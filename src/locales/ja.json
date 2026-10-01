@@ -1,0 +1,154 @@
+{
+  "common": {},
+  "home": {
+    "title": ""
+  },
+  "place": {
+    "title": "",
+    "explore": {
+      "todayOpening": "",
+      "regions": "",
+      "koreanRegionsDescription": "",
+      "japaneseRegionsDescription": "",
+      "viewDetails": "",
+      "previous": "",
+      "next": "",
+      "back": "",
+      "notFound": ""
+    },
+    "all": {
+      "sort": {
+        "latest": "",
+        "popular": ""
+      },
+      "period": {
+        "all": "",
+        "today": "",
+        "week": "",
+        "weekend": "",
+        "custom": ""
+      },
+      "opensOn": "",
+      "endsOn": "",
+      "ended": "",
+      "addFavorite": "",
+      "removeFavorite": "",
+      "mock": {
+        "seongsuArt": "",
+        "tokyoGame": "",
+        "hongdaeFashion": "",
+        "osakaBeauty": "",
+        "busanLifestyle": "",
+        "kyotoCharacter": ""
+      }
+    },
+    "filters": {
+      "countries": {
+        "kr": "",
+        "jp": ""
+      },
+      "quick": {
+        "preReservation": "",
+        "benefit": "",
+        "newOpen": ""
+      },
+      "eventTypes": {
+        "_label": "",
+        "popup": "",
+        "exhibition": "",
+        "performance": "",
+        "festival": "",
+        "event": ""
+      },
+      "regions": {
+        "_label": "",
+        "seongsu": "",
+        "hongdae": "",
+        "yeouido": "",
+        "gangnam": "",
+        "jamsil": "",
+        "busan": "",
+        "incheon": "",
+        "daegu": "",
+        "daejeon": "",
+        "gwangju": "",
+        "suwon": "",
+        "goyang": "",
+        "yongin": "",
+        "ulsan": "",
+        "changwon": "",
+        "jeonju": "",
+        "tokyo": "",
+        "osaka": "",
+        "kyoto": "",
+        "fukuoka": "",
+        "nagoya": "",
+        "sapporo": "",
+        "yokohama": ""
+      },
+      "interests": {
+        "_label": "",
+        "animeCharacter": "",
+        "game": "",
+        "fashion": "",
+        "beauty": "",
+        "foodBeverage": "",
+        "exhibitionArt": "",
+        "lifestyle": ""
+      },
+      "operationStatuses": {
+        "_label": "",
+        "open": "",
+        "upcoming": "",
+        "closed": ""
+      },
+      "details": "",
+      "close": "",
+      "reset": "",
+      "resetAll": "",
+      "showPopups": "",
+      "collapse": "",
+      "collapseRegions": "",
+      "moreRegions": "",
+      "remove": ""
+    }
+  },
+  "map": {
+    "title": ""
+  },
+  "community": {
+    "title": "",
+    "settings": "",
+    "write": "",
+    "views": "",
+    "category": {
+      "all": "",
+      "review": "",
+      "info": "",
+      "question": ""
+    },
+    "sort": {
+      "latest": "",
+      "popular": ""
+    },
+    "time": {
+      "minutesAgo": "",
+      "hoursAgo": "",
+      "daysAgo": ""
+    },
+    "mock": {
+      "place": { "longTokyo": "" },
+      "body": {
+        "seongsuReview": "",
+        "tokyoInfo": "",
+        "hongdaeQuestion": "",
+        "osakaReview": "",
+        "kyotoQuestion": "",
+        "busanInfo": ""
+      }
+    }
+  },
+  "my": {
+    "title": ""
+  }
+}

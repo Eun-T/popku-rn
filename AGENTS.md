@@ -1,41 +1,53 @@
-This is an Expo/React Native mobile application. Prioritize mobile-first patterns, performance, and cross-platform compatibility.
+# POPKU 작업 지침
 
-## Expo has changed — do not trust your training data
+이 저장소는 React Native + Expo + TypeScript 기반의
+한국·일본 팝업스토어 탐색 앱이다.
 
-Expo ships breaking changes every SDK release. APIs you remember are likely renamed, moved, or removed. Before writing any code that touches an Expo, EAS, or React Native API:
+## 작업 전 확인
 
-1. Read the major version of the `expo` package in `package.json`.
-2. Fetch the matching versioned docs: `https://docs.expo.dev/versions/v<major>.0.0/`
-3. For anything else, fetch https://docs.expo.dev/llms.txt — an index of all Expo docs with corrections to common LLM misconceptions. Follow its links to the specific page you need; never answer from memory.
+- 코드 작업 전 `docs/CONVENTIONS.md`를 확인한다.
+- 작업과 직접 관련된 문서만 추가로 확인한다.
+  - 제품 기능과 정책: `docs/PRODUCT.md`
+  - 구조와 기술 설계: `docs/ARCHITECTURE.md`
+  - API: `docs/API.md`
+  - 데이터 구조: `docs/DATABASE.md`
+  - 디자인과 UI: `docs/DESIGN.md`
+  - 주요 결정: `docs/DECISIONS.md`
+  - 알려진 문제: `docs/TROUBLESHOOTING.md`
+- 존재하지 않는 문서는 억지로 찾지 않는다.
+- 기존 구조와 디자인 규칙을 우선한다.
+- 확정되지 않은 내용을 임의로 결정하지 않는다.
+- 불필요한 파일 탐색과 반복 분석을 피한다.
 
-## Commands
+## 구현 원칙
 
-Use `bunx` instead of `npx` if the project uses bun (`bun.lock` present).
+- React Native + Expo + TypeScript를 사용한다.
+- 기존 Expo Router 구조를 유지한다.
+- 재사용 가능한 UI는 별도 컴포넌트로 분리한다.
+- UI 작업은 `docs/DESIGN.md`를 준수한다.
+- 관련 없는 코드, UI, 로직, 패키지 및 설정은 변경하지 않는다.
+- 필요한 경우를 제외하고 새로운 패키지를 설치하지 않는다.
+- 안정성과 유지보수에 필요한 변경은 허용한다.
 
-```bash
-npx expo install <package>  # ALWAYS use instead of npm/yarn/pnpm/bun add — resolves SDK-compatible versions
-npx expo start              # start the dev server
-npx expo lint               # lint
-npx tsc --noEmit            # typecheck
-npx expo-doctor             # diagnose dependency and config issues
-npx expo install --fix      # fix incompatible package versions
-```
+## 작업 효율 및 터미널
 
-Run lint and typecheck before declaring any task done.
+- 토큰 절약을 위해 작업 범위에 필요한 파일만 확인한다.
+- 불필요한 분석, 반복 탐색 및 장황한 설명을 피한다.
+- 가능하면 기존 터미널을 사용한다.
+- 불필요한 별도 Windows 터미널 창을 실행하지 않는다.
+- 실행 중인 Expo 서버와 에뮬레이터를 임의로 종료하지 않는다.
 
-## Navigation & Routing
+## 문서 업데이트
 
-- Use **Expo Router** for all navigation. Routes live in `src/app/` — every file there is a screen, `_layout.tsx` files define navigators. Keep non-route code (components, hooks, utils) outside `src/app/`.
-- Import `Link`, `router`, and `useLocalSearchParams` from `expo-router`.
-- Docs: https://docs.expo.dev/router/introduction.md
+- 실제 구현이나 확정된 결정이 달라졌을 때만 관련 문서를 수정한다.
+- 모든 작업에서 모든 문서를 읽거나 수정하지 않는다.
+- 계획이나 미정 사항을 구현 완료로 기록하지 않는다.
+- 단순 코드 변경에 문서 수정이 필요하지 않다면 생략한다.
 
-## Building with EAS
+## 검증 및 완료 보고
 
-Use EAS to build, sign, and submit the app in the cloud (`eas build`, `eas submit`) and to ship over-the-air updates (`eas update`) — no local Xcode or Android Studio required. Run EAS CLI as `bunx eas-cli <command>` in Bun projects, or `npx eas-cli@latest <command>` otherwise; substitute that for bare `eas` in docs examples.
-Docs: https://docs.expo.dev/eas/index.md
-
-## Rules
-
-- If `ios/` and `android/` directories do not exist, they are generated (Continuous Native Generation). Never create or edit them by hand — configure native behavior in `app.json` and config plugins.
-- Expo Go only includes its bundled native modules. After adding a library with native code, the app needs a development build: `npx expo run:ios|android` locally, or `eas build --profile development`.
-- Prefer recommended Expo modules over third-party libraries, and check your available skills before adding dependencies. Docs: https://docs.expo.dev/versions/latest/index.md
+- 변경 범위에 맞는 최소한의 검증을 수행한다.
+- 단순 UI 수정 시 불필요한 전체 빌드를 피한다.
+- 기능이나 구조 변경 시 필요한 검증을 수행한다.
+- 테스트를 실행하지 않았다면 명시한다.
+- 작업 완료 후 변경 파일, 주요 변경 사항 및 검증 결과만 간결하게 보고한다.

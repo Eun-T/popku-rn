@@ -1,0 +1,158 @@
+{
+  "common": {},
+  "home": {
+    "title": "메인 홈"
+  },
+  "place": {
+    "title": "플레이스",
+    "explore": {
+      "todayOpening": "오늘 새로 열어요!",
+      "regions": "어디로 놀러 갈까!",
+      "interests": "취향 따라 찾아볼까요?",
+      "interestsDescription": "좋아하는 취향의 팝업을 골라 둘러보세요.",
+      "koreanRegionsDescription": "이번 주말, 한국의 핫한 동네로 떠나볼까요?",
+      "japaneseRegionsDescription": "도쿄부터 오사카까지, 일본의 팝업을 만나보세요!",
+      "viewDetails": "{title} 상세 보기",
+      "previous": "이전 팝업",
+      "next": "다음 팝업",
+      "back": "뒤로 가기",
+      "notFound": "팝업 정보를 찾을 수 없습니다."
+    },
+    "all": {
+      "sort": {
+        "latest": "최신순",
+        "popular": "인기순"
+      },
+      "period": {
+        "all": "기간 전체",
+        "today": "오늘",
+        "week": "이번 주",
+        "weekend": "이번 주말",
+        "custom": "날짜 직접 선택"
+      },
+      "opensOn": "{date} 오픈",
+      "endsOn": "{date}까지",
+      "ended": "종료",
+      "addFavorite": "찜하기",
+      "removeFavorite": "찜 해제",
+      "mock": {
+        "seongsuArt": "성수 컬러 아트 팝업",
+        "tokyoGame": "도쿄 게임 월드 팝업",
+        "hongdaeFashion": "홍대 패션 스튜디오 팝업",
+        "osakaBeauty": "오사카 뷰티 마켓 팝업",
+        "busanLifestyle": "부산 라이프스타일 팝업",
+        "kyotoCharacter": "교토 캐릭터 전시 팝업"
+      }
+    },
+    "filters": {
+      "countries": {
+        "kr": "한국",
+        "jp": "일본"
+      },
+      "quick": {
+        "preReservation": "사전예약",
+        "benefit": "혜택",
+        "newOpen": "신규오픈"
+      },
+      "eventTypes": {
+        "_label": "행사 유형",
+        "popup": "팝업",
+        "exhibition": "전시",
+        "performance": "공연",
+        "festival": "페스티벌",
+        "event": "이벤트"
+      },
+      "regions": {
+        "_label": "지역",
+        "seongsu": "성수",
+        "hongdae": "홍대·신촌",
+        "yeouido": "여의도",
+        "gangnam": "강남·서초",
+        "jamsil": "잠실",
+        "busan": "부산",
+        "incheon": "인천",
+        "daegu": "대구",
+        "daejeon": "대전",
+        "gwangju": "광주",
+        "suwon": "수원",
+        "goyang": "고양",
+        "yongin": "용인",
+        "ulsan": "울산",
+        "changwon": "창원",
+        "jeonju": "전주",
+        "tokyo": "도쿄",
+        "osaka": "오사카",
+        "kyoto": "교토",
+        "fukuoka": "후쿠오카",
+        "nagoya": "나고야",
+        "sapporo": "삿포로",
+        "yokohama": "요코하마"
+      },
+      "interests": {
+        "_label": "관심 분야",
+        "animeCharacter": "애니·캐릭터",
+        "game": "게임",
+        "fashion": "패션",
+        "beauty": "뷰티",
+        "foodBeverage": "F&B",
+        "exhibitionArt": "전시·아트",
+        "lifestyle": "라이프스타일"
+      },
+      "operationStatuses": {
+        "_label": "운영 상태",
+        "open": "운영 중",
+        "upcoming": "오픈 예정",
+        "closed": "종료"
+      },
+      "details": "상세 필터",
+      "close": "필터 닫기",
+      "reset": "초기화",
+      "resetAll": "전체 초기화",
+      "showPopups": "팝업 보기",
+      "collapse": "접기",
+      "collapseRegions": "지역 접기",
+      "moreRegions": "지역 {count}개 더 보기",
+      "remove": "{label} 필터 삭제"
+    }
+  },
+  "map": {
+    "title": "지도"
+  },
+  "community": {
+    "title": "커뮤니티",
+    "settings": "설정",
+    "write": "글쓰기",
+    "views": "조회 {count}",
+    "category": {
+      "all": "전체",
+      "review": "방문 후기",
+      "info": "현장 정보",
+      "question": "질문"
+    },
+    "sort": {
+      "latest": "최신순",
+      "popular": "인기순"
+    },
+    "time": {
+      "minutesAgo": "{count}분 전",
+      "hoursAgo": "{count}시간 전",
+      "daysAgo": "{count}일 전"
+    },
+    "mock": {
+      "place": {
+        "longTokyo": "도쿄 게임 월드 애니메이션 캐릭터 콜라보레이션 팝업스토어"
+      },
+      "body": {
+        "seongsuReview": "성수 컬러 아트 팝업 다녀왔어요! 전시 동선이 잘 되어 있고 직접 참여할 수 있는 공간도 많아서 즐거웠어요. 주말에는 줄이 길 수 있으니 조금 일찍 가는 걸 추천해요.",
+        "tokyoInfo": "도쿄 게임 월드 팝업 현장 대기 줄은 지금 건물 오른쪽으로 이어져 있어요. 입장 안내는 현장 직원분이 차례로 해 주시고, 인기 굿즈는 오전 중에 확인하는 편이 좋겠어요.",
+        "hongdaeQuestion": "홍대 패션 스튜디오 팝업은 예약 없이 방문해도 입장할 수 있나요? 이번 주말에 가려고 하는데 현장 대기가 어느 정도인지 궁금해요.",
+        "osakaReview": "오사카 뷰티 마켓 팝업에서 체험 코너를 둘러봤어요. 제품을 직접 비교해 볼 수 있고 직원 안내도 친절해서 만족스러웠습니다.",
+        "kyotoQuestion": "교토에서 이번 주에 가볼 만한 캐릭터 팝업이 있을까요? 장소는 아직 정하지 않았어요. 이동하기 편한 곳이면 좋겠습니다.",
+        "busanInfo": "부산 팝업 현장에서는 오후부터 입장 대기가 조금 늘었어요. 포토존은 안쪽에 있고, 안내 데스크에서 운영 시간을 다시 확인할 수 있습니다."
+      }
+    }
+  },
+  "my": {
+    "title": "마이페이지"
+  }
+}
