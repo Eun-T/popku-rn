@@ -1,0 +1,2 @@
+constants/api.ts
+*.sync-conflict-*

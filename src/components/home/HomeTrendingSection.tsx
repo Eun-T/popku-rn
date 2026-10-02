@@ -1,34 +1,37 @@
-import { useState } from 'react';
-import { useRouter } from 'expo-router';
-import { StyleSheet, Text, View, type ImageSourcePropType } from 'react-native';
+import { useRouter } from "expo-router";
+import { useState } from "react";
+import { StyleSheet, Text, View, type ImageSourcePropType } from "react-native";
 
-import { useHomePopups } from '../../hooks/useHomePopups';
-import { colors, spacing, typography } from '../../theme/tokens';
-import FilterChips from '../common/FilterChips';
-import MoreButton from '../common/MoreButton';
-import { HomeTrendingSkeleton, RankingSkeletonFooter } from './HomePopupSkeleton';
-import PopupRankingCard from './PopupRankingCard';
+import { useHomePopups } from "../../hooks/useHomePopups";
+import { colors, spacing, typography } from "../../theme/tokens";
+import FilterChips from "../common/FilterChips";
+import MoreButton from "../common/MoreButton";
+import {
+  HomeTrendingSkeleton,
+  RankingSkeletonFooter,
+} from "./HomePopupSkeleton";
+import PopupRankingCard from "./PopupRankingCard";
 
 const countries = [
-  { label: '한국', value: 'KR' },
-  { label: '일본', value: 'JP' },
+  { label: "한국", value: "KR" },
+  { label: "일본", value: "JP" },
 ] as const;
-type Country = (typeof countries)[number]['value'];
+type Country = (typeof countries)[number]["value"];
 
-const placeholderImage = require('../../../assets/images/ranking-placeholder.png');
+const placeholderImage = require("../../../assets/images/ranking-placeholder.png");
 
 function cardImage(url: string | null): ImageSourcePropType {
   return url ? { uri: url } : placeholderImage;
 }
 
 function displayDate(date: string): string {
-  return date.replace(/-/g, '.');
+  return date.replace(/-/g, ".");
 }
 
 export default function HomeTrendingSection() {
   const router = useRouter();
-  const [selectedCountry, setSelectedCountry] = useState<Country>('KR');
-  const { status, popups } = useHomePopups('trending', selectedCountry);
+  const [selectedCountry, setSelectedCountry] = useState<Country>("KR");
+  const { status, popups } = useHomePopups("trending", selectedCountry);
   const [isExpanded, setIsExpanded] = useState(false);
   const [favorites, setFavorites] = useState<Record<string, boolean>>({});
 
@@ -45,7 +48,9 @@ export default function HomeTrendingSection() {
 
   return (
     <View style={styles.section}>
-      <Text style={styles.title}>지금 뜨는 팝업</Text>
+      <Text style={styles.title}>
+        지금 뜨는 팝업
+      </Text>
       <Text style={styles.description}>요즘 인기 있는 팝업을 모아봤어요!</Text>
       <View style={styles.filters}>
         <FilterChips
@@ -55,9 +60,13 @@ export default function HomeTrendingSection() {
         />
       </View>
       <View style={styles.rankingList}>
-        {status === 'loading' && <HomeTrendingSkeleton />}
-        {status === 'error' && <Text style={styles.stateText}>팝업을 불러오지 못했어요.</Text>}
-        {status === 'ready' && popups.length === 0 && <Text style={styles.stateText}>지금 뜨는 팝업이 없어요.</Text>}
+        {status === "loading" && <HomeTrendingSkeleton />}
+        {status === "error" && (
+          <Text style={styles.stateText}>팝업을 불러오지 못했어요.</Text>
+        )}
+        {status === "ready" && popups.length === 0 && (
+          <Text style={styles.stateText}>지금 뜨는 팝업이 없어요.</Text>
+        )}
         {visiblePopups.map((popup, index) => {
           const rank = index + 1;
           const id = `${selectedCountry}-${popup.publicId}`;
@@ -69,21 +78,35 @@ export default function HomeTrendingSection() {
               image={cardImage(popup.coverImageUrl)}
               title={popup.name}
               period={`${displayDate(popup.startDate)} ~ ${displayDate(popup.endDate)}`}
-              tags={[...(popup.regionName ? [popup.regionName] : []), ...popup.tags.map((tag) => tag.name)]}
+              tags={[
+                ...(popup.regionName ? [popup.regionName] : []),
+                ...popup.tags.map((tag) => tag.name),
+              ]}
               isFavorite={Boolean(favorites[id])}
               onToggleFavorite={() => toggleFavorite(id)}
-              onPress={() => router.push({ pathname: '/places/[id]', params: { id: popup.publicId } })}
+              onPress={() =>
+                router.push({
+                  pathname: "/places/[id]",
+                  params: { id: popup.publicId },
+                })
+              }
             />
           );
         })}
       </View>
-      {status === 'loading' && <View style={styles.moreButtonContainer}><RankingSkeletonFooter /></View>}
-      {status === 'ready' && popups.length > 5 && <View style={styles.moreButtonContainer}>
-        <MoreButton
-          label={isExpanded ? '접기' : 'TOP 10 모두 보기'}
-          onPress={() => setIsExpanded((current) => !current)}
-        />
-      </View>}
+      {status === "loading" && (
+        <View style={styles.moreButtonContainer}>
+          <RankingSkeletonFooter />
+        </View>
+      )}
+      {status === "ready" && popups.length > 5 && (
+        <View style={styles.moreButtonContainer}>
+          <MoreButton
+            label={isExpanded ? "접기" : "TOP 10 모두 보기"}
+            onPress={() => setIsExpanded((current) => !current)}
+          />
+        </View>
+      )}
     </View>
   );
 }
