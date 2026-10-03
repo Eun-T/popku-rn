@@ -25,36 +25,35 @@ export default function PopupRankingCard({
   onPress,
 }: PopupRankingCardProps) {
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={`${title} 상세 보기`} onPress={onPress} style={styles.card}>
-      <View style={styles.imageFrame}>
-        <Image source={image} style={styles.image} resizeMode="cover" />
-        <View style={styles.rankBadge}>
-          <Text style={styles.rankText}>{rank}</Text>
+    <View style={styles.card}>
+      <Pressable accessibilityRole="button" accessibilityLabel={`${title} 상세 보기`} onPress={onPress} style={styles.detailButton}>
+        <View style={styles.imageFrame}>
+          <Image source={image} style={styles.image} resizeMode="cover" />
+          <View style={styles.rankBadge}>
+            <Text style={styles.rankText}>{rank}</Text>
+          </View>
         </View>
-      </View>
-      <View style={styles.content}>
-        <Text style={styles.title} numberOfLines={1} ellipsizeMode="tail">
-          {title}
-        </Text>
-        <Text style={styles.period}>{period}</Text>
-        <View style={styles.tags}>
-          {tags.map((tag) => (
-            <View key={tag} style={styles.tag}>
-              <Text style={styles.tagText} numberOfLines={1}>
-                {tag}
-              </Text>
-            </View>
-          ))}
+        <View style={styles.content}>
+          <Text style={styles.title} numberOfLines={1} ellipsizeMode="tail">
+            {title}
+          </Text>
+          <Text style={styles.period}>{period}</Text>
+          <View style={styles.tags}>
+            {tags.map((tag) => (
+              <View key={tag} style={styles.tag}>
+                <Text style={styles.tagText} numberOfLines={1}>
+                  {tag}
+                </Text>
+              </View>
+            ))}
+          </View>
         </View>
-      </View>
+      </Pressable>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={isFavorite ? `${title} 찜 취소` : `${title} 찜하기`}
         accessibilityState={{ selected: isFavorite }}
-        onPress={(event) => {
-          event.stopPropagation();
-          onToggleFavorite();
-        }}
+        onPress={onToggleFavorite}
         style={styles.favoriteButton}
       >
         <Heart
@@ -63,7 +62,7 @@ export default function PopupRankingCard({
           fill={isFavorite ? colors.primary : 'none'}
         />
       </Pressable>
-    </Pressable>
+    </View>
   );
 }
 
@@ -71,10 +70,16 @@ const styles = StyleSheet.create({
   card: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: spacing.space12,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
     backgroundColor: colors.background,
+  },
+  detailButton: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.space12,
   },
   imageFrame: {
     width: 88,

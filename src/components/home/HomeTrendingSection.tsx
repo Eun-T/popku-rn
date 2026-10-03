@@ -120,16 +120,16 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   description: {
-    marginTop: spacing.space8,
+    marginTop: 2,
     ...typography.label,
     color: colors.secondaryText,
   },
   filters: {
-    marginTop: spacing.space20,
+    marginTop: spacing.space16,
   },
   rankingList: {
-    marginTop: spacing.space24,
-    rowGap: spacing.space12,
+    marginTop: spacing.space16,
+    // rowGap: spacing.space12,
   },
   moreButtonContainer: {
     marginTop: spacing.space12,

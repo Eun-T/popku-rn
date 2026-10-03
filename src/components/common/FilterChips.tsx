@@ -1,6 +1,6 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from "react-native";
 
-import { colors, radius, spacing, typography } from '../../theme/tokens';
+import { colors, radius, spacing, typography } from "../../theme/tokens";
 
 type FilterOption<T extends string> = {
   label: string;
@@ -31,7 +31,12 @@ export default function FilterChips<T extends string>({
             onPress={() => onChange(option.value)}
             style={[styles.filter, isSelected && styles.selectedFilter]}
           >
-            <Text style={[styles.filterText, isSelected && styles.selectedFilterText]}>
+            <Text
+              style={[
+                styles.filterText,
+                isSelected && styles.selectedFilterText,
+              ]}
+            >
               {option.label}
             </Text>
           </Pressable>
@@ -43,14 +48,14 @@ export default function FilterChips<T extends string>({
 
 const styles = StyleSheet.create({
   filters: {
-    flexDirection: 'row',
+    flexDirection: "row",
     columnGap: spacing.space8,
   },
   filter: {
     height: 36,
     paddingHorizontal: spacing.space16,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     borderRadius: radius.full,
     borderWidth: 1,
     borderColor: colors.border,

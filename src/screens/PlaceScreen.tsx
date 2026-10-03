@@ -60,8 +60,18 @@ function toggleId<T extends string | number>(ids: T[], id: T): T[] {
 export default function PlaceScreen() {
   const router = useRouter();
   const listRef = useRef<FlatList<PublicPopup>>(null);
-  useScrollToTop(listRef);
   const [selectedTab, setSelectedTab] = useState<PlaceTab>('탐색');
+  const scrollYRef = useRef(0);
+  const tabPressScrollRef = useRef({
+    scrollToTop: () => {
+      if (scrollYRef.current > 0) {
+        listRef.current?.scrollToOffset({ offset: 0, animated: true });
+      } else {
+        setSelectedTab((current) => current === '탐색' ? '전체' : '탐색');
+      }
+    },
+  });
+  useScrollToTop(tabPressScrollRef);
   const [appliedFilters, setAppliedFilters] = useState(createEmptyPlaceFilters);
   const [appliedDetailFilters, setAppliedDetailFilters] = useState(emptyPopupFilters);
   const [draftDetailFilters, setDraftDetailFilters] = useState(emptyPopupFilters);
@@ -291,7 +301,10 @@ export default function PlaceScreen() {
         columnWrapperStyle={styles.gridRow}
         ItemSeparatorComponent={() => <View style={styles.gridRowGap} />}
         contentContainerStyle={[styles.listContent, contentPadding]}
-        onScroll={(event) => setSearchSticky(event.nativeEvent.contentOffset.y >= searchTop.current)}
+        onScroll={(event) => {
+          scrollYRef.current = Math.max(0, event.nativeEvent.contentOffset.y);
+          setSearchSticky(scrollYRef.current >= searchTop.current);
+        }}
         scrollEventThrottle={16}
         ListEmptyComponent={selectedTab === '전체'
           ? status === 'loading'
@@ -453,14 +466,14 @@ export default function PlaceScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    paddingTop: spacing.space24,
+    paddingTop: 8,
     backgroundColor: colors.background,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: spacing.space12,
+    marginBottom: spacing.space4,
   },
   title: {
     ...typography.titleL,
@@ -469,7 +482,6 @@ const styles = StyleSheet.create({
   tabs: {
     flexDirection: 'row',
     columnGap: spacing.space20,
-    marginTop: spacing.space12,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },

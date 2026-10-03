@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { FlatList, Image, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useRef, useState } from 'react';
+import { FlatList, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { regionFilters } from '../../constants/placeFilters';
 import { placeRegionSectionTitleKey, type PlaceRegionCardItem, type PlaceRegionPage } from '../../constants/placeRegionMocks';
@@ -13,6 +13,7 @@ type PlaceRegionSectionProps = {
 };
 
 const CARD_GAP = 6;
+const CARD_ASPECT_RATIO = 1.6;
 const PAGE_GAP = 16;
 const DESCRIPTION_HEIGHT = 20;
 const DESCRIPTION_BOTTOM_GAP = 16;
@@ -21,67 +22,27 @@ const regionLabelKeys = new Map(regionFilters.map((region) => [region.id, region
 export default function PlaceRegionSection({ pages, width, onPress }: PlaceRegionSectionProps) {
   const listRef = useRef<FlatList<PlaceRegionPage>>(null);
   const [activeIndex, setActiveIndex] = useState(0);
+  const activeIndexRef = useRef(0);
+  const buttonTargetRef = useRef<number | null>(null);
   const [pageWidth, setPageWidth] = useState(width);
-  const scrollOffsetRef = useRef(0);
-  const dragStartIndexRef = useRef(0);
-  const targetIndexRef = useRef<number | null>(null);
-  const isDraggingRef = useRef(false);
-  const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pageStride = pageWidth + PAGE_GAP;
   // Preserve the existing card width while changing only the gaps.
   const cardWidth = (pageWidth - 10) / 2;
-  const pageHeight = DESCRIPTION_HEIGHT + DESCRIPTION_BOTTOM_GAP + (cardWidth / 1.8) * 2 + CARD_GAP;
-
-  useEffect(() => () => {
-    if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
-  }, []);
+  const pageHeight = DESCRIPTION_HEIGHT + DESCRIPTION_BOTTOM_GAP + (cardWidth / CARD_ASPECT_RATIO) * 2 + CARD_GAP;
 
   if (pages.length === 0 || cardWidth <= 0) return null;
 
   const clampIndex = (index: number) => Math.max(0, Math.min(pages.length - 1, index));
-
-  const settlePage = () => {
-    if (isDraggingRef.current) return;
-    const startIndex = dragStartIndexRef.current;
-    const distance = scrollOffsetRef.current - startIndex * pageStride;
-    const direction = distance >= pageWidth / 2 ? 1 : distance <= -pageWidth / 2 ? -1 : 0;
-    const index = clampIndex(targetIndexRef.current ?? startIndex + direction);
-    const offset = index * pageStride;
-    if (Math.abs(scrollOffsetRef.current - offset) > 1) {
-      listRef.current?.scrollToOffset({ offset, animated: true });
-    } else {
-      targetIndexRef.current = null;
-      dragStartIndexRef.current = index;
-      setActiveIndex(index);
-    }
-  };
-
-  const scheduleSettle = () => {
-    if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
-    settleTimerRef.current = setTimeout(settlePage, 120);
+  const updateActiveIndex = (index: number) => {
+    if (activeIndexRef.current === index) return;
+    activeIndexRef.current = index;
+    setActiveIndex(index);
   };
 
   const goToPage = (index: number) => {
-    targetIndexRef.current = index;
+    buttonTargetRef.current = index;
     listRef.current?.scrollToOffset({ offset: index * pageStride, animated: true });
-    scheduleSettle();
-  };
-
-  const beginDrag = () => {
-    if (isDraggingRef.current) return;
-    if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
-    isDraggingRef.current = true;
-    dragStartIndexRef.current = clampIndex(Math.round(scrollOffsetRef.current / pageStride));
-    targetIndexRef.current = null;
-  };
-
-  const finishDrag = () => {
-    if (!isDraggingRef.current) return;
-    isDraggingRef.current = false;
-    const startIndex = dragStartIndexRef.current;
-    const distance = scrollOffsetRef.current - startIndex * pageStride;
-    const direction = distance >= pageWidth / 2 ? 1 : distance <= -pageWidth / 2 ? -1 : 0;
-    goToPage(clampIndex(startIndex + direction));
+    updateActiveIndex(index);
   };
 
   return (
@@ -92,9 +53,6 @@ export default function PlaceRegionSection({ pages, width, onPress }: PlaceRegio
         onLayout={(event) => {
           const measuredWidth = event.nativeEvent.layout.width;
           if (measuredWidth > 0 && measuredWidth !== pageWidth) {
-            scrollOffsetRef.current = activeIndex * (measuredWidth + PAGE_GAP);
-            dragStartIndexRef.current = activeIndex;
-            targetIndexRef.current = null;
             setPageWidth(measuredWidth);
           }
         }}
@@ -105,6 +63,8 @@ export default function PlaceRegionSection({ pages, width, onPress }: PlaceRegio
           data={pages}
           keyExtractor={(page) => page.id}
           horizontal
+          snapToOffsets={[0, pageStride]}
+          snapToAlignment="start"
           decelerationRate="fast"
           bounces={false}
           overScrollMode="never"
@@ -114,15 +74,19 @@ export default function PlaceRegionSection({ pages, width, onPress }: PlaceRegio
           ItemSeparatorComponent={() => <View style={styles.pageGap} />}
           getItemLayout={(_, index) => ({ length: pageWidth, offset: pageStride * index, index })}
           scrollEventThrottle={16}
+          onScrollBeginDrag={() => { buttonTargetRef.current = null; }}
           onScroll={(event) => {
-            scrollOffsetRef.current = event.nativeEvent.contentOffset.x;
-            if (!isDraggingRef.current) scheduleSettle();
+            const offset = event.nativeEvent.contentOffset.x;
+            if (buttonTargetRef.current !== null) {
+              if (Math.abs(offset - buttonTargetRef.current * pageStride) < 1) buttonTargetRef.current = null;
+              return;
+            }
+            updateActiveIndex(clampIndex(Math.round(offset / pageStride)));
           }}
-          onScrollBeginDrag={beginDrag}
-          onScrollEndDrag={finishDrag}
-          onTouchStart={Platform.OS === 'web' ? beginDrag : undefined}
-          onTouchEnd={Platform.OS === 'web' ? finishDrag : undefined}
-          onMomentumScrollEnd={settlePage}
+          onMomentumScrollEnd={(event) => {
+            buttonTargetRef.current = null;
+            updateActiveIndex(clampIndex(Math.round(event.nativeEvent.contentOffset.x / pageStride)));
+          }}
           style={{ width: pageWidth, height: pageHeight }}
           renderItem={({ item: page }) => (
             <View style={{ width: pageWidth, height: pageHeight }}>
@@ -175,7 +139,7 @@ const styles = StyleSheet.create({
   heading: {
     ...typography.titleM,
     color: colors.text,
-    marginBottom: spacing.space8,
+    marginBottom: spacing.space4 * 0.5,
   },
   viewport: {
     width: '100%',
@@ -197,7 +161,7 @@ const styles = StyleSheet.create({
     rowGap: CARD_GAP,
   },
   card: {
-    aspectRatio: 1.8,
+    aspectRatio: CARD_ASPECT_RATIO,
     borderRadius: radius.radius8,
     overflow: 'hidden',
     justifyContent: 'flex-end',

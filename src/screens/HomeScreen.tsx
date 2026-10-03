@@ -32,7 +32,7 @@ const styles = StyleSheet.create({
   },
   quickMenuSection: {
     marginTop: spacing.space16,
-    marginBottom: spacing.space40,
+    marginBottom: spacing.space32,
   },
   newPopupSection: {
     marginTop: spacing.space56,

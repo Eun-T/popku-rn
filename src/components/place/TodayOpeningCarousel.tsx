@@ -117,7 +117,7 @@ export default function TodayOpeningCarousel({ items, width, today, loading, err
 
 const styles = StyleSheet.create({
   section: {
-    marginTop: spacing.space32,
+    marginTop: spacing.space24,
   },
   heading: {
     ...typography.titleM,

@@ -170,7 +170,7 @@ export default function CommunityScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    paddingTop: spacing.space24,
+    paddingTop: spacing.space8,
     backgroundColor: communityColors.background,
   },
   header: {

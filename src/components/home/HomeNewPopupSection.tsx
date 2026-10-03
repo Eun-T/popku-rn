@@ -84,12 +84,12 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   description: {
-    marginTop: spacing.space8,
+    marginTop: 2,
     ...typography.label,
     color: colors.secondaryText,
   },
   filters: {
-    marginTop: spacing.space20,
+    marginTop: spacing.space16,
   },
   cardList: {
     marginTop: spacing.space24,
