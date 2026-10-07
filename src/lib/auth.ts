@@ -1,6 +1,8 @@
 import * as SecureStore from 'expo-secure-store';
 
 import { API_BASE_URL } from '../constants/api';
+import { clearFavoriteCache } from './favoriteCache';
+import { clearCommunityLikes } from './communityFeedRefresh';
 
 const ACCESS_TOKEN_KEY = 'accessToken';
 const REFRESH_TOKEN_KEY = 'refreshToken';
@@ -33,6 +35,26 @@ export type CurrentUser = {
 
 let authUser: CurrentUser | null = null;
 const authUserListeners = new Set<() => void>();
+const authSessionListeners = new Set<() => void>();
+let publishedGeneration = 0;
+let authGeneration = 0;
+let tokenWrites: Promise<void> = Promise.resolve();
+let invalidation: { generation: number; nextGeneration: number; result: Promise<boolean> } | undefined;
+
+// Serialize SecureStore mutations so an already-started delete cannot erase a later login.
+function writeTokens<T>(operation: () => Promise<T>): Promise<T> {
+  const result = tokenWrites.then(operation);
+  tokenWrites = result.then(() => {}, () => {});
+  return result;
+}
+
+export async function getAuthSession(): Promise<{ accessToken: string | null; generation: number }> {
+  for (;;) {
+    const generation = authGeneration;
+    const accessToken = await getSavedAccessToken();
+    if (generation === authGeneration) return { accessToken, generation };
+  }
+}
 
 export function getAuthUser(): CurrentUser | null {
   return authUser;
@@ -44,8 +66,39 @@ export function subscribeAuthUser(listener: () => void): () => void {
 }
 
 export function setAuthUser(user: CurrentUser | null): void {
+  const identityChanged = authUser?.email !== user?.email;
+  const sessionChanged = identityChanged || publishedGeneration !== authGeneration;
+  const dataChanged = identityChanged || authUser?.nickname !== user?.nickname;
+  if (identityChanged) { clearFavoriteCache(); clearCommunityLikes(); }
+  publishedGeneration = authGeneration;
+  if (!dataChanged && !sessionChanged) return;
   authUser = user;
   authUserListeners.forEach((listener) => listener());
+  if (sessionChanged) authSessionListeners.forEach((listener) => listener());
+}
+
+export function subscribeAuthSession(listener: () => void): () => void {
+  authSessionListeners.add(listener);
+  return () => { authSessionListeners.delete(listener); };
+}
+
+export class CurrentUserError extends Error {
+  constructor(readonly status: number) { super('사용자 정보를 불러오지 못했습니다.'); }
+}
+
+/** A profile read cannot invalidate or overwrite a newer login. */
+export async function refreshAuthUser(isActive: () => boolean = () => true): Promise<void> {
+  const session = await getAuthSession();
+  try {
+    const user = session.accessToken ? await getCurrentUser(session.accessToken) : null;
+    if (isActive() && session.generation === authGeneration) setAuthUser(user);
+  } catch (error) {
+    if (error instanceof CurrentUserError && error.status === 401) {
+      await clearTokens(session.generation);
+      return;
+    }
+    throw error;
+  }
 }
 
 export async function login(email: string, password: string): Promise<LoginResponse> {
@@ -78,22 +131,30 @@ export async function getCurrentUser(accessToken: string): Promise<CurrentUser> 
   if (__DEV__) console.info('[AUTH] /me response:', response.status);
   if (!response.ok) {
     await logHttpFailure('/me error response', response);
-    throw new Error('사용자 정보를 불러오지 못했습니다.');
+    throw new CurrentUserError(response.status);
   }
   return response.json();
 }
 
 export async function saveTokens(tokens: LoginResponse): Promise<void> {
-  await SecureStore.setItemAsync(ACCESS_TOKEN_KEY, tokens.accessToken);
-  try {
-    await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, tokens.refreshToken);
-  } catch (error) {
-    await SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY);
-    throw error;
-  }
+  authGeneration += 1;
+  clearFavoriteCache();
+  clearCommunityLikes();
+  await writeTokens(async () => {
+    await SecureStore.setItemAsync(ACCESS_TOKEN_KEY, tokens.accessToken);
+    try {
+      await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, tokens.refreshToken);
+    } catch (error) {
+      await SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY);
+      throw error;
+    }
+  });
 }
 
-export function getSavedAccessToken(): Promise<string | null> {
+export async function getSavedAccessToken(): Promise<string | null> {
+  await tokenWrites;
+  // SecureStore has no Web implementation; public reads can continue without a token.
+  if (!await SecureStore.isAvailableAsync()) return null;
   return SecureStore.getItemAsync(ACCESS_TOKEN_KEY);
 }
 
@@ -135,12 +196,27 @@ export async function logout(): Promise<void> {
   }
 }
 
-export async function clearTokens(): Promise<void> {
-  const results = await Promise.allSettled([
-    SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY),
-    SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY),
-  ]);
-  setAuthUser(null);
-  const failure = results.find((result) => result.status === 'rejected');
-  if (failure?.status === 'rejected') throw failure.reason;
+export function clearTokens(expectedGeneration?: number): Promise<boolean> {
+  if (expectedGeneration !== undefined) {
+    if (invalidation?.generation === expectedGeneration && authGeneration === invalidation.nextGeneration) {
+      return invalidation.result;
+    }
+    if (expectedGeneration !== authGeneration) return Promise.resolve(false);
+  }
+  const generation = authGeneration++;
+  const nextGeneration = authGeneration;
+  clearFavoriteCache();
+  clearCommunityLikes();
+  const result = writeTokens(async () => {
+    const results = await Promise.allSettled([
+      SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY),
+      SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY),
+    ]);
+    if (authGeneration === nextGeneration) setAuthUser(null);
+    const failure = results.find((item) => item.status === 'rejected');
+    if (failure?.status === 'rejected') throw failure.reason;
+    return authGeneration === nextGeneration;
+  });
+  invalidation = { generation, nextGeneration, result };
+  return result;
 }

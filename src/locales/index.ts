@@ -5,6 +5,7 @@ export type Locale = 'ko' | 'ja';
 
 const defaultLocale: Locale = 'ko';
 const currentLocale: Locale = defaultLocale;
+export function getLocale(): Locale { return currentLocale; }
 const dictionaries: Record<Locale, unknown> = { ko, ja };
 
 function lookup(dictionary: unknown, key: string): string | undefined {

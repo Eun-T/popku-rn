@@ -1,8 +1,8 @@
-import { useRouter } from "expo-router";
 import { useState } from "react";
 import { StyleSheet, Text, View, type ImageSourcePropType } from "react-native";
 
 import { useHomePopups } from "../../hooks/useHomePopups";
+import { usePopupFavorites } from "../../hooks/usePopupFavorites";
 import { colors, spacing, typography } from "../../theme/tokens";
 import FilterChips from "../common/FilterChips";
 import MoreButton from "../common/MoreButton";
@@ -28,22 +28,17 @@ function displayDate(date: string): string {
   return date.replace(/-/g, ".");
 }
 
-export default function HomeTrendingSection() {
-  const router = useRouter();
+export default function HomeTrendingSection({ onPressPopup }: { onPressPopup: (id: string) => void }) {
   const [selectedCountry, setSelectedCountry] = useState<Country>("KR");
   const { status, popups } = useHomePopups("trending", selectedCountry);
   const [isExpanded, setIsExpanded] = useState(false);
-  const [favorites, setFavorites] = useState<Record<string, boolean>>({});
+  const { isFavorite, isFavoriteDisabled, toggleFavorite } = usePopupFavorites();
 
   const visiblePopups = popups.slice(0, isExpanded ? 10 : 5);
 
   const handleCountryChange = (country: Country) => {
     setSelectedCountry(country);
     setIsExpanded(false);
-  };
-
-  const toggleFavorite = (id: string) => {
-    setFavorites((current) => ({ ...current, [id]: !current[id] }));
   };
 
   return (
@@ -82,13 +77,11 @@ export default function HomeTrendingSection() {
                 ...(popup.regionName ? [popup.regionName] : []),
                 ...popup.tags.map((tag) => tag.name),
               ]}
-              isFavorite={Boolean(favorites[id])}
-              onToggleFavorite={() => toggleFavorite(id)}
+              isFavorite={isFavorite(popup.publicId)}
+              isFavoriteDisabled={isFavoriteDisabled(popup.publicId)}
+              onToggleFavorite={() => void toggleFavorite(popup)}
               onPress={() =>
-                router.push({
-                  pathname: "/places/[id]",
-                  params: { id: popup.publicId },
-                })
+                onPressPopup(popup.publicId)
               }
             />
           );

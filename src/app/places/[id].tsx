@@ -1,42 +1,97 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
-import * as Clipboard from 'expo-clipboard';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ArrowLeft, ArrowUpRight, CalendarDays, ChevronRight, Clock3, Copy, Gift, Heart, MapPin, MessageCircle, Share2, Star, Ticket } from 'lucide-react-native';
-import { Image, Linking, Pressable, ScrollView, Share, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useLocalSearchParams, useRouter } from "expo-router";
+import {
+  ArrowLeft,
+  ArrowUpRight,
+  CalendarDays,
+  ChevronLeft,
+  ChevronRight,
+  Clock3,
+  Heart,
+  MapPin,
+  MessageCircle,
+  Share2,
+  Star,
+  Ticket,
+} from "lucide-react-native";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
+import {
+  Alert,
+  Linking,
+  Pressable,
+  ScrollView,
+  Share,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from "react-native";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 
-import Tag from '../../components/common/Tag';
-import IntroductionImageCarousel from '../../components/place/IntroductionImageCarousel';
-import OfficialChannelIcon, { type SocialChannel } from '../../components/place/OfficialChannelIcon';
-import PopupDetailSkeleton from '../../components/place/PopupDetailSkeleton';
-import PlaceMapPreview, { isMapPreviewAvailable } from '../../components/place/PlaceMapPreview';
-import { getPopupDetail, type PublicPopupDetail } from '../../lib/popups';
-import { t } from '../../locales';
-import { colors, radius, spacing } from '../../theme/tokens';
+import Tag from "../../components/common/Tag";
+import {
+  FLOATING_TAB_BAR_BOTTOM_GAP,
+  FLOATING_TAB_BAR_HEIGHT,
+} from "../../components/navigation/FloatingTabBar";
+import IntroductionImageCarousel from "../../components/place/IntroductionImageCarousel";
+import OfficialChannelIcon from "../../components/place/OfficialChannelIcon";
+import PlaceMapPreview, {
+  isMapPreviewAvailable,
+} from "../../components/place/PlaceMapPreview";
+import PopupDetailSkeleton from "../../components/place/PopupDetailSkeleton";
+import PopupGuidanceCarousel from "../../components/place/PopupGuidanceCarousel";
+import PopupHeroImage from "../../components/place/PopupHeroImage";
+import PopupReviews from "../../components/place/PopupReviews";
+import {
+  clearTokens,
+  getAuthSession,
+  getAuthUser,
+  subscribeAuthUser,
+} from "../../lib/auth";
+import {
+  favoritePopup,
+  FavoriteUnauthorizedError,
+  unfavoritePopup,
+} from "../../lib/favorites";
+import {
+  highlightHeading,
+  isValidExternalUrl,
+  officialChannelLabel,
+  officialChannelLinks,
+  popupSummary,
+  visiblePopupHighlights,
+} from "../../lib/popupDetailContent";
+import {
+  getPopupDetail,
+  PopupDetailUnauthorizedError,
+  type PublicPopupDetail,
+} from "../../lib/popups";
+import { popupOperatingStatus } from "../../lib/popupStatus";
+import { getLocale, t, type Locale } from "../../locales";
+import { colors, radius, spacing, typography } from "../../theme/tokens";
 
-type DetailRowProps = { icon: ReactNode; label: string; children: ReactNode; alignTop?: boolean };
-type DetailTab = 'info' | 'reviews';
-type DetailState = { id: string | undefined; status: 'loading' | 'ready' | 'error'; detail: PublicPopupDetail | null };
-
-const placeholderImage = require('../../../assets/images/ranking-placeholder.png');
-
-const socialChannelOrder: readonly SocialChannel[] = ['instagram', 'x', 'youtube', 'threads', 'facebook'];
-const socialChannelLabels: Record<SocialChannel, string> = {
-  instagram: 'Instagram',
-  x: 'X',
-  youtube: 'YouTube',
-  threads: 'Threads',
-  facebook: 'Facebook',
+type DetailRowProps = {
+  icon: ReactNode;
+  label: string;
+  children: ReactNode;
+  alignTop?: boolean;
+  compact?: boolean;
 };
-
-function isValidExternalUrl(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return (url.protocol === 'https:' || url.protocol === 'http:') && !!url.hostname;
-  } catch {
-    return false;
-  }
-}
+type DetailTab = "info" | "reviews";
+type DetailState = {
+  id: string | undefined;
+  languageCode: Locale;
+  status: "loading" | "ready" | "error";
+  detail: PublicPopupDetail | null;
+};
 
 type DetailTabsProps = {
   selectedTab: DetailTab;
@@ -44,95 +99,259 @@ type DetailTabsProps = {
   onSelectReviews: () => void;
 };
 
-function DetailTabs({ selectedTab, onSelectInfo, onSelectReviews }: DetailTabsProps) {
+function DetailTabs({
+  selectedTab,
+  onSelectInfo,
+  onSelectReviews,
+}: DetailTabsProps) {
   return (
     <View style={styles.tabs}>
-      <Pressable accessibilityRole="tab" accessibilityState={{ selected: selectedTab === 'info' }} onPress={onSelectInfo} style={styles.tab}>
-        <Text style={[styles.tabText, selectedTab === 'info' && styles.activeTabText]}>팝업 정보</Text>
-        {selectedTab === 'info' && <View style={styles.tabIndicator} />}
+      <Pressable
+        accessibilityRole="tab"
+        accessibilityState={{ selected: selectedTab === "info" }}
+        onPress={onSelectInfo}
+        style={styles.tab}
+      >
+        <Text
+          style={[
+            styles.tabText,
+            selectedTab === "info" && styles.activeTabText,
+          ]}
+        >
+          팝업 정보
+        </Text>
+        {selectedTab === "info" && <View style={styles.tabIndicator} />}
       </Pressable>
-      <Pressable accessibilityRole="tab" accessibilityState={{ selected: selectedTab === 'reviews' }} onPress={onSelectReviews} style={styles.tab}>
-        <Text style={[styles.tabText, selectedTab === 'reviews' && styles.activeTabText]}>방문 리뷰</Text>
-        {selectedTab === 'reviews' && <View style={styles.tabIndicator} />}
+      <Pressable
+        accessibilityRole="tab"
+        accessibilityState={{ selected: selectedTab === "reviews" }}
+        onPress={onSelectReviews}
+        style={styles.tab}
+      >
+        <Text
+          style={[
+            styles.tabText,
+            selectedTab === "reviews" && styles.activeTabText,
+          ]}
+        >
+          방문 리뷰
+        </Text>
+        {selectedTab === "reviews" && <View style={styles.tabIndicator} />}
       </Pressable>
     </View>
   );
 }
 
-function DetailRow({ icon, label, children, alignTop = false }: DetailRowProps) {
+function DetailRow({
+  icon,
+  label,
+  children,
+  alignTop = false,
+  compact = false,
+}: DetailRowProps) {
   return (
     <View style={[styles.infoRow, alignTop && styles.infoRowTop]}>
-      <View style={[styles.rowIcon, alignTop && styles.rowIconTop]}>{icon}</View>
-      <Text style={styles.rowLabel}>{label}</Text>
+      <View style={[styles.rowIcon, alignTop && styles.rowIconTop]}>
+        {icon}
+      </View>
+      <Text style={[styles.rowLabel, compact && styles.reservationLabel]}>
+        {label}
+      </Text>
       <View style={styles.rowValue}>{children}</View>
     </View>
   );
 }
 
 function formatDate(value: string): string {
-  const [year, month, day] = value.split('-');
+  const [year, month, day] = value.split("-");
   return `${year}.${month}.${day}`;
 }
 
 function formatDateTime(value: string): string {
-  const [date, time] = value.split('T');
-  return `${formatDate(date)} ${time?.slice(0, 5) ?? ''}`.trim();
-}
-
-function dateAtMidnight(value: string): Date {
-  const [year, month, day] = value.split('-').map(Number);
-  return new Date(year, month - 1, day);
+  const [date, time] = value.split("T");
+  return `${formatDate(date)} ${time?.slice(0, 5) ?? ""}`.trim();
 }
 
 export default function PlaceDetail() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, tab } = useLocalSearchParams<{ id: string; tab?: string }>();
   const router = useRouter();
-  const { width, height } = useWindowDimensions();
+  const languageCode = getLocale();
+  const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
-  const [isFavorite, setFavorite] = useState(false);
-  const [selectedTab, setSelectedTab] = useState<DetailTab>('info');
+  const authUser = useSyncExternalStore(
+    subscribeAuthUser,
+    getAuthUser,
+    getAuthUser,
+  );
+  const [isFavoriteUpdating, setFavoriteUpdating] = useState(false);
+  const favoriteBusy = useRef(false);
+  const favoriteGeneration = useRef(0);
+  const [selectedTab, setSelectedTab] = useState<DetailTab>("info");
   const [isTabPinned, setTabPinned] = useState(false);
-  const [requestState, setRequestState] = useState<DetailState>({ id, status: 'loading', detail: null });
+  const [requestState, setRequestState] = useState<DetailState>({
+    id,
+    languageCode,
+    status: "loading",
+    detail: null,
+  });
 
   useEffect(() => {
-    setFavorite(false);
-    setSelectedTab('info');
+    setSelectedTab(tab === "reviews" ? "reviews" : "info");
     setTabPinned(false);
+  }, [id, tab]);
+
+  useEffect(() => {
+    favoriteGeneration.current += 1;
     if (!id) {
-      setRequestState({ id, status: 'error', detail: null });
+      setRequestState({ id, languageCode, status: "error", detail: null });
       return;
     }
     const controller = new AbortController();
-    setRequestState({ id, status: 'loading', detail: null });
-    getPopupDetail(id, controller.signal)
+    setRequestState({ id, languageCode, status: "loading", detail: null });
+    getAuthSession()
+      .then(async ({ accessToken: token, generation }) => {
+        if (__DEV__)
+          console.info("[FAVORITE] detail request", {
+            publicId: id,
+            tokenPresent: !!token,
+          });
+        try {
+          return await getPopupDetail(
+            id,
+            controller.signal,
+            token ?? undefined,
+            languageCode,
+          );
+        } catch (error) {
+          if (
+            token &&
+            error instanceof PopupDetailUnauthorizedError &&
+            !controller.signal.aborted
+          ) {
+            if ((await clearTokens(generation)) === false) throw error;
+            return getPopupDetail(
+              id,
+              controller.signal,
+              undefined,
+              languageCode,
+            );
+          }
+          throw error;
+        }
+      })
       .then((detail) => {
-        if (!controller.signal.aborted) setRequestState({ id, status: 'ready', detail });
+        if (!controller.signal.aborted) {
+          if (__DEV__)
+            console.info("[FAVORITE] detail loaded", {
+              publicId: id,
+              favoriteCount: detail.favoriteCount,
+              isFavorited: detail.isFavorited,
+            });
+          setRequestState({ id, languageCode, status: "ready", detail });
+        }
       })
       .catch(() => {
-        if (!controller.signal.aborted) setRequestState({ id, status: 'error', detail: null });
+        if (!controller.signal.aborted)
+          setRequestState({ id, languageCode, status: "error", detail: null });
       });
     return () => controller.abort();
-  }, [id]);
+  }, [id, authUser, languageCode]);
 
-  const detail = requestState.id === id && requestState.status === 'ready' ? requestState.detail : null;
+  const detail =
+    requestState.id === id &&
+    requestState.languageCode === languageCode &&
+    requestState.status === "ready"
+      ? requestState.detail
+      : null;
+
+  const toggleFavorite = async () => {
+    if (__DEV__)
+      console.info("[FAVORITE] heart press", {
+        publicId: detail?.publicId,
+        busy: favoriteBusy.current,
+      });
+    if (!detail || favoriteBusy.current) return;
+    const generation = favoriteGeneration.current;
+    favoriteBusy.current = true;
+    setFavoriteUpdating(true);
+    try {
+      const result = detail.isFavorited
+        ? await unfavoritePopup(detail.publicId)
+        : await favoritePopup(detail.publicId);
+      if (__DEV__) console.info("[FAVORITE] updated", result);
+      setRequestState((current) =>
+        favoriteGeneration.current === generation &&
+        current.id === detail.publicId &&
+        current.detail
+          ? {
+              ...current,
+              detail: {
+                ...current.detail,
+                isFavorited: result.isFavorited,
+                favoriteCount: result.favoriteCount,
+              },
+            }
+          : current,
+      );
+    } catch (error) {
+      if (__DEV__)
+        console.info(
+          "[FAVORITE] update failed",
+          error instanceof Error ? error.message : "unknown error",
+        );
+      if (error instanceof FavoriteUnauthorizedError) {
+        const invalidated = await clearTokens(error.authGeneration).catch(
+          () => true,
+        );
+        if (invalidated === false) return;
+        router.push("/profile/login");
+      } else {
+        Alert.alert("찜을 변경하지 못했어요", "잠시 후 다시 시도해 주세요.");
+      }
+    } finally {
+      favoriteBusy.current = false;
+      setFavoriteUpdating(false);
+    }
+  };
 
   if (!detail) {
-    const isError = requestState.id === id && requestState.status === 'error';
+    const isError =
+      requestState.id === id &&
+      requestState.languageCode === languageCode &&
+      requestState.status === "error";
     if (!isError) {
       return (
-        <SafeAreaView style={styles.container} edges={['bottom']}>
+        <SafeAreaView style={styles.container} edges={["bottom"]}>
           <ScrollView contentContainerStyle={styles.content}>
             <PopupDetailSkeleton
               width={width}
-              heroControls={(
-                <View style={[styles.heroControls, { top: insets.top + spacing.space12 }]}>
-                  <Pressable accessibilityRole="button" accessibilityLabel={t('place.explore.back')} onPress={() => router.back()} style={styles.heroButton}>
-                    <ArrowLeft size={20} color={colors.text} />
+              heroControls={
+                <View
+                  style={[
+                    styles.heroControls,
+                    { top: insets.top + spacing.space12 },
+                  ]}
+                >
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={t("place.explore.back")}
+                    onPress={() => router.back()}
+                    style={styles.heroButton}
+                  >
+                    <ChevronLeft size={24} color={colors.background} />
                   </Pressable>
                 </View>
-              )}
-              tabs={<View style={styles.tabSlot}><DetailTabs selectedTab="info" onSelectInfo={() => {}} onSelectReviews={() => {}} /></View>}
+              }
+              tabs={
+                <View style={styles.tabSlot}>
+                  <DetailTabs
+                    selectedTab="info"
+                    onSelectInfo={() => {}}
+                    onSelectReviews={() => {}}
+                  />
+                </View>
+              }
             />
           </ScrollView>
         </SafeAreaView>
@@ -140,7 +359,12 @@ export default function PlaceDetail() {
     }
     return (
       <SafeAreaView style={styles.container}>
-        <Pressable accessibilityRole="button" accessibilityLabel={t('place.explore.back')} onPress={() => router.back()} style={styles.emptyBack}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t("place.explore.back")}
+          onPress={() => router.back()}
+          style={styles.emptyBack}
+        >
           <ArrowLeft size={24} color={colors.text} />
         </Pressable>
         <View style={styles.empty}>
@@ -152,215 +376,458 @@ export default function PlaceDetail() {
 
   const latitude = detail.latitude;
   const longitude = detail.longitude;
-  const mapCoordinates = typeof latitude === 'number' && Number.isFinite(latitude) && Math.abs(latitude) <= 90
-    && typeof longitude === 'number' && Number.isFinite(longitude) && Math.abs(longitude) <= 180
-    ? { latitude, longitude }
-    : null;
+  const mapCoordinates =
+    typeof latitude === "number" &&
+    Number.isFinite(latitude) &&
+    Math.abs(latitude) <= 90 &&
+    typeof longitude === "number" &&
+    Number.isFinite(longitude) &&
+    Math.abs(longitude) <= 180
+      ? { latitude, longitude }
+      : null;
   const hasMapSection = Boolean(mapCoordinates && isMapPreviewAvailable);
-  const hasBenefits = Boolean(detail.benefits?.trim());
-  const hasIntroduction = Boolean(detail.introduction?.trim());
-  const socialData = detail.socialLinks && typeof detail.socialLinks === 'object' && !Array.isArray(detail.socialLinks)
-    ? detail.socialLinks as Record<string, unknown> : null;
-  const socialLinks = socialChannelOrder.flatMap((channel) => {
-    const url = socialData?.[channel];
-    return typeof url === 'string' && isValidExternalUrl(url) ? [{ channel, url }] : [];
-  });
-  const reservationUrl = detail.reservationUrl && isValidExternalUrl(detail.reservationUrl) ? detail.reservationUrl : null;
+  const summary = popupSummary(detail.summary);
+  const highlights = visiblePopupHighlights(detail.highlights);
+  const hasDescriptionContent = !!summary || highlights.length > 0;
+  const hasDescriptionSection =
+    hasDescriptionContent || detail.contentImageUrls.length > 0;
+  const socialLinks = officialChannelLinks(detail.socialLinks);
+  const reservationUrl =
+    detail.reservationUrl && isValidExternalUrl(detail.reservationUrl)
+      ? detail.reservationUrl
+      : null;
   const reservationTimes = [
-    detail.reservationStartAt && `시작 ${formatDateTime(detail.reservationStartAt)}`,
-    detail.reservationEndAt && `종료 ${formatDateTime(detail.reservationEndAt)}`,
-  ].filter(Boolean).join('\n');
-  const period = [detail.startDate && formatDate(detail.startDate), detail.endDate && formatDate(detail.endDate)]
-    .filter(Boolean).join(' - ');
+    detail.reservationStartAt &&
+      t("place.detail.basicInfo.reservationStart", {
+        date: formatDateTime(detail.reservationStartAt),
+      }),
+    detail.reservationEndAt &&
+      t("place.detail.basicInfo.reservationEnd", {
+        date: formatDateTime(detail.reservationEndAt),
+      }),
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const period = [
+    detail.startDate && formatDate(detail.startDate),
+    detail.endDate && formatDate(detail.endDate),
+  ]
+    .filter(Boolean)
+    .join(" - ");
   const locationDetail = detail.locationDetail?.trim();
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const status = detail.startDate && today < dateAtMidnight(detail.startDate) ? '오픈 예정'
-    : detail.endDate && today > dateAtMidnight(detail.endDate) ? '종료'
-      : detail.startDate || detail.endDate ? '운영 중' : null;
-  const statusVariant = status === '운영 중' ? 'primary' : status === '오픈 예정' ? 'info' : 'neutral';
+  const hasAddress = Boolean(detail.address?.trim());
+  const status = popupOperatingStatus(detail.startDate, detail.endDate);
+  const statusVariant =
+    status === "운영 중"
+      ? "primary"
+      : status === "오픈 예정"
+        ? "info"
+        : "neutral";
   const openReviews = () => {
-    setSelectedTab('reviews');
+    setSelectedTab("reviews");
     scrollRef.current?.scrollTo({ y: width, animated: true });
   };
+  const averageRating = (detail.averageRating ?? 0).toFixed(1);
+  const reviewCount = detail.reviewCount ?? 0;
   const openDirections = () => {
     // Connect a map app or route sheet when navigation is implemented.
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['bottom']}>
+    <SafeAreaView style={styles.container} edges={["bottom"]}>
       <ScrollView
         ref={scrollRef}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, styles.floatingContentInset]}
         scrollEventThrottle={16}
-        onScroll={(event) => setTabPinned(event.nativeEvent.contentOffset.y >= width - insets.top)}
+        onScroll={(event) =>
+          setTabPinned(event.nativeEvent.contentOffset.y >= width - insets.top)
+        }
       >
         <View style={[styles.hero, { width, height: width }]}>
-          <Image source={detail.coverImageUrl ? { uri: detail.coverImageUrl } : placeholderImage} resizeMode="cover" style={{ width, height: width }} />
-          <View style={[styles.heroControls, { top: insets.top + spacing.space12 }]}>
-            <Pressable accessibilityRole="button" accessibilityLabel={t('place.explore.back')} onPress={() => router.back()} style={styles.heroButton}>
-              <ArrowLeft size={20} color={colors.text} />
+          <PopupHeroImage
+            key={detail.coverImageUrl ?? "placeholder"}
+            uri={detail.coverImageUrl}
+            accessibilityLabel={detail.name}
+            topInset={insets.top}
+          />
+          <View
+            style={[styles.heroControls, { top: insets.top + spacing.space12 }]}
+          >
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t("place.explore.back")}
+              onPress={() => router.back()}
+              style={styles.heroButton}
+            >
+              <ChevronLeft size={24} color={colors.background} />
             </Pressable>
-            <View style={styles.rightControls}>
-              <Pressable accessibilityRole="button" accessibilityLabel="공유하기" onPress={() => void Share.share({ message: detail.name })} style={styles.heroButton}>
-                <Share2 size={20} color={colors.text} />
-              </Pressable>
-              <Pressable accessibilityRole="button" accessibilityLabel={isFavorite ? '찜 해제' : '찜하기'} accessibilityState={{ selected: isFavorite }} onPress={() => setFavorite((current) => !current)} style={styles.heroButton}>
-                <Heart size={20} color={isFavorite ? colors.primary : colors.text} fill={isFavorite ? colors.primary : 'none'} />
-              </Pressable>
-            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="공유하기"
+              onPress={() => void Share.share({ message: detail.name })}
+              style={styles.heroButton}
+            >
+              <Share2 size={24} color={colors.background} />
+            </Pressable>
           </View>
         </View>
 
         <View style={styles.tabSlot}>
           {!isTabPinned && (
-            <DetailTabs selectedTab={selectedTab} onSelectInfo={() => setSelectedTab('info')} onSelectReviews={openReviews} />
+            <DetailTabs
+              selectedTab={selectedTab}
+              onSelectInfo={() => setSelectedTab("info")}
+              onSelectReviews={openReviews}
+            />
           )}
         </View>
 
-        {selectedTab === 'info' ? <View style={styles.infoContent}>
-        <View>
-          <View style={styles.tags}>
-            {status && <Tag label={status} variant={statusVariant} />}
-            {detail.regionName && <Tag label={detail.regionName} />}
-            {detail.tags.map((tag) => <Tag key={tag.id} label={tag.name} />)}
-          </View>
-          <Text numberOfLines={1} ellipsizeMode="tail" style={styles.title}>{detail.name}</Text>
-          <View style={styles.stats}>
-            <View style={styles.stat}><Heart size={18} color="#FF5A6E" fill="none" /><Text style={styles.statText}>{isFavorite ? '찜함' : '찜'}</Text></View>
-            <Pressable accessibilityRole="button" accessibilityLabel="별점 정보 없음, 방문 리뷰로 이동" onPress={openReviews} style={styles.stat}>
-              <Star size={18} color="#F5B800" fill="none" /><Text style={styles.statText}>별점</Text>
-            </Pressable>
-            <Pressable accessibilityRole="button" accessibilityLabel="방문 리뷰로 이동" onPress={openReviews} style={styles.stat}>
-              <MessageCircle size={18} color="#5B8DEF" fill="none" />
-              <Text style={styles.statText}>후기</Text>
-              <ChevronRight size={16} color={colors.secondaryText} />
-            </Pressable>
-          </View>
-        </View>
-
-        {detail.notice?.trim() ? (
-          <View style={styles.contentSection}>
-            <View style={styles.noticeCard}>
-              <View style={styles.noticeHeading}>
-                <Text numberOfLines={1} style={styles.noticeTitle}>공지사항</Text>
+        {selectedTab === "info" ? (
+          <View style={styles.infoContent}>
+            <View>
+              <View style={styles.tags}>
+                {status && <Tag label={status} variant={statusVariant} />}
+                {detail.regionName && <Tag label={detail.regionName} />}
+                {detail.tags.map((tag) => (
+                  <Tag key={tag.id} label={tag.name} />
+                ))}
               </View>
-              <Text style={styles.noticePreview}>{detail.notice}</Text>
-            </View>
-          </View>
-        ) : null}
-
-        <View style={styles.infoSection}>
-          <View style={styles.infoRows}>
-            <DetailRow icon={<CalendarDays size={18} color={colors.secondaryText} />} label="기간">
-              <Text style={styles.valueText}>{period || '정보 준비 중'}</Text>
-            </DetailRow>
-            <DetailRow icon={<Clock3 size={18} color={colors.secondaryText} />} label="운영시간" alignTop>
-              <Text numberOfLines={2} ellipsizeMode="tail" style={styles.valueText}>{detail.operatingHours?.trim() || '정보 준비 중'}</Text>
-            </DetailRow>
-            {(detail.reservationStartAt || detail.reservationEndAt || reservationUrl) && (
-              <Pressable
-                accessibilityRole={reservationUrl ? 'link' : undefined}
-                accessibilityLabel={reservationUrl ? '사전예약 링크 열기' : undefined}
-                disabled={!reservationUrl}
-                onPress={() => { if (reservationUrl) void Linking.openURL(reservationUrl); }}
-              >
-                <DetailRow icon={<Ticket size={18} color={colors.secondaryText} />} label="사전예약">
-                  <View style={styles.reservationContent}>
-                    <Text style={[styles.valueText, styles.reservationText]}>{reservationTimes || '예약하기'}</Text>
-                    {reservationUrl && <ChevronRight size={20} color={colors.secondaryText} />}
-                  </View>
-                </DetailRow>
-              </Pressable>
-            )}
-            <DetailRow icon={<MapPin size={18} color={colors.secondaryText} />} label="장소" alignTop>
-              <View style={styles.placeContent}>
-                <Text numberOfLines={1} ellipsizeMode="tail" style={[styles.valueText, styles.placeAddress]}>{detail.address || '주소 정보 준비 중'}</Text>
-                <Pressable accessibilityRole="button" accessibilityLabel="주소 복사" onPress={() => void Clipboard.setStringAsync(detail.address)} style={styles.copyButton}>
-                  <Copy size={18} color={colors.secondaryText} />
+              <Text numberOfLines={1} ellipsizeMode="tail" style={styles.title}>
+                {detail.name}
+              </Text>
+              <View style={styles.stats}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={detail.isFavorited ? "찜 해제" : "찜하기"}
+                  accessibilityState={{
+                    selected: detail.isFavorited,
+                    disabled: isFavoriteUpdating,
+                  }}
+                  disabled={isFavoriteUpdating}
+                  onPress={() => void toggleFavorite()}
+                  style={styles.stat}
+                >
+                  <Heart
+                    size={18}
+                    color="#FF5A6E"
+                    fill={detail.isFavorited ? "#FF5A6E" : "none"}
+                  />
+                  <Text style={[styles.statText, styles.favoriteCount]}>{detail.favoriteCount}</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`평균 별점 ${averageRating}점, 방문 리뷰로 이동`}
+                  onPress={openReviews}
+                  style={styles.stat}
+                >
+                  <Star size={18} color="#F5B800" fill="#F5B800" />
+                  <Text style={styles.statText}>{averageRating}</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="방문 리뷰로 이동"
+                  onPress={openReviews}
+                  style={styles.stat}
+                >
+                  <MessageCircle size={18} color="#5B8DEF" fill="#5B8DEF" />
+                  <Text style={styles.statText}>{reviewCount > 0 ? `후기 ${reviewCount}개` : "후기"}</Text>
+                  <ChevronRight size={16} color={colors.secondaryText} />
                 </Pressable>
               </View>
-            </DetailRow>
-            {locationDetail ? (
-              <DetailRow icon={<MapPin size={18} color={colors.secondaryText} />} label="위치" alignTop>
-                <Text numberOfLines={1} ellipsizeMode="tail" style={styles.valueText}>{locationDetail}</Text>
-              </DetailRow>
-            ) : null}
-          </View>
-        </View>
-        {mapCoordinates && isMapPreviewAvailable && (
-          <View style={styles.mapSection}>
-            <View style={styles.mapDivider} />
-            <View style={styles.mapFrame}>
-              <Text style={styles.sectionTitle}>위치</Text>
-              <View style={styles.mapPreview}><PlaceMapPreview {...mapCoordinates} /></View>
-              <Pressable accessibilityRole="button" onPress={openDirections} style={styles.directionsButton}>
-                <Text style={styles.directionsText}>길찾기</Text>
-                <ArrowUpRight size={16} color={colors.text} />
-              </Pressable>
             </View>
-            <View style={[styles.mapDivider, styles.mapBottomDivider]} />
-          </View>
-        )}
-          <View style={!hasMapSection && styles.introductionSection}>
-            {!hasMapSection && <View style={styles.mapDivider} />}
-            <View style={styles.introductionContent}>
-              <Text style={styles.sectionTitle}>팝업 소개</Text>
-              {hasBenefits && (
-                <View style={[styles.noticeCard, styles.benefitCard]}>
-                  <View style={styles.benefitHeading}>
-                    <Gift size={18} color={colors.primary} style={styles.benefitIcon} />
-                    <Text numberOfLines={1} style={styles.benefitTitle}>혜택</Text>
+
+            <PopupGuidanceCarousel
+              popupId={detail.publicId}
+              languageCode={languageCode}
+              notice={detail.notice}
+              benefits={detail.benefits}
+            />
+
+            <View style={styles.infoSection}>
+              <View style={styles.infoRows}>
+                <DetailRow
+                  icon={<CalendarDays size={18} color={colors.secondaryText} />}
+                  label={t("place.detail.basicInfo.period")}
+                  alignTop
+                >
+                  <Text style={[styles.valueText, styles.infoValueText]}>
+                    {period || t("place.detail.basicInfo.pending")}
+                  </Text>
+                </DetailRow>
+                <DetailRow
+                  icon={<Clock3 size={18} color={colors.secondaryText} />}
+                  label={t("place.detail.basicInfo.time")}
+                  alignTop
+                >
+                  <Text
+                    numberOfLines={2}
+                    ellipsizeMode="tail"
+                    style={[styles.valueText, styles.infoValueText]}
+                  >
+                    {detail.operatingHours?.trim() ||
+                      t("place.detail.basicInfo.pending")}
+                  </Text>
+                </DetailRow>
+                <DetailRow
+                  icon={<MapPin size={18} color={colors.secondaryText} />}
+                  label={t("place.detail.basicInfo.place")}
+                  alignTop
+                >
+                  <View style={styles.placeDetails}>
+                    {hasAddress ? (
+                      <Text style={[styles.valueText, styles.infoValueText]}>
+                        {detail.address}
+                      </Text>
+                    ) : null}
+                    {locationDetail ? (
+                      <Text style={[styles.valueText, styles.infoValueText]}>
+                        {locationDetail}
+                      </Text>
+                    ) : null}
+                    {!hasAddress && !locationDetail ? (
+                      <Text style={[styles.valueText, styles.infoValueText]}>
+                        {t("place.detail.basicInfo.addressPending")}
+                      </Text>
+                    ) : null}
                   </View>
-                  <Text style={[styles.noticePreview, styles.benefitPreview]}>{detail.benefits}</Text>
-                </View>
-              )}
-              {hasIntroduction && (
-                <Text style={[styles.introductionText, hasBenefits ? styles.introductionAfterBenefit : styles.introductionAfterTitle]}>
-                  {detail.introduction}
-                </Text>
-              )}
-              {detail.contentImageUrls.length > 0 && (
-                <View style={[
-                  hasIntroduction ? styles.introductionImages : hasBenefits ? styles.introductionAfterBenefit : styles.introductionAfterTitle,
-                ]}>
-                  <IntroductionImageCarousel key={detail.publicId} images={detail.contentImageUrls} width={width - spacing.space16 * 2} />
-                </View>
-              )}
-              <Pressable disabled accessibilityRole="button" accessibilityLabel="정보 수정 제보하기" accessibilityState={{ disabled: true }} hitSlop={10} style={styles.reportAction}>
-                <Text numberOfLines={1} style={styles.reportActionText}>정보 수정 제보 →</Text>
-              </Pressable>
-            </View>
-            <View style={[styles.mapDivider, styles.mapBottomDivider]} />
-          </View>
-        {socialLinks.length > 0 && (
-          <View>
-            <View style={styles.officialContent}>
-              <Text numberOfLines={1} style={styles.sectionTitle}>공식 채널</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.socialScroller} contentContainerStyle={styles.socialButtons}>
-                  {socialLinks.map(({ channel, url }) => (
-                    <Pressable
-                      key={channel}
-                      accessibilityRole="link"
-                      accessibilityLabel={`${socialChannelLabels[channel]} 공식 채널`}
-                      onPress={() => void Linking.openURL(url)}
-                      style={styles.socialButton}
+                </DetailRow>
+                {reservationUrl ? (
+                  <Pressable
+                    accessibilityRole="link"
+                    accessibilityLabel={t("place.detail.basicInfo.reserve")}
+                    onPress={() => {
+                      void Linking.openURL(reservationUrl).catch(() =>
+                        Alert.alert(t("place.detail.channelOpenError")),
+                      );
+                    }}
+                    style={styles.reservationCard}
+                  >
+                    <DetailRow
+                      icon={<Ticket size={18} color={colors.primary} />}
+                      label={t("place.detail.basicInfo.reservation")}
+                      compact
                     >
-                      <OfficialChannelIcon channel={channel} />
-                    </Pressable>
-                  ))}
-              </ScrollView>
+                      <View style={styles.reservationContent}>
+                        {reservationTimes ? (
+                          <View style={styles.reservationText}>
+                            <Text style={styles.reservationTimes}>
+                              {reservationTimes}
+                            </Text>
+                          </View>
+                        ) : null}
+                        <View style={styles.reservationAction}>
+                          <Text style={styles.reservationActionText}>
+                            {t("place.detail.basicInfo.reserve")}
+                          </Text>
+                          <ChevronRight size={18} color={colors.primary} />
+                        </View>
+                      </View>
+                    </DetailRow>
+                  </Pressable>
+                ) : null}
+              </View>
             </View>
-            <View style={[styles.mapDivider, styles.mapBottomDivider]} />
+            {mapCoordinates && isMapPreviewAvailable && (
+              <View style={styles.mapSection}>
+                <View style={styles.mapDivider} />
+                <View style={styles.mapFrame}>
+                  <Text style={styles.sectionTitle}>위치</Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="지도에서 팝업 보기"
+                    onPress={() =>
+                      router.dismissTo({
+                        pathname: "/(tabs)/map",
+                        params: { popupId: detail.publicId },
+                      })
+                    }
+                    style={styles.mapPreview}
+                  >
+                    <PlaceMapPreview {...mapCoordinates} />
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={openDirections}
+                    style={styles.directionsButton}
+                  >
+                    <Text style={styles.directionsText}>길찾기</Text>
+                    <ArrowUpRight size={16} color={colors.text} />
+                  </Pressable>
+                </View>
+                <View style={[styles.mapDivider, styles.mapBottomDivider]} />
+              </View>
+            )}
+            {hasDescriptionSection && (
+              <View style={!hasMapSection && styles.descriptionSection}>
+                {!hasMapSection && <View style={styles.mapDivider} />}
+                <View style={styles.descriptionContent}>
+                  <Text style={styles.sectionTitle}>
+                    {t("place.detail.about")}
+                  </Text>
+                  {summary && (
+                    <Text
+                      style={[
+                        styles.descriptionText,
+                        styles.descriptionAfterTitle,
+                      ]}
+                    >
+                      {summary}
+                    </Text>
+                  )}
+                  {highlights.length > 0 && (
+                    <View
+                      style={[
+                        styles.highlights,
+                        summary
+                          ? styles.descriptionAfterBenefit
+                          : styles.descriptionAfterTitle,
+                      ]}
+                    >
+                      {highlights.map((highlight, index) => {
+                        const heading = highlightHeading(highlight.type);
+                        return (
+                          <View key={`${index}-${highlight.type}`}>
+                            <View style={styles.highlightHeading}>
+                              <Text
+                                accessible={false}
+                                accessibilityElementsHidden
+                                importantForAccessibility="no"
+                                style={styles.highlightEmoji}
+                              >
+                                {heading.emoji}
+                              </Text>
+                              <Text
+                                style={[
+                                  styles.benefitTitle,
+                                  styles.highlightTitle,
+                                ]}
+                              >
+                                {t(heading.key)}
+                              </Text>
+                            </View>
+                            <Text
+                              style={[
+                                styles.descriptionText,
+                                styles.highlightText,
+                              ]}
+                            >
+                              {highlight.text}
+                            </Text>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  )}
+                  {detail.contentImageUrls.length > 0 && (
+                    <View
+                      style={[
+                        hasDescriptionContent
+                          ? styles.descriptionImages
+                          : styles.descriptionAfterTitle,
+                      ]}
+                    >
+                      <IntroductionImageCarousel
+                        key={detail.publicId}
+                        images={detail.contentImageUrls}
+                        width={width - spacing.space16 * 2}
+                      />
+                    </View>
+                  )}
+                  <Pressable
+                    disabled
+                    accessibilityRole="button"
+                    accessibilityLabel="정보 수정 제보하기"
+                    accessibilityState={{ disabled: true }}
+                    hitSlop={10}
+                    style={styles.reportAction}
+                  >
+                    <Text numberOfLines={1} style={styles.reportActionText}>
+                      정보 수정 제보 →
+                    </Text>
+                  </Pressable>
+                </View>
+                <View style={[styles.mapDivider, styles.mapBottomDivider]} />
+              </View>
+            )}
+            {socialLinks.length > 0 && (
+              <View>
+                <View style={styles.officialContent}>
+                  <Text numberOfLines={1} style={styles.sectionTitle}>
+                    {t("place.detail.officialChannels")}
+                  </Text>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    style={styles.socialScroller}
+                    contentContainerStyle={styles.socialButtons}
+                  >
+                    {socialLinks.map(({ channel, url }) => (
+                      <Pressable
+                        key={channel}
+                        accessibilityRole="link"
+                        accessibilityLabel={t(
+                          "place.detail.officialChannelLink",
+                          { channel: officialChannelLabel(channel, t) },
+                        )}
+                        onPress={() => {
+                          void Linking.openURL(url).catch(() =>
+                            Alert.alert(t("place.detail.channelOpenError")),
+                          );
+                        }}
+                        style={styles.socialButton}
+                      >
+                        <OfficialChannelIcon channel={channel} />
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+                </View>
+                <View style={[styles.mapDivider, styles.mapBottomDivider]} />
+              </View>
+            )}
           </View>
+        ) : (
+          <PopupReviews publicId={detail.publicId} title={detail.name} />
         )}
-        </View> : <View style={[styles.empty, { minHeight: height }]}><Text style={styles.valueText}>아직 등록된 방문 리뷰가 없어요.</Text></View>}
       </ScrollView>
       {isTabPinned && (
         <View style={[styles.pinnedTabs, { paddingTop: insets.top }]}>
-          <DetailTabs selectedTab={selectedTab} onSelectInfo={() => setSelectedTab('info')} onSelectReviews={openReviews} />
+          <DetailTabs
+            selectedTab={selectedTab}
+            onSelectInfo={() => setSelectedTab("info")}
+            onSelectReviews={openReviews}
+          />
         </View>
       )}
+      <Pressable
+        testID="popup-floating-favorite"
+        accessibilityRole="button"
+        accessibilityLabel={detail.isFavorited ? "찜 해제" : "찜하기"}
+        accessibilityState={{
+          selected: detail.isFavorited,
+          disabled: isFavoriteUpdating,
+        }}
+        disabled={isFavoriteUpdating}
+        onPress={() => void toggleFavorite()}
+        style={[
+          styles.floatingFavorite,
+          {
+            right: insets.right + spacing.space16,
+            bottom:
+              insets.bottom +
+              (FLOATING_TAB_BAR_BOTTOM_GAP + FLOATING_TAB_BAR_HEIGHT) / 2 +
+              spacing.space16,
+          },
+        ]}
+      >
+        <Heart
+          size={18}
+          color={colors.background}
+          fill={detail.isFavorited ? colors.background : "none"}
+        />
+        <Text style={styles.floatingFavoriteText}>
+          {detail.isFavorited ? "찜했어요" : "찜하기"}
+        </Text>
+      </Pressable>
     </SafeAreaView>
   );
 }
@@ -368,67 +835,266 @@ export default function PlaceDetail() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   content: { paddingBottom: spacing.space40 },
-  hero: { position: 'relative' },
-  heroControls: { position: 'absolute', left: spacing.space16, right: spacing.space16, flexDirection: 'row', justifyContent: 'space-between' },
-  rightControls: { flexDirection: 'row', columnGap: spacing.space8 },
-  heroButton: { width: 32, height: 32, borderRadius: radius.full, backgroundColor: 'rgba(255, 255, 255, 0.88)', alignItems: 'center', justifyContent: 'center' },
-  tabSlot: { width: '100%', height: 56, backgroundColor: colors.background },
-  pinnedTabs: { position: 'absolute', top: 0, left: 0, right: 0, backgroundColor: colors.background, zIndex: 10, elevation: 10 },
-  tabs: { width: '100%', height: 56, flexDirection: 'row', alignItems: 'stretch', backgroundColor: colors.background, borderBottomWidth: 1, borderBottomColor: colors.border, zIndex: 1 },
-  tab: { flex: 1, minWidth: 0, height: 56, alignItems: 'center', justifyContent: 'center' },
-  tabText: { fontSize: 16, fontWeight: '500', color: colors.secondaryText },
-  activeTabText: { fontWeight: '700', color: colors.text },
-  tabIndicator: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 2, backgroundColor: colors.text },
-  infoContent: { paddingTop: spacing.space24, paddingHorizontal: spacing.space16 },
-  title: { marginTop: spacing.space12, fontSize: 18, fontWeight: '700', lineHeight: 26, color: colors.text },
-  tags: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.space8 },
-  stats: { flexDirection: 'row', alignItems: 'center', columnGap: spacing.space20, marginTop: spacing.space12 },
-  stat: { flexDirection: 'row', alignItems: 'center', columnGap: 5 },
-  statText: { fontSize: 14, fontWeight: '600', lineHeight: 20, color: colors.text },
-  contentSection: { marginTop: 28 },
+  hero: { position: "relative" },
+  heroControls: {
+    position: "absolute",
+    left: spacing.space16,
+    right: spacing.space16,
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  heroButton: {
+    width: 44,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000000",
+    shadowOpacity: 0.25,
+    shadowRadius: 2,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 2,
+  },
+  floatingContentInset: { paddingBottom: 48 + spacing.space16 * 2 },
+  floatingFavorite: {
+    position: "absolute",
+    height: 48,
+    paddingHorizontal: spacing.space16,
+    flexDirection: "row",
+    alignItems: "center",
+    columnGap: spacing.space8,
+    borderRadius: radius.full,
+    backgroundColor: "#FF5A6E",
+    shadowColor: "#000000",
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+  },
+  floatingFavoriteText: {
+    ...typography.label,
+    fontWeight: "600",
+    color: colors.background,
+  },
+  tabSlot: { width: "100%", height: 56, backgroundColor: colors.background },
+  pinnedTabs: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: colors.background,
+    zIndex: 10,
+    elevation: 10,
+  },
+  tabs: {
+    width: "100%",
+    height: 56,
+    flexDirection: "row",
+    alignItems: "stretch",
+    backgroundColor: colors.background,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    zIndex: 1,
+  },
+  tab: {
+    flex: 1,
+    minWidth: 0,
+    height: 56,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  tabText: { fontSize: 16, fontWeight: "500", color: colors.secondaryText },
+  activeTabText: { fontWeight: "700", color: colors.text },
+  tabIndicator: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 2,
+    backgroundColor: colors.text,
+  },
+  infoContent: {
+    paddingTop: spacing.space24,
+    paddingHorizontal: spacing.space16,
+  },
+  title: {
+    marginTop: spacing.space12,
+    fontSize: 18,
+    fontWeight: "700",
+    lineHeight: 26,
+    color: colors.text,
+  },
+  tags: { flexDirection: "row", flexWrap: "wrap", gap: spacing.space8 },
+  stats: {
+    flexDirection: "row",
+    alignItems: "center",
+    columnGap: spacing.space12,
+    marginTop: spacing.space12,
+  },
+  stat: { flexDirection: "row", alignItems: "center", columnGap: 5 },
+  statText: {
+    fontSize: 14,
+    fontWeight: "600",
+    lineHeight: 20,
+    color: colors.text,
+  },
+  favoriteCount: { fontVariant: ["tabular-nums"] },
   infoSection: { marginTop: spacing.space24 },
   mapSection: { marginTop: spacing.space24 },
-  mapDivider: { height: 8, marginHorizontal: -spacing.space16, backgroundColor: '#F5F6F8' },
+  mapDivider: {
+    height: 8,
+    marginHorizontal: -spacing.space16,
+    backgroundColor: "#F5F6F8",
+  },
   mapBottomDivider: { marginTop: spacing.space24 },
-  introductionSection: { marginTop: spacing.space24 },
-  introductionContent: { marginTop: spacing.space24 },
-  benefitCard: { marginTop: spacing.space16 },
-  benefitHeading: { flexDirection: 'row', alignItems: 'center', columnGap: 10 },
-  benefitIcon: { marginTop: 1 },
-  benefitTitle: { flexShrink: 0, fontSize: 14, fontWeight: '600', lineHeight: 20, color: colors.text },
-  benefitPreview: { marginTop: spacing.space8 },
-  introductionText: { fontSize: 14, fontWeight: '400', lineHeight: 22, color: colors.text },
-  introductionAfterBenefit: { marginTop: spacing.space24 },
-  introductionAfterTitle: { marginTop: spacing.space16 },
-  introductionImages: { marginTop: spacing.space20 },
-  reportAction: { alignSelf: 'flex-end', marginTop: spacing.space16 },
-  reportActionText: { fontSize: 13, fontWeight: '600', color: colors.secondaryText },
-  officialContent: { marginTop: spacing.space24, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  descriptionSection: { marginTop: spacing.space24 },
+  descriptionContent: { marginTop: spacing.space24 },
+  benefitTitle: {
+    flexShrink: 0,
+    fontSize: 14,
+    fontWeight: "600",
+    lineHeight: 20,
+    color: colors.text,
+  },
+  descriptionText: {
+    fontSize: 14,
+    fontWeight: "400",
+    lineHeight: 22,
+    color: colors.text,
+  },
+  descriptionAfterBenefit: { marginTop: spacing.space24 },
+  descriptionAfterTitle: { marginTop: spacing.space16 },
+  descriptionImages: { marginTop: spacing.space20 },
+  highlights: { gap: spacing.space24 },
+  highlightHeading: {
+    flexDirection: "row",
+    alignItems: "center",
+    columnGap: spacing.space6,
+  },
+  highlightTitle: { flex: 1, flexShrink: 1 },
+  highlightEmoji: { fontSize: 16 },
+  highlightText: { marginTop: spacing.space8 },
+  reportAction: { alignSelf: "flex-end", marginTop: spacing.space16 },
+  reportActionText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: colors.secondaryText,
+  },
+  officialContent: {
+    marginTop: spacing.space24,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
   socialScroller: { flexShrink: 1, marginLeft: spacing.space12 },
-  socialButtons: { flexGrow: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', columnGap: spacing.space12 },
-  socialButton: { width: 44, height: 44, borderRadius: radius.full, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
+  socialButtons: {
+    flexGrow: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    columnGap: spacing.space12,
+  },
+  socialButton: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.full,
+    backgroundColor: colors.surface,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   mapFrame: { marginTop: spacing.space24 },
   mapPreview: { marginTop: spacing.space12 },
-  directionsButton: { width: '100%', height: 48, marginTop: spacing.space12, paddingHorizontal: spacing.space16, borderWidth: 1, borderColor: colors.border, borderRadius: radius.radius12, backgroundColor: colors.background, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', columnGap: spacing.space6 },
-  directionsText: { fontSize: 15, fontWeight: '600', color: colors.text },
-  sectionTitle: { fontSize: 18, fontWeight: '700', lineHeight: 26, color: colors.text },
-  noticeCard: { minHeight: 72, paddingVertical: 14, paddingHorizontal: spacing.space16, borderRadius: radius.radius12, backgroundColor: '#F7F8FA' },
-  noticeHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', columnGap: spacing.space8 },
-  noticeTitle: { flex: 1, fontSize: 14, fontWeight: '600', lineHeight: 20, color: colors.text },
-  noticePreview: { marginTop: spacing.space6, fontSize: 13, lineHeight: 19, color: colors.secondaryText },
-  infoRows: { flexDirection: 'column', gap: spacing.space4 },
-  infoRow: { minHeight: 32, flexDirection: 'row', alignItems: 'center' },
-  infoRowTop: { alignItems: 'flex-start' },
-  rowIcon: { width: 20, marginRight: spacing.space8, alignItems: 'flex-end' },
+  directionsButton: {
+    width: "100%",
+    height: 48,
+    marginTop: spacing.space12,
+    paddingHorizontal: spacing.space16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.radius12,
+    backgroundColor: colors.background,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    columnGap: spacing.space6,
+  },
+  directionsText: { fontSize: 15, fontWeight: "600", color: colors.text },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    lineHeight: 26,
+    color: colors.text,
+  },
+  infoRows: { flexDirection: "column", gap: spacing.space12 },
+  infoRow: { minHeight: 20, flexDirection: "row", alignItems: "center" },
+  infoRowTop: { alignItems: "flex-start" },
+  rowIcon: {
+    width: 20,
+    flexShrink: 0,
+    marginRight: spacing.space8,
+    alignItems: "flex-end",
+  },
   rowIconTop: { paddingTop: 1 },
-  rowLabel: { width: 78, fontSize: 14, fontWeight: '500', lineHeight: 20, color: colors.secondaryText },
+  rowLabel: {
+    width: 78,
+    flexShrink: 0,
+    fontSize: 14,
+    fontWeight: "500",
+    lineHeight: 20,
+    color: colors.secondaryText,
+  },
   rowValue: { flex: 1, minWidth: 0 },
-  valueText: { fontSize: 14, fontWeight: '500', lineHeight: 20, color: colors.text },
-  reservationContent: { flexDirection: 'row', alignItems: 'center', columnGap: spacing.space6 },
-  reservationText: { flex: 1 },
-  placeContent: { flexDirection: 'row', alignItems: 'flex-start', minWidth: 0 },
-  placeAddress: { flex: 1, minWidth: 0 },
-  copyButton: { width: 36, height: 36, flexShrink: 0, marginLeft: spacing.space6, alignItems: 'center', justifyContent: 'center' },
-  emptyBack: { width: 48, height: 48, marginLeft: spacing.space8, alignItems: 'center', justifyContent: 'center' },
-  empty: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  valueText: {
+    fontSize: 14,
+    fontWeight: "500",
+    lineHeight: 20,
+    color: colors.text,
+  },
+  infoValueText: { textAlign: "right" },
+  reservationLabel: { width: 40 },
+  reservationCard: {
+    minHeight: 48,
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: colors.primary,
+    borderRadius: radius.radius12,
+    backgroundColor: "#F0FDF4",
+    paddingVertical: spacing.space4,
+    paddingHorizontal: spacing.space12,
+  },
+  reservationContent: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    flexWrap: "wrap",
+    alignItems: "center",
+    columnGap: spacing.space8,
+    rowGap: spacing.space4,
+  },
+  reservationText: { flexGrow: 1, flexShrink: 1, flexBasis: 88, minWidth: 0 },
+  reservationTimes: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: colors.secondaryText,
+    textAlign: "center",
+  },
+  reservationAction: {
+    flexDirection: "row",
+    alignItems: "center",
+    columnGap: spacing.space4,
+    flexShrink: 0,
+  },
+  reservationActionText: {
+    fontSize: 14,
+    fontWeight: "600",
+    lineHeight: 20,
+    color: colors.primaryDark,
+  },
+  placeDetails: { gap: spacing.space4 },
+  emptyBack: {
+    width: 48,
+    height: 48,
+    marginLeft: spacing.space8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  empty: { flex: 1, alignItems: "center", justifyContent: "center" },
 });

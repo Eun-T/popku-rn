@@ -38,12 +38,6 @@ export const quickFilters = [
     labelKey: "place.filters.quick.benefit",
     group: "quickFeatures",
   },
-  {
-    id: "newOpen",
-    label: "신규오픈",
-    labelKey: "place.filters.quick.newOpen",
-    group: "quickFeatures",
-  },
 ] as const;
 
 export const eventTypeFilters = [
@@ -212,10 +206,10 @@ export const regionFilters = [
 export const interestFilters = [
   {
     id: "animeCharacter",
-    label: "애니·캐릭터",
+    label: "캐릭터/IP",
     labelKey: "place.filters.interests.animeCharacter",
   },
-  { id: "game", label: "게임", labelKey: "place.filters.interests.game" },
+  { id: "game", label: "게임/디지털", labelKey: "place.filters.interests.game" },
   { id: "fashion", label: "패션", labelKey: "place.filters.interests.fashion" },
   { id: "beauty", label: "뷰티", labelKey: "place.filters.interests.beauty" },
   {
@@ -225,12 +219,12 @@ export const interestFilters = [
   },
   {
     id: "exhibitionArt",
-    label: "전시·아트",
+    label: "아트/전시",
     labelKey: "place.filters.interests.exhibitionArt",
   },
   {
     id: "lifestyle",
-    label: "라이프스타일",
+    label: "라이프",
     labelKey: "place.filters.interests.lifestyle",
   },
 ] as const;
@@ -280,3 +274,13 @@ export const createEmptyPlaceFilters = (): PlaceFilterState => ({
   interests: [],
   operationStatuses: [],
 });
+
+export const visitPeriodOptions = [
+  { id: 'all', labelKey: 'place.all.period.all' },
+  { id: 'today', labelKey: 'place.all.period.today' },
+  { id: 'week', labelKey: 'place.all.period.week' },
+  { id: 'weekend', labelKey: 'place.all.period.weekend' },
+  { id: 'custom', labelKey: 'place.all.period.custom' },
+] as const;
+
+export type VisitPeriod = Exclude<(typeof visitPeriodOptions)[number]['id'], 'custom'>;

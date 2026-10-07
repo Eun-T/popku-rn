@@ -1,4 +1,9 @@
+import type { VisitPeriod } from '../constants/placeFilters';
 import { API_BASE_URL } from '../constants/api';
+import { getLocale, type Locale } from '../locales';
+
+export type PopupHighlightType = 'SPECIAL' | 'GOODS' | 'PRODUCTS' | 'VIEW' | 'EXPERIENCE' | 'FOOD' | 'SPACE' | 'HIGHLIGHT';
+export type PopupHighlight = { type: PopupHighlightType; text: string };
 
 export type PublicPopup = {
   publicId: string;
@@ -6,14 +11,44 @@ export type PublicPopup = {
   countryCode: string;
   regionId: number | null;
   regionName: string | null;
+  latitude: number | null;
+  longitude: number | null;
   startDate: string;
   endDate: string;
   coverImageUrl: string | null;
+  coverImageCacheKey?: string | null;
+  /** Client-only timestamp: start of the request that delivered this cover URL. */
+  coverImageFetchedAt?: number;
   tags: { id: number; name: string }[];
+};
+
+export type PopupMapMarker = {
+  id: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  primaryTag: string | null;
+  coverImageUrl: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  tags: { id: number; name: string }[];
+};
+
+export type PopupSearchResult = {
+  id: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  address: string;
+  regionName: string | null;
 };
 
 export type PublicPopupDetail = {
   publicId: string;
+  favoriteCount: number;
+  isFavorited: boolean;
+  averageRating?: number | null;
+  reviewCount?: number | null;
   name: string;
   countryCode: 'KR' | 'JP';
   regionId: number | null;
@@ -30,15 +65,18 @@ export type PublicPopupDetail = {
   reservationUrl: string | null;
   notice: string | null;
   benefits: string | null;
-  introduction: string | null;
+  summary: string | null;
+  highlights: PopupHighlight[] | null;
   tags: { id: number; name: string }[];
   coverImageUrl: string | null;
   contentImageUrls: string[];
+  coverImageCacheKey?: string | null;
   socialLinks: unknown | null;
 };
 
 export type PopupStatus = 'ONGOING' | 'UPCOMING' | 'ENDED';
 export type PopupListFilters = {
+  visitPeriod?: VisitPeriod;
   regionIds?: readonly number[];
   tagIds?: readonly number[];
   status?: PopupStatus;
@@ -80,6 +118,28 @@ async function requestPopupList(query: string, signal: AbortSignal): Promise<Pub
   return body.popups as PublicPopup[];
 }
 
+export async function getPopupMap(signal: AbortSignal): Promise<PopupMapMarker[]> {
+  const response = await fetch(`${API_BASE_URL}/api/popups/map`, { signal });
+  if (!response.ok) throw new Error('Popup map request failed');
+
+  const body: unknown = await response.json();
+  if (!body || typeof body !== 'object' || !('popups' in body) || !Array.isArray(body.popups)) {
+    throw new Error('Invalid popup map response');
+  }
+  return body.popups as PopupMapMarker[];
+}
+
+export async function searchPopups(query: string, signal: AbortSignal): Promise<PopupSearchResult[]> {
+  const response = await fetch(`${API_BASE_URL}/api/popups/search?q=${encodeURIComponent(query)}&limit=10`, { signal });
+  if (!response.ok) throw new Error('Popup search request failed');
+
+  const body: unknown = await response.json();
+  if (!body || typeof body !== 'object' || !('popups' in body) || !Array.isArray(body.popups)) {
+    throw new Error('Invalid popup search response');
+  }
+  return body.popups as PopupSearchResult[];
+}
+
 export function getPopups(
   countryCode: 'KR' | 'JP' | undefined,
   signal: AbortSignal,
@@ -90,7 +150,35 @@ export function getPopups(
   if (filters.regionIds?.length) parameters.push(`regionIds=${filters.regionIds.join(',')}`);
   if (filters.tagIds?.length) parameters.push(`tagIds=${filters.tagIds.join(',')}`);
   if (filters.status) parameters.push(`status=${filters.status}`);
+  if (filters.visitPeriod && filters.visitPeriod !== 'all') parameters.push(`visitPeriod=${filters.visitPeriod}`);
   return requestPopupList(parameters.length ? `?${parameters.join('&')}` : '', signal);
+}
+
+export type PopupPage = { popups: PublicPopup[]; nextCursor: string | null };
+
+export async function getPopupPage(countryCode: 'KR' | 'JP' | undefined, signal: AbortSignal,
+  filters: PopupListFilters = {}, cursor: string | null = null): Promise<PopupPage> {
+  const parameters = ['limit=10'];
+  if (countryCode) parameters.push(`countryCode=${countryCode}`);
+  if (filters.regionIds?.length) parameters.push(`regionIds=${filters.regionIds.join(',')}`);
+  if (filters.tagIds?.length) parameters.push(`tagIds=${filters.tagIds.join(',')}`);
+  if (filters.status) parameters.push(`status=${filters.status}`);
+  if (filters.visitPeriod && filters.visitPeriod !== 'all') parameters.push(`visitPeriod=${filters.visitPeriod}`);
+  if (cursor) parameters.push(`cursor=${encodeURIComponent(cursor)}`);
+  const response = await fetch(`${API_BASE_URL}/api/popups?${parameters.join('&')}`, { signal });
+  if (!response.ok) throw new Error('Popup page request failed');
+  const body: unknown = await response.json();
+  if (!body || typeof body !== 'object' || !('popups' in body) || !Array.isArray(body.popups)
+    || !('nextCursor' in body) || (body.nextCursor !== null && typeof body.nextCursor !== 'string')) {
+    throw new Error('Invalid popup page response');
+  }
+  return body as PopupPage;
+}
+
+export function getWeeklyPopups(countryCode: 'KR' | 'JP' | undefined, weekStart: string,
+  weekEnd: string, signal: AbortSignal): Promise<PublicPopup[]> {
+  const country = countryCode ? `&countryCode=${countryCode}` : '';
+  return requestPopupList(`?weekStart=${weekStart}&weekEnd=${weekEnd}${country}`, signal);
 }
 
 export function getEndingSoonPopups(countryCode: 'KR' | 'JP' | undefined, signal: AbortSignal): Promise<PublicPopup[]> {
@@ -98,8 +186,12 @@ export function getEndingSoonPopups(countryCode: 'KR' | 'JP' | undefined, signal
   return requestPopupList(`?endingSoon=true${country}`, signal);
 }
 
-export async function getPopupDetail(publicId: string, signal: AbortSignal): Promise<PublicPopupDetail> {
-  const response = await fetch(`${API_BASE_URL}/api/popups/${encodeURIComponent(publicId)}`, { signal });
+export async function getPopupDetail(publicId: string, signal: AbortSignal, accessToken?: string, languageCode: Locale = getLocale()): Promise<PublicPopupDetail> {
+  const response = await fetch(`${API_BASE_URL}/api/popups/${encodeURIComponent(publicId)}?languageCode=${encodeURIComponent(languageCode)}`, {
+    signal,
+    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+  });
+  if (response.status === 401) throw new PopupDetailUnauthorizedError();
   if (!response.ok) throw new Error('Popup detail request failed');
 
   const body: unknown = await response.json();
@@ -107,6 +199,10 @@ export async function getPopupDetail(publicId: string, signal: AbortSignal): Pro
     throw new Error('Invalid popup detail response');
   }
   return body as PublicPopupDetail;
+}
+
+export class PopupDetailUnauthorizedError extends Error {
+  constructor() { super('Popup detail token expired'); }
 }
 
 export async function getNewPopups(countryCode: 'KR' | 'JP', signal: AbortSignal): Promise<PublicPopup[]> {

@@ -62,8 +62,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   selectedFilter: {
-    borderColor: colors.primary,
-    backgroundColor: colors.primary,
+    borderColor: colors.text,
+    backgroundColor: colors.text,
   },
   filterText: {
     ...typography.label,

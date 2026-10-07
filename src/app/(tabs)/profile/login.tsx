@@ -46,7 +46,7 @@ export default function Login() {
       setAuthUser(currentUser);
       if (__DEV__) console.info('[AUTH] user state updated');
       step = 'navigation';
-      router.replace('/(tabs)/index');
+      router.replace('/(tabs)');
     } catch (cause) {
       if (__DEV__) console.info('[AUTH] login failed at:', step, cause instanceof Error ? cause.message : 'unknown error');
       if (tokensSaved) {
@@ -82,7 +82,7 @@ export default function Login() {
       tokensSaved = true;
       const currentUser = await getCurrentUser(result.tokens.accessToken);
       setAuthUser(currentUser);
-      router.replace('/(tabs)/index');
+      router.replace('/(tabs)');
     } catch (cause) {
       if (__DEV__) {
         const code = cause instanceof GoogleAuthApiError

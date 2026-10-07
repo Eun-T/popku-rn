@@ -9,7 +9,10 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/expo.icon",
-      "bundleIdentifier": "com.popku.app"
+      "bundleIdentifier": "com.popku.app",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "현재 위치 주변의 팝업을 찾기 위해 위치 정보가 필요합니다."
+      }
     },
     "android": {
       "package": "com.popku.app",
@@ -43,6 +46,14 @@
         }
       ],
       "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "게시글에 사진을 첨부하기 위해 사진 라이브러리 접근이 필요합니다.",
+          "cameraPermission": false,
+          "microphonePermission": false
+        }
+      ],
       [
         "expo-build-properties",
         {

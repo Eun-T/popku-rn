@@ -1,5 +1,5 @@
+import { Image } from "expo-image";
 import {
-  Image,
   Pressable,
   StyleSheet,
   Text,
@@ -54,7 +54,7 @@ export default function PlaceInterestSection({
             (interest) => interest.id === card.id,
           );
           const label =
-            card.id === "game" ? "게임·디지털" : t(filter?.labelKey ?? card.id);
+            card.id === "game" ? "게임/디지털" : t(filter?.labelKey ?? card.id);
 
           return (
             <Pressable
@@ -66,7 +66,8 @@ export default function PlaceInterestSection({
             >
               <Image
                 source={card.image}
-                resizeMode="cover"
+                contentFit="cover"
+                cachePolicy="memory-disk"
                 style={styles.image}
               />
               <View pointerEvents="none" style={styles.overlay} />

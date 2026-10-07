@@ -10,6 +10,7 @@ type PopupRankingCardProps = {
   period: string;
   tags: readonly string[];
   isFavorite: boolean;
+  isFavoriteDisabled: boolean;
   onToggleFavorite: () => void;
   onPress: () => void;
 };
@@ -21,6 +22,7 @@ export default function PopupRankingCard({
   period,
   tags,
   isFavorite,
+  isFavoriteDisabled,
   onToggleFavorite,
   onPress,
 }: PopupRankingCardProps) {
@@ -52,7 +54,8 @@ export default function PopupRankingCard({
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={isFavorite ? `${title} 찜 취소` : `${title} 찜하기`}
-        accessibilityState={{ selected: isFavorite }}
+        accessibilityState={{ selected: isFavorite, disabled: isFavoriteDisabled }}
+        disabled={isFavoriteDisabled}
         onPress={onToggleFavorite}
         style={styles.favoriteButton}
       >

@@ -39,11 +39,11 @@ export default function PopupDetailSkeleton({ width, heroControls, tabs }: Popup
             </View>
           ))}
         </View>
-        <View style={styles.introductionSection}>
+        <View style={styles.descriptionSection}>
           <View style={styles.divider} />
           <SkeletonBlock width={100} height={26} style={styles.sectionTitle} />
-          <SkeletonBlock width="100%" height={22} style={styles.introductionLine} />
-          <SkeletonBlock width="65%" height={22} style={styles.introductionLine} />
+          <SkeletonBlock width="100%" height={22} style={styles.summaryLine} />
+          <SkeletonBlock width="65%" height={22} style={styles.summaryLine} />
         </View>
       </View>
     </>
@@ -59,8 +59,8 @@ const styles = StyleSheet.create({
   infoSection: { marginTop: spacing.space24 },
   infoRow: { minHeight: 32, flexDirection: 'row', alignItems: 'center', columnGap: spacing.space8 },
   nextInfoRow: { marginTop: spacing.space4 },
-  introductionSection: { marginTop: spacing.space24 },
+  descriptionSection: { marginTop: spacing.space24 },
   divider: { height: 8, marginHorizontal: -spacing.space16, backgroundColor: '#F5F6F8' },
   sectionTitle: { marginTop: spacing.space24 },
-  introductionLine: { marginTop: spacing.space16 },
+  summaryLine: { marginTop: spacing.space16 },
 });

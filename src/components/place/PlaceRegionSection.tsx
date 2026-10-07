@@ -1,5 +1,6 @@
-import { useRef, useState } from 'react';
-import { FlatList, Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Image } from 'expo-image';
+import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { regionFilters } from '../../constants/placeFilters';
 import { placeRegionSectionTitleKey, type PlaceRegionCardItem, type PlaceRegionPage } from '../../constants/placeRegionMocks';
@@ -10,6 +11,7 @@ type PlaceRegionSectionProps = {
   pages: readonly PlaceRegionPage[];
   width: number;
   onPress: (item: PlaceRegionCardItem) => void;
+  isActive?: boolean;
 };
 
 const CARD_GAP = 6;
@@ -19,7 +21,7 @@ const DESCRIPTION_HEIGHT = 20;
 const DESCRIPTION_BOTTOM_GAP = 16;
 const regionLabelKeys = new Map(regionFilters.map((region) => [region.id, region.labelKey] as const));
 
-export default function PlaceRegionSection({ pages, width, onPress }: PlaceRegionSectionProps) {
+export default function PlaceRegionSection({ pages, width, onPress, isActive = true }: PlaceRegionSectionProps) {
   const listRef = useRef<FlatList<PlaceRegionPage>>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const activeIndexRef = useRef(0);
@@ -29,6 +31,13 @@ export default function PlaceRegionSection({ pages, width, onPress }: PlaceRegio
   // Preserve the existing card width while changing only the gaps.
   const cardWidth = (pageWidth - 10) / 2;
   const pageHeight = DESCRIPTION_HEIGHT + DESCRIPTION_BOTTOM_GAP + (cardWidth / CARD_ASPECT_RATIO) * 2 + CARD_GAP;
+
+  useEffect(() => {
+    if (!isActive) return;
+    // Restore the offset after hiding or resizing, without replacing the list.
+    buttonTargetRef.current = activeIndexRef.current;
+    listRef.current?.scrollToOffset({ offset: activeIndexRef.current * pageStride, animated: false });
+  }, [isActive, pageStride]);
 
   if (pages.length === 0 || cardWidth <= 0) return null;
 
@@ -52,13 +61,16 @@ export default function PlaceRegionSection({ pages, width, onPress }: PlaceRegio
         style={styles.viewport}
         onLayout={(event) => {
           const measuredWidth = event.nativeEvent.layout.width;
-          if (measuredWidth > 0 && measuredWidth !== pageWidth) {
+          if (!isActive || measuredWidth <= 0) return;
+          if (measuredWidth !== pageWidth) {
             setPageWidth(measuredWidth);
+          } else {
+            buttonTargetRef.current = activeIndexRef.current;
+            listRef.current?.scrollToOffset({ offset: activeIndexRef.current * pageStride, animated: false });
           }
         }}
       >
         <FlatList
-          key={pageWidth}
           ref={listRef}
           data={pages}
           keyExtractor={(page) => page.id}
@@ -70,12 +82,15 @@ export default function PlaceRegionSection({ pages, width, onPress }: PlaceRegio
           overScrollMode="never"
           scrollEnabled={pages.length > 1}
           showsHorizontalScrollIndicator={false}
-          initialScrollIndex={activeIndex}
+          // Keep both local-asset pages rendered when Explore has zero layout size.
+          initialNumToRender={pages.length}
+          removeClippedSubviews={false}
           ItemSeparatorComponent={() => <View style={styles.pageGap} />}
           getItemLayout={(_, index) => ({ length: pageWidth, offset: pageStride * index, index })}
           scrollEventThrottle={16}
-          onScrollBeginDrag={() => { buttonTargetRef.current = null; }}
+          onScrollBeginDrag={() => { if (isActive) buttonTargetRef.current = null; }}
           onScroll={(event) => {
+            if (!isActive) return;
             const offset = event.nativeEvent.contentOffset.x;
             if (buttonTargetRef.current !== null) {
               if (Math.abs(offset - buttonTargetRef.current * pageStride) < 1) buttonTargetRef.current = null;
@@ -84,8 +99,11 @@ export default function PlaceRegionSection({ pages, width, onPress }: PlaceRegio
             updateActiveIndex(clampIndex(Math.round(offset / pageStride)));
           }}
           onMomentumScrollEnd={(event) => {
+            if (!isActive) return;
+            const offset = event.nativeEvent.contentOffset.x;
+            if (buttonTargetRef.current !== null && Math.abs(offset - buttonTargetRef.current * pageStride) >= 1) return;
             buttonTargetRef.current = null;
-            updateActiveIndex(clampIndex(Math.round(event.nativeEvent.contentOffset.x / pageStride)));
+            updateActiveIndex(clampIndex(Math.round(offset / pageStride)));
           }}
           style={{ width: pageWidth, height: pageHeight }}
           renderItem={({ item: page }) => (
@@ -102,7 +120,7 @@ export default function PlaceRegionSection({ pages, width, onPress }: PlaceRegio
                     onPress={() => onPress(item)}
                     style={[styles.card, { width: cardWidth }]}
                   >
-                    <Image source={item.image} resizeMode="cover" style={styles.image} />
+                    <Image source={item.image} contentFit="cover" cachePolicy="memory-disk" style={styles.image} />
                     <View pointerEvents="none" style={styles.overlay} />
                     <Text numberOfLines={1} style={styles.label}>
                       {t(regionLabelKeys.get(item.id) ?? item.id)}

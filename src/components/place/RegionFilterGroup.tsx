@@ -1,17 +1,16 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react-native';
 import { Pressable, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
 
-import { regionFilters, type RegionId } from '../../constants/placeFilters';
 import { t } from '../../locales';
 import { colors, radius, spacing, typography } from '../../theme/tokens';
 
-type RegionOption = (typeof regionFilters)[number];
+type RegionOption = { id: number; name: string };
 
 type RegionFilterGroupProps = {
   options: readonly RegionOption[];
-  selected: readonly RegionId[];
-  onToggle: (id: RegionId) => void;
+  selected: readonly number[];
+  onToggle: (id: number) => void;
 };
 
 function getRowCount(widths: readonly number[], availableWidth: number): number {
@@ -60,6 +59,12 @@ export default function RegionFilterGroup({ options, selected, onToggle }: Regio
 
   const hiddenCount = options.length - visibleCount;
   const visibleOptions = expanded ? options : options.slice(0, visibleCount);
+  const hiddenSelectedKey = options.slice(visibleCount)
+    .filter((option) => selected.includes(option.id)).map((option) => option.id).join(',');
+
+  useEffect(() => {
+    if (allMeasured && hiddenSelectedKey) setExpanded(true);
+  }, [allMeasured, hiddenSelectedKey]);
 
   return (
     <View
@@ -83,7 +88,7 @@ export default function RegionFilterGroup({ options, selected, onToggle }: Regio
                 : { ...current, [option.id]: width });
             }}
           >
-            <Text numberOfLines={1} style={styles.chipText}>{t(option.labelKey)}</Text>
+            <Text numberOfLines={1} style={styles.chipText}>{option.name}</Text>
           </View>
         ))}
         {options.map((_, index) => {
@@ -119,7 +124,7 @@ export default function RegionFilterGroup({ options, selected, onToggle }: Regio
                 style={[styles.chip, isSelected && styles.selectedChip]}
               >
                 <Text numberOfLines={1} style={[styles.chipText, isSelected && styles.selectedChipText]}>
-                  {t(option.labelKey)}
+                  {option.name}
                 </Text>
               </Pressable>
             );
@@ -178,8 +183,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   selectedChip: {
-    borderColor: colors.primary,
-    backgroundColor: colors.primary,
+    borderColor: colors.text,
+    backgroundColor: colors.text,
   },
   chipText: {
     ...typography.label,

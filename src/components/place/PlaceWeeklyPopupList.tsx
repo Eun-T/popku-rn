@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { Heart } from 'lucide-react-native';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -6,9 +5,11 @@ import type { PublicPopup } from '../../lib/popups';
 import { colors, radius, spacing } from '../../theme/tokens';
 
 type PlaceWeeklyPopupListProps = {
-  selectedWeek: Date;
   popups: readonly PublicPopup[];
   onPressPopup: (popup: PublicPopup) => void;
+  isFavorite: (publicId: string) => boolean;
+  isFavoriteDisabled: (publicId: string) => boolean;
+  onToggleFavorite: (popup: PublicPopup) => void;
 };
 
 const placeholderImage = require('../../../assets/images/ranking-placeholder.png');
@@ -22,25 +23,13 @@ function localDateString(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
-export default function PlaceWeeklyPopupList({ selectedWeek, popups, onPressPopup }: PlaceWeeklyPopupListProps) {
-  const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
-  const weekEnd = new Date(selectedWeek);
-  weekEnd.setDate(weekEnd.getDate() + 6);
-  const weekStartString = localDateString(selectedWeek);
-  const weekEndString = localDateString(weekEnd);
-  const weeklyPopups = popups.filter((popup) => popup.startDate <= weekEndString && popup.endDate >= weekStartString).slice(0, 3);
+export default function PlaceWeeklyPopupList({ popups, onPressPopup, isFavorite, isFavoriteDisabled, onToggleFavorite }: PlaceWeeklyPopupListProps) {
   const todayString = localDateString(new Date());
-
-  const toggleFavorite = (id: string) => {
-    setFavoriteIds((current) => current.includes(id)
-      ? current.filter((favoriteId) => favoriteId !== id)
-      : [...current, id]);
-  };
 
   return (
     <View style={styles.list}>
-      {weeklyPopups.map((popup, index) => {
-        const isFavorite = favoriteIds.includes(popup.publicId);
+      {popups.map((popup, index) => {
+        const favorited = isFavorite(popup.publicId);
         const status = popup.startDate > todayString ? '이번 주 오픈' : popup.endDate < todayString ? '종료' : '운영 중';
 
         return (
@@ -54,15 +43,16 @@ export default function PlaceWeeklyPopupList({ selectedWeek, popups, onPressPopu
                   </Text>
                   <Pressable
                     accessibilityRole="button"
-                    accessibilityLabel={isFavorite ? '찜 해제' : '찜하기'}
-                    accessibilityState={{ selected: isFavorite }}
+                    accessibilityLabel={favorited ? '찜 해제' : '찜하기'}
+                    accessibilityState={{ selected: favorited, disabled: isFavoriteDisabled(popup.publicId) }}
+                    disabled={isFavoriteDisabled(popup.publicId)}
                     onPress={(event) => {
                       event.stopPropagation();
-                      toggleFavorite(popup.publicId);
+                      onToggleFavorite(popup);
                     }}
                     style={styles.favoriteButton}
                   >
-                    <Heart size={20} color={isFavorite ? colors.primary : colors.text} fill={isFavorite ? colors.primary : 'none'} />
+                    <Heart size={18} color={favorited ? colors.primary : colors.text} fill={favorited ? colors.primary : 'none'} style={styles.favoriteIcon} />
                   </Pressable>
                 </View>
                 <View style={styles.statusRow}>
@@ -83,7 +73,7 @@ export default function PlaceWeeklyPopupList({ selectedWeek, popups, onPressPopu
                 </View>
               </View>
             </Pressable>
-            {index < weeklyPopups.length - 1 && (
+            {index < popups.length - 1 && (
               <View style={styles.separator}><View style={styles.divider} /></View>
             )}
           </View>
@@ -108,6 +98,7 @@ const styles = StyleSheet.create({
   tag: { height: 22, flexShrink: 1, justifyContent: 'center', paddingHorizontal: 7, borderRadius: 5, backgroundColor: colors.surface },
   tagText: { fontSize: 11, fontWeight: '500', lineHeight: 16, color: '#4B5563' },
   favoriteButton: { minWidth: 68, height: 36, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', columnGap: spacing.space4 },
+  favoriteIcon: { shadowColor: '#000000', shadowOpacity: 0.25, shadowRadius: 2, shadowOffset: { width: 0, height: 1 }, elevation: 2 },
   separator: { height: 10, justifyContent: 'center' },
   divider: { height: 1, backgroundColor: colors.border, opacity: 0.55 },
 });

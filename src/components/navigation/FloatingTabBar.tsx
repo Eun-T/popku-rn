@@ -339,7 +339,7 @@ export default function FloatingTabBar({
     activeRoute?.name,
   ]);
 
-  if (pathname === "/profile/login" || pathname === "/profile/signup")
+  if (pathname === "/profile/login" || pathname === "/profile/signup" || pathname === "/profile/favorites")
     return null;
 
   return (

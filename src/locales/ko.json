@@ -5,6 +5,39 @@
   },
   "place": {
     "title": "플레이스",
+    "detail": {
+      "about": "팝업 소개",
+      "benefits": "혜택",
+      "notice": "공지사항",
+      "officialChannels": "공식 채널",
+      "website": "공식 홈페이지",
+      "officialChannelLink": "{channel} 공식 채널",
+      "channelOpenError": "링크를 열지 못했어요. 잠시 후 다시 시도해 주세요.",
+      "basicInfo": {
+        "period": "기간",
+        "time": "시간",
+        "place": "장소",
+        "reservation": "예약",
+        "reservationNone": "사전예약 없음",
+        "reservationAvailable": "사전예약 가능",
+        "reserve": "예약하기",
+        "reservationStart": "{date} 오픈",
+        "reservationEnd": "{date} 마감",
+        "copyAddress": "주소 복사",
+        "pending": "정보 준비 중",
+        "addressPending": "주소 정보 준비 중"
+      },
+      "highlights": {
+        "SPECIAL": "뭐가 특별해요?",
+        "GOODS": "어떤 굿즈가 있어요?",
+        "PRODUCTS": "무엇을 만나볼 수 있어요?",
+        "VIEW": "무엇을 볼 수 있어요?",
+        "EXPERIENCE": "무엇을 체험할 수 있어요?",
+        "FOOD": "무엇을 맛볼 수 있어요?",
+        "SPACE": "어떤 공간이에요?",
+        "HIGHLIGHT": "놓치면 아쉬운 건?"
+      }
+    },
     "explore": {
       "todayOpening": "오늘 새로 열어요!",
       "regions": "어디로 놀러 갈까!",
@@ -51,8 +84,7 @@
       },
       "quick": {
         "preReservation": "사전예약",
-        "benefit": "혜택",
-        "newOpen": "신규오픈"
+        "benefit": "혜택"
       },
       "eventTypes": {
         "_label": "행사 유형",
@@ -90,13 +122,13 @@
       },
       "interests": {
         "_label": "관심 분야",
-        "animeCharacter": "애니·캐릭터",
-        "game": "게임",
+        "animeCharacter": "캐릭터/IP",
+        "game": "게임/디지털",
         "fashion": "패션",
         "beauty": "뷰티",
         "foodBeverage": "F&B",
-        "exhibitionArt": "전시·아트",
-        "lifestyle": "라이프스타일"
+        "exhibitionArt": "아트/전시",
+        "lifestyle": "라이프"
       },
       "operationStatuses": {
         "_label": "운영 상태",
@@ -119,15 +151,54 @@
     "title": "지도"
   },
   "community": {
+    "postMenu": "게시글 메뉴",
+    "cancel": "취소",
+    "edit": {
+      "title": "게시글 수정",
+      "action": "수정하기",
+      "save": "수정 완료",
+      "failed": "게시글을 수정하지 못했어요. 잠시 후 다시 시도해 주세요.",
+      "loadFailed": "수정할 게시글을 불러오지 못했어요. 눌러서 다시 시도해 주세요.",
+      "confirmRetry": "수정 완료 여부를 확인하지 못했어요. 수정 완료를 다시 누르면 같은 요청으로 확인합니다."
+    },
+    "delete": {
+      "action": "삭제하기",
+      "title": "게시글을 삭제할까요?",
+      "message": "삭제한 게시글은 되돌릴 수 없습니다.",
+      "confirm": "삭제",
+      "failed": "게시글을 삭제하지 못했어요. 잠시 후 다시 시도해 주세요."
+    },
+    "detail": {
+      "title": "게시글",
+      "missing": "게시글을 찾을 수 없어요.",
+      "failed": "게시글을 불러오지 못했어요.",
+      "retry": "다시 시도",
+      "image": "{index}번째 게시글 이미지"
+    },
     "title": "커뮤니티",
     "settings": "설정",
     "write": "글쓰기",
+    "writeBack": "뒤로가기",
+    "register": "등록하기",
+    "registering": "등록 중",
+    "writeFailed": "게시글 등록에 실패했어요. 잠시 후 다시 시도해 주세요.",
+    "writeContent": "본문",
+    "writePlaceholder": "내용을 입력해 주세요.",
+    "attachImage": "이미지 첨부",
+    "removeImage": "{index}번째 이미지 삭제",
+    "imageConfirmRetry": "등록 완료 여부를 확인하지 못했어요. 등록을 다시 누르면 같은 요청을 확인하며 중복 작성하지 않습니다.",
+    "imageError": {
+      "permission": "사진 접근 권한이 필요해요. 설정에서 사진 접근을 허용해 주세요.",
+      "limit": "이미지는 최대 5장까지 첨부할 수 있어요.",
+      "conversion": "이미지를 준비하지 못했어요. 다른 사진을 선택하거나 다시 시도해 주세요."
+    },
     "views": "조회 {count}",
     "category": {
       "all": "전체",
       "review": "방문 후기",
       "info": "현장 정보",
-      "question": "질문"
+      "question": "질문",
+      "free": "자유"
     },
     "sort": {
       "latest": "최신순",

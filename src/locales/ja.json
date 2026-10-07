@@ -5,6 +5,39 @@
   },
   "place": {
     "title": "",
+    "detail": {
+      "about": "ポップアップ紹介",
+      "benefits": "特典",
+      "notice": "お知らせ",
+      "officialChannels": "公式チャンネル",
+      "website": "公式サイト",
+      "officialChannelLink": "{channel}の公式チャンネル",
+      "channelOpenError": "リンクを開けませんでした。しばらくしてからもう一度お試しください。",
+      "basicInfo": {
+        "period": "期間",
+        "time": "時間",
+        "place": "場所",
+        "reservation": "予約",
+        "reservationNone": "事前予約なし",
+        "reservationAvailable": "事前予約可能",
+        "reserve": "予約する",
+        "reservationStart": "{date} 受付開始",
+        "reservationEnd": "{date} 受付終了",
+        "copyAddress": "住所をコピー",
+        "pending": "情報準備中",
+        "addressPending": "住所情報準備中"
+      },
+      "highlights": {
+        "SPECIAL": "ここが特別！",
+        "GOODS": "どんなグッズがある？",
+        "PRODUCTS": "何が見つかる？",
+        "VIEW": "何が見られる？",
+        "EXPERIENCE": "何が体験できる？",
+        "FOOD": "何が味わえる？",
+        "SPACE": "どんな空間？",
+        "HIGHLIGHT": "ここは見逃せない！"
+      }
+    },
     "explore": {
       "todayOpening": "",
       "regions": "",
@@ -49,8 +82,7 @@
       },
       "quick": {
         "preReservation": "",
-        "benefit": "",
-        "newOpen": ""
+        "benefit": ""
       },
       "eventTypes": {
         "_label": "",
@@ -117,9 +149,47 @@
     "title": ""
   },
   "community": {
+    "postMenu": "投稿メニュー",
+    "cancel": "キャンセル",
+    "edit": {
+      "title": "投稿を編集",
+      "action": "編集する",
+      "save": "編集を保存",
+      "failed": "投稿を編集できませんでした。しばらくしてから再度お試しください。",
+      "loadFailed": "投稿を読み込めませんでした。タップして再試行してください。",
+      "confirmRetry": "編集結果を確認できませんでした。保存をもう一度押すと同じリクエストで確認します。"
+    },
+    "delete": {
+      "action": "削除する",
+      "title": "投稿を削除しますか？",
+      "message": "削除した投稿は元に戻せません。",
+      "confirm": "削除",
+      "failed": "投稿を削除できませんでした。しばらくしてから再度お試しください。"
+    },
+    "detail": {
+      "title": "投稿",
+      "missing": "投稿が見つかりません。",
+      "failed": "投稿を読み込めませんでした。",
+      "retry": "再試行",
+      "image": "{index}枚目の投稿画像"
+    },
     "title": "",
     "settings": "",
     "write": "",
+    "writeBack": "",
+    "register": "",
+    "registering": "",
+    "writeFailed": "",
+    "writeContent": "",
+    "writePlaceholder": "",
+    "attachImage": "",
+    "removeImage": "{index}枚目の画像を削除",
+    "imageConfirmRetry": "投稿の完了を確認できませんでした。もう一度投稿すると、同じリクエストを確認し、重複投稿を防ぎます。",
+    "imageError": {
+      "permission": "写真へのアクセスが必要です。設定で写真へのアクセスを許可してください。",
+      "limit": "画像は最大5枚まで添付できます。",
+      "conversion": "画像を準備できませんでした。別の写真を選ぶか、もう一度お試しください。"
+    },
     "views": "",
     "category": {
       "all": "",

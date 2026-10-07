@@ -1,6 +1,8 @@
 import { useRef, useState } from 'react';
+import { BlurTargetView, BlurView } from 'expo-blur';
+import { Image, type ImageSource } from 'expo-image';
 import { ChevronLeft, ChevronRight } from 'lucide-react-native';
-import { FlatList, Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 
 import type { PublicPopup } from '../../lib/popups';
@@ -21,6 +23,26 @@ const placeholderImage = require('../../../assets/images/ranking-placeholder.png
 
 const CARD_HEIGHT = 280;
 const POSTER_HEIGHT = CARD_HEIGHT * 0.75;
+
+function PosterBackground({ source }: { source: ImageSource | number }) {
+  const blurTarget = useRef<View>(null);
+
+  return (
+    <>
+      <BlurTargetView ref={blurTarget} pointerEvents="none" style={StyleSheet.absoluteFill}>
+        <Image source={source} contentFit="cover" style={StyleSheet.absoluteFill} />
+      </BlurTargetView>
+      <BlurView
+        pointerEvents="none"
+        blurTarget={blurTarget}
+        blurMethod="dimezisBlurView"
+        intensity={35}
+        tint="dark"
+        style={StyleSheet.absoluteFill}
+      />
+    </>
+  );
+}
 
 function formatMonthDay(value: string): string {
   const [, month, day] = value.split('-');
@@ -67,7 +89,8 @@ export default function TodayOpeningCarousel({ items, width, today, loading, err
           }}
           renderItem={({ item }) => (
             <Pressable accessibilityRole="button" onPress={() => onPressPopup(item)} style={[styles.card, { width, backgroundColor: colors.surface }]}>
-              <Image source={item.coverImageUrl ? { uri: item.coverImageUrl } : placeholderImage} resizeMode="contain" style={[styles.poster, { width: posterWidth }]} />
+              <PosterBackground source={item.coverImageUrl ? { uri: item.coverImageUrl } : placeholderImage} />
+              <Image source={item.coverImageUrl ? { uri: item.coverImageUrl } : placeholderImage} contentFit="contain" style={[styles.poster, { width: posterWidth }]} />
               <View pointerEvents="none" style={styles.bottomGradient}>
                 <Svg width="100%" height="100%">
                   <Defs>
@@ -117,7 +140,7 @@ export default function TodayOpeningCarousel({ items, width, today, loading, err
 
 const styles = StyleSheet.create({
   section: {
-    marginTop: spacing.space24,
+    marginTop: spacing.space20,
   },
   heading: {
     ...typography.titleM,

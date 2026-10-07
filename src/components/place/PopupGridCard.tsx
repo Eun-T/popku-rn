@@ -1,96 +1,180 @@
-import { Heart, MapPin } from 'lucide-react-native';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from "@expo/vector-icons";
+import { Image } from "expo-image";
+import { Heart } from "lucide-react-native";
+import {
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+} from "react-native";
 
-import type { PublicPopup } from '../../lib/popups';
-import { t } from '../../locales';
-import { colors, radius, spacing, typography } from '../../theme/tokens';
+import type { PublicPopup } from "../../lib/popups";
+import { usePlaceCoverImage, type RecoverPlaceCover } from "../../hooks/usePlaceCoverImage";
+import { popupOperatingStatus } from "../../lib/popupStatus";
+import { t } from "../../locales";
+import { colors, radius, spacing, typography } from "../../theme/tokens";
 
 type PopupGridCardProps = {
   item: PublicPopup;
   width: number;
   isFavorite: boolean;
-  onToggleFavorite: (id: string) => void;
+  isFavoriteDisabled: boolean;
+  onToggleFavorite: () => void;
   onPress?: (item: PublicPopup) => void;
+  onRecoverCover?: RecoverPlaceCover;
 };
 
-const placeholderImage = require('../../../assets/images/ranking-placeholder.png');
+const placeholderImage = require("../../../assets/images/ranking-placeholder.png");
+const favoriteIconSize = 26;
 
-function toLocalDate(value: string): Date {
-  const [year, month, day] = value.split('-').map(Number);
-  return new Date(year, month - 1, day);
-}
-
-function formatMonthDay(value: string): string {
-  const [, month, day] = value.split('-');
-  return `${month}.${day}`;
+function formatPeriod(startDate: string, endDate: string): string {
+  const [startYear, startMonth, startDay] = startDate.split("-");
+  const [endYear, endMonth, endDay] = endDate.split("-");
+  const start = `${startYear.slice(-2)}.${startMonth}.${startDay}`;
+  const end = `${endYear.slice(-2)}.${endMonth}.${endDay}`;
+  return `${start} ~ ${end}`;
 }
 
 export default function PopupGridCard({
   item,
   width,
   isFavorite,
+  isFavoriteDisabled,
   onToggleFavorite,
   onPress,
+  onRecoverCover,
 }: PopupGridCardProps) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const isUpcoming = today < toLocalDate(item.startDate);
-  const isEnded = today > toLocalDate(item.endDate);
-  const badgeText = isUpcoming
-    ? t('place.all.opensOn', { date: formatMonthDay(item.startDate) })
-    : isEnded
-      ? t('place.all.ended')
-      : t('place.all.endsOn', { date: formatMonthDay(item.endDate) });
+  const status = popupOperatingStatus(item.startDate, item.endDate);
+  const statusText =
+    status === "오픈 예정" ? "오픈예정" : status === "종료" ? "종료됨" : "진행중";
+  const { fontScale } = useWindowDimensions();
+  const cover = usePlaceCoverImage(item, onRecoverCover);
+  const region = item.regionName?.trim() ?? "";
+  // Legacy multi-category rows need an explicit admin decision; never pick the first tag.
+  const category = item.tags.length === 1 ? item.tags[0] : undefined;
 
   return (
     <Pressable
       onPress={onPress ? () => onPress(item) : undefined}
-      accessibilityRole={onPress ? 'button' : undefined}
+      accessibilityRole={onPress ? "button" : undefined}
       style={[styles.card, { width }]}
     >
       <View style={styles.posterArea}>
-        <Image source={item.coverImageUrl ? { uri: item.coverImageUrl } : placeholderImage} resizeMode="cover" style={styles.poster} />
+        <Image
+          source={
+            cover.source ?? (item.coverImageUrl ? null : placeholderImage)
+          }
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          onError={cover.onError}
+          onLoad={cover.onLoad}
+          style={styles.poster}
+        />
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={isFavorite ? t('place.all.removeFavorite') : t('place.all.addFavorite')}
-          accessibilityState={{ selected: isFavorite }}
+          accessibilityLabel={
+            isFavorite
+              ? t("place.all.removeFavorite")
+              : t("place.all.addFavorite")
+          }
+          accessibilityState={{
+            selected: isFavorite,
+            disabled: isFavoriteDisabled,
+          }}
+          disabled={isFavoriteDisabled}
           onPress={(event) => {
             event.stopPropagation();
-            onToggleFavorite(item.publicId);
+            onToggleFavorite();
           }}
           style={styles.favoriteButton}
         >
-          <Heart
-            size={22}
-            color={isFavorite ? colors.primary : colors.text}
-            fill={isFavorite ? colors.primary : 'none'}
-          />
+          <View
+            pointerEvents="none"
+            accessible={false}
+            style={styles.favoriteIcon}
+          >
+            <Heart
+              size={favoriteIconSize}
+              color={isFavorite ? "#FF5A6E" : colors.text}
+              strokeWidth={2}
+              fill="none"
+              style={styles.favoriteIconLayer}
+            />
+            <Heart
+              size={favoriteIconSize}
+              color={isFavorite ? "#FF5A6E" : colors.background}
+              strokeWidth={2}
+              fill={isFavorite ? "#FF5A6E" : colors.secondaryText}
+              style={styles.favoriteIconLayer}
+            />
+          </View>
         </Pressable>
       </View>
 
-      <View style={[styles.badge, isUpcoming ? styles.upcomingBadge : isEnded ? styles.endedBadge : styles.openBadge]}>
-        <Text style={[styles.badgeText, isUpcoming ? styles.upcomingText : isEnded ? styles.endedText : styles.openText]}>
-          {badgeText}
-        </Text>
-      </View>
-
-      <Text numberOfLines={1} ellipsizeMode="tail" style={styles.title}>{item.name}</Text>
-
-      <View style={styles.locationAndTag}>
-        <View style={styles.location}>
-          <MapPin size={14} color={colors.secondaryText} />
-          <Text numberOfLines={1} style={styles.locationText}>{item.regionName}</Text>
-        </View>
-        {item.tags[0] && <View style={styles.tag}>
-          <Text numberOfLines={1} ellipsizeMode="tail" style={styles.tagText}>
-            {item.tags.map((tag) => tag.name).join(', ')}
+      <View
+        style={styles.statusRow}
+      >
+        <View
+          style={[
+            styles.statusBadge,
+            status === "오픈 예정"
+              ? styles.upcomingBadge
+              : status === "종료"
+                ? styles.endedBadge
+                : styles.openBadge,
+          ]}
+        >
+          <Text
+            numberOfLines={1}
+            style={[
+              styles.statusText,
+              status === "오픈 예정"
+                ? styles.upcomingText
+                : status === "종료"
+                  ? styles.endedText
+                  : styles.openText,
+            ]}
+          >
+            {statusText}
           </Text>
-        </View>}
+        </View>
       </View>
 
-      <Text numberOfLines={1} style={styles.period}>
-        {formatMonthDay(item.startDate)} ~ {formatMonthDay(item.endDate)}
+      <Text numberOfLines={1} ellipsizeMode="tail" style={styles.title}>
+        {item.name}
       </Text>
+
+      <Text numberOfLines={1} ellipsizeMode="tail" style={styles.period}>
+        {formatPeriod(item.startDate, item.endDate)}
+      </Text>
+
+      <View
+        style={[
+          styles.metadata,
+          { minHeight: typography.caption.lineHeight * fontScale },
+        ]}
+      >
+        {!!region && (
+          <View style={styles.location}>
+            <Ionicons name="location-sharp" size={16} color={colors.secondaryText} />
+            <Text
+              numberOfLines={1}
+              ellipsizeMode="tail"
+              style={[styles.metadataText, styles.regionText]}
+            >
+              {region}
+            </Text>
+          </View>
+        )}
+        {!!category?.name.trim() && (
+          <View style={styles.tag}>
+            <Text numberOfLines={1} style={[styles.metadataText, styles.categoryText]}>
+              {category.name.trim()}
+            </Text>
+          </View>
+        )}
+      </View>
     </Pressable>
   );
 }
@@ -100,91 +184,124 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   posterArea: {
-    width: '100%',
+    width: "100%",
     aspectRatio: 4 / 5,
   },
   poster: {
-    width: '100%',
-    height: '100%',
+    width: "100%",
+    height: "100%",
     borderRadius: radius.radius8,
   },
   favoriteButton: {
-    position: 'absolute',
+    position: "absolute",
     right: spacing.space8,
     bottom: spacing.space8,
     width: 40,
     height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: radius.full,
-    backgroundColor: 'rgba(255, 255, 255, 0.85)',
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000000",
+    shadowOpacity: 0.25,
+    shadowRadius: 2,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 2,
   },
-  badge: {
-    alignSelf: 'flex-start',
+  favoriteIcon: {
+    width: favoriteIconSize,
+    height: favoriteIconSize,
+  },
+  favoriteIconLayer: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+  },
+  statusRow: {
+    alignSelf: "flex-start",
+    maxWidth: "100%",
+    flexDirection: "row",
+    flexWrap: "nowrap",
+    alignItems: "center",
     marginTop: spacing.space8,
-    paddingHorizontal: spacing.space6,
-    paddingVertical: spacing.space4,
-    borderRadius: radius.radius4,
   },
-  upcomingBadge: {
-    backgroundColor: colors.primaryLight,
+  statusBadge: {
+    flexShrink: 0,
+    alignItems: "center",
+    borderRadius: 5,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
   },
-  openBadge: {
-    backgroundColor: colors.infoLight,
-  },
-  endedBadge: {
-    backgroundColor: colors.surface,
-  },
-  badgeText: {
+  statusText: {
     ...typography.caption,
-    fontWeight: '700',
+    fontWeight: "600",
+    flexShrink: 0,
+    fontSize: 12,
+    lineHeight: 16,
   },
   upcomingText: {
-    color: colors.primaryDark,
+    color: "#1D4ED8",
   },
   openText: {
-    color: colors.infoDark,
+    color: "#15803D",
   },
   endedText: {
-    color: colors.secondaryText,
+    color: "#6B7280",
+  },
+  upcomingBadge: {
+    backgroundColor: "#DBEAFE",
+  },
+  openBadge: {
+    backgroundColor: "#DCFCE7",
+  },
+  endedBadge: {
+    backgroundColor: "#F3F4F6",
   },
   title: {
-    marginTop: spacing.space6,
-    fontSize: 14,
-    fontWeight: '700',
+    marginTop: spacing.space4,
+    fontSize: 16,
+    fontWeight: "700",
     lineHeight: 20,
     color: colors.text,
   },
-  locationAndTag: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    columnGap: spacing.space4,
-    marginTop: spacing.space8,
-    overflow: 'hidden',
+  metadata: {
+    marginTop: spacing.space4,
+    flexDirection: "row",
+    flexWrap: "nowrap",
+    alignItems: "center",
+    columnGap: spacing.space6,
+    overflow: "hidden",
   },
   location: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     columnGap: spacing.space4,
-  },
-  locationText: {
-    ...typography.caption,
-    color: colors.secondaryText,
-  },
-  tag: {
     minWidth: 0,
     flexShrink: 1,
+  },
+  regionText: {
+    minWidth: 0,
+    flexShrink: 1,
+  },
+  tag: {
+    flexShrink: 0,
     paddingHorizontal: spacing.space4,
     borderRadius: radius.radius4,
-    backgroundColor: colors.surface,
+    backgroundColor: "#F3F4F6",
   },
-  tagText: {
+  categoryText: {
+    color: "#4B5563",
+  },
+  metadataText: {
     ...typography.caption,
     color: colors.secondaryText,
   },
   period: {
-    marginTop: spacing.space6,
+    marginTop: 3,
+    minWidth: 0,
+    flexShrink: 1,
     ...typography.caption,
+    fontWeight: "400",
+    fontSize: 13,
+    lineHeight: 20,
     color: colors.secondaryText,
   },
 });

@@ -1,5 +1,7 @@
 import { ScrollView, StyleSheet, View } from 'react-native';
 
+import { usePopupNavigation } from '../hooks/usePopupNavigation';
+
 import HomeBanner from '../components/home/HomeBanner';
 import HomeNewPopupSection from '../components/home/HomeNewPopupSection';
 import HomeQuickMenu from '../components/home/HomeQuickMenu';
@@ -8,15 +10,16 @@ import { FLOATING_TAB_BAR_BOTTOM_GAP, FLOATING_TAB_BAR_HEIGHT } from '../compone
 import { colors, spacing } from '../theme/tokens';
 
 export default function HomeScreen() {
+  const openPopup = usePopupNavigation();
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <HomeBanner />
       <View style={styles.quickMenuSection}>
         <HomeQuickMenu />
       </View>
-      <HomeTrendingSection />
+      <HomeTrendingSection onPressPopup={openPopup} />
       <View style={styles.newPopupSection}>
-        <HomeNewPopupSection />
+        <HomeNewPopupSection onPressPopup={openPopup} />
       </View>
     </ScrollView>
   );

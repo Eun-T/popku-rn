@@ -9,6 +9,7 @@ export const colors = {
   moreButtonBackground: '#F7F8FC',
   text: '#111827',
   secondaryText: '#6B7280',
+  inactiveText: '#9CA3AF',
   inactiveTabText: '#B8BEC8',
   border: '#E5E7EB',
   brandGradient: ['#22C55E', '#86EFAC'],

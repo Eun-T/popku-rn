@@ -5,7 +5,9 @@ import FloatingTabBar from '../../components/navigation/FloatingTabBar';
 export default function TabLayout() {
   return (
     <Tabs
-      tabBar={(props) => <FloatingTabBar {...props} />}
+      tabBar={(props) => props.state.routes[props.state.index]?.name === 'map'
+        ? null
+        : <FloatingTabBar {...props} />}
       screenOptions={{ headerShown: false }}
     >
       <Tabs.Screen name="index" options={{ title: '메인 홈' }} />

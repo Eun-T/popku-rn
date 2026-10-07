@@ -4,6 +4,7 @@ export type SignupRequest = {
   email: string;
   password: string;
   nickname: string;
+  signupProof: string;
   consents: {
     termsOfService: boolean;
     privacyPolicy: boolean;

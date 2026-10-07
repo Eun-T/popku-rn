@@ -46,3 +46,6 @@ example
 .env
 .env.local
 .env.*.local
+
+# Local temporary/debug files
+.tmp/

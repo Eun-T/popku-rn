@@ -91,8 +91,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   selectedChip: {
-    borderColor: colors.primary,
-    backgroundColor: colors.primary,
+    borderColor: colors.text,
+    backgroundColor: colors.text,
   },
   chipText: {
     ...typography.label,

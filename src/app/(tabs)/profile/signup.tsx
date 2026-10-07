@@ -138,6 +138,7 @@ export default function SignUpEmail() {
   const [signupStep, setSignupStep] = useState<SignupStep>(isGoogle ? 'nickname' : 'emailPassword');
   const [email, setEmail] = useState('');
   const [verificationStage, setVerificationStage] = useState<VerificationStage>('email');
+  const [signupProof, setSignupProof] = useState<string | null>(null);
   const [code, setCode] = useState('');
   const [secondsLeft, setSecondsLeft] = useState(VERIFICATION_SECONDS);
   const [resendSecondsLeft, setResendSecondsLeft] = useState(0);
@@ -163,7 +164,7 @@ export default function SignUpEmail() {
   const scrollViewRef = useRef<ScrollView>(null);
   const canReceiveCode = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
   const canVerify = /^\d{6}$/.test(code);
-  const canContinue = verificationStage === 'verified'
+  const canContinue = verificationStage === 'verified' && signupProof !== null
     && isValidPassword(password)
     && passwordConfirmation === password;
   const showPasswordMismatch = confirmationTouched
@@ -184,7 +185,8 @@ export default function SignUpEmail() {
   const canJoin = signupStep === 'terms'
     && signupDraft.nickname !== null
     && signupDraft.termsAccepted
-    && signupDraft.privacyAccepted;
+    && signupDraft.privacyAccepted
+    && (isGoogle || signupProof !== null);
   const remainingTime = String(Math.floor(secondsLeft / 60)).padStart(2, '0') + ':' + String(secondsLeft % 60).padStart(2, '0');
 
   useEffect(() => {
@@ -318,17 +320,28 @@ export default function SignUpEmail() {
         const currentUser = await getCurrentUser(tokens.accessToken);
         setAuthUser(currentUser);
       } else {
+        if (!signupProof) return;
         const request: SignupRequest = {
           email: signupDraft.email,
           password: signupDraft.password,
           nickname: signupDraft.nickname,
           consents,
+          signupProof,
         };
         await registerUser(request);
+        setSignupProof(null);
       }
     } catch (error) {
       if (googleTokensSaved) {
         try { await clearTokens(); } catch { /* Keep the original error visible. */ }
+      }
+      if (!isGoogle && error instanceof SignupApiError && error.status === 403) {
+        setSignupProof(null);
+        setVerificationStage('email');
+        setCode('');
+        setEmailError('이메일 인증을 다시 진행해 주세요.');
+        setSignupStep('emailPassword');
+        return;
       }
       setJoinError(isGoogle ? googleJoinErrorMessage(error) : joinErrorMessage(error));
       return;
@@ -345,7 +358,7 @@ export default function SignUpEmail() {
     Keyboard.dismiss();
     if (isGoogle) {
       clearGoogleSignup();
-      router.replace('/(tabs)/index');
+      router.replace('/(tabs)');
     } else {
       router.dismissTo('/profile/login');
     }
@@ -357,6 +370,7 @@ export default function SignUpEmail() {
     pendingRef.current = false;
     setPending(null);
     setEmail(value);
+    setSignupProof(null);
     setVerificationStage('email');
     setCode('');
     setSecondsLeft(VERIFICATION_SECONDS);
@@ -382,6 +396,7 @@ export default function SignUpEmail() {
     if (!canReceiveCode) return;
     const version = beginRequest('send');
     if (version === null) return;
+    setSignupProof(null);
     const targetEmail = email.trim();
     setEmailError('');
     try {
@@ -409,6 +424,7 @@ export default function SignUpEmail() {
     if (verificationStage !== 'code' || resendSecondsLeft > 0) return;
     const version = beginRequest('resend');
     if (version === null) return;
+    setSignupProof(null);
     setCodeError('');
     try {
       await sendEmailVerification(email.trim());
@@ -427,10 +443,12 @@ export default function SignUpEmail() {
     if (verificationStage !== 'code' || !canVerify) return;
     const version = beginRequest('verify');
     if (version === null) return;
+    setSignupProof(null);
     setCodeError('');
     try {
-      await verifyEmailCode(email.trim(), code);
+      const proof = await verifyEmailCode(email.trim(), code);
       if (requestVersionRef.current !== version) return;
+      setSignupProof(proof);
       Keyboard.dismiss();
       setVerificationStage('verified');
     } catch (error) {

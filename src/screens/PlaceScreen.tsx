@@ -1,13 +1,16 @@
+import { usePopupNavigation } from '../hooks/usePopupNavigation';
 import { useEffect, useRef, useState } from 'react';
-import { useRouter, useScrollToTop } from 'expo-router';
+import { useScrollToTop } from 'expo-router';
 import { Bell, Search, X } from 'lucide-react-native';
 import { FlatList, Pressable, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import AppliedFilterBar from '../components/place/AppliedFilterBar';
-import PlaceAllToolbar, { type PlaceSort, type VisitPeriod } from '../components/place/PlaceAllToolbar';
+import type { VisitPeriod } from '../constants/placeFilters';
 import PlaceFilterSheet from '../components/place/PlaceFilterSheet';
 import PopupGridCard from '../components/place/PopupGridCard';
+import { createPlaceCoverRecovery, mergeRecoveredCover } from '../lib/placeCoverRecovery';
+import { getPopupDetail } from '../lib/popups';
 import PopupGridSkeleton from '../components/place/PopupGridSkeleton';
 import QuickFilterBar from '../components/place/QuickFilterBar';
 import PlaceRegionSection from '../components/place/PlaceRegionSection';
@@ -28,24 +31,25 @@ import { t } from '../locales';
 import {
   emptyPopupFilters,
   getEndingSoonPopups,
-  getPopups,
+  getPopupPage,
   type PopupRegionOption,
   type PopupStatus,
   type PopupTagOption,
   type PublicPopup,
 } from '../lib/popups';
 import { getRegions, getTags } from '../lib/filterOptions';
+import { usePopupFavorites } from '../hooks/usePopupFavorites';
 
 const tabs = ['탐색', '전체'] as const;
 type PlaceTab = (typeof tabs)[number];
 const categoryTagNames: Partial<Record<InterestId, string>> = {
-  animeCharacter: '애니·캐릭터',
+  animeCharacter: '캐릭터/IP',
   beauty: '뷰티',
-  game: '게임·디지털',
+  game: '게임/디지털',
   fashion: '패션',
 };
 const emptyPopups: readonly PublicPopup[] = [];
-type PopupListState = { queryKey: string; status: 'loading' | 'ready' | 'error'; popups: PublicPopup[] };
+type PopupListState = { queryKey: string; status: 'loading' | 'ready' | 'error'; popups: PublicPopup[]; nextCursor: string | null; loadingMore: boolean; moreError: boolean };
 type OptionsState<T> = { status: 'loading' | 'ready' | 'error'; options: T[] };
 type EndingSoonState = { country: CountryCode | undefined; status: 'loading' | 'ready' | 'error'; popups: PublicPopup[] };
 
@@ -58,7 +62,7 @@ function toggleId<T extends string | number>(ids: T[], id: T): T[] {
 }
 
 export default function PlaceScreen() {
-  const router = useRouter();
+  const openPopup = usePopupNavigation();
   const listRef = useRef<FlatList<PublicPopup>>(null);
   const [selectedTab, setSelectedTab] = useState<PlaceTab>('탐색');
   const scrollYRef = useRef(0);
@@ -73,16 +77,28 @@ export default function PlaceScreen() {
   });
   useScrollToTop(tabPressScrollRef);
   const [appliedFilters, setAppliedFilters] = useState(createEmptyPlaceFilters);
+  const [draftQuickFilters, setDraftQuickFilters] = useState(createEmptyPlaceFilters);
   const [appliedDetailFilters, setAppliedDetailFilters] = useState(emptyPopupFilters);
   const [draftDetailFilters, setDraftDetailFilters] = useState(emptyPopupFilters);
   const [isFilterSheetOpen, setFilterSheetOpen] = useState(false);
-  const [sort, setSort] = useState<PlaceSort>('latest');
   const [visitPeriod, setVisitPeriod] = useState<VisitPeriod>('all');
-  const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
+  const [draftVisitPeriod, setDraftVisitPeriod] = useState<VisitPeriod>('all');
+  const { isFavorite, isFavoriteDisabled, toggleFavorite } = usePopupFavorites();
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchSticky, setSearchSticky] = useState(false);
   const searchTop = useRef(Number.POSITIVE_INFINITY);
-  const [popupListState, setPopupListState] = useState<PopupListState>({ queryKey: '', status: 'loading', popups: [] });
+  const [popupListState, setPopupListState] = useState<PopupListState>({ queryKey: '', status: 'loading', popups: [], nextCursor: null, loadingMore: false, moreError: false });
+  const listStateRef = useRef(popupListState);
+  const listRequest = useRef<AbortController | null>(null);
+  const latestQueryKey = useRef('');
+  const coverRecovery = useRef<ReturnType<typeof createPlaceCoverRecovery> | null>(null);
+  if (!coverRecovery.current) {
+    coverRecovery.current = createPlaceCoverRecovery(getPopupDetail, (original, detail, fetchedAt) => {
+      const current = listStateRef.current;
+      const popups = mergeRecoveredCover(current.popups, original, detail, fetchedAt);
+      if (popups.some((item, index) => item !== current.popups[index])) publishList({ ...current, popups });
+    });
+  }
   const [endingSoonState, setEndingSoonState] = useState<EndingSoonState>({ country: undefined, status: 'loading', popups: [] });
   const [today, setToday] = useState(seoulDateString);
   const [regionStates, setRegionStates] = useState<Record<CountryCode, OptionsState<PopupRegionOption>>>(() => ({
@@ -93,9 +109,16 @@ export default function PlaceScreen() {
   const regionSelection = useRef(0);
   const categorySelection = useRef(0);
   const country = appliedFilters.countries[0];
+  const filterOptionsCountry = isFilterSheetOpen ? draftQuickFilters.countries[0] : country;
   const regionIdsKey = appliedDetailFilters.regionIds.join(',');
   const tagIdsKey = appliedDetailFilters.tagIds.join(',');
-  const queryKey = [country ?? '', regionIdsKey, tagIdsKey, appliedDetailFilters.status ?? ''].join('|');
+  const hasAppliedFilters = appliedFilters.countries.length > 0
+    || appliedFilters.quickFeatures.length > 0
+    || appliedDetailFilters.regionIds.length > 0
+    || appliedDetailFilters.tagIds.length > 0
+    || appliedDetailFilters.status !== undefined
+    || visitPeriod !== 'all';
+  const queryKey = [country ?? '', regionIdsKey, tagIdsKey, appliedDetailFilters.status ?? '', visitPeriod, visitPeriod === 'all' ? '' : today].join('|');
 
   useEffect(() => {
     let active = true;
@@ -107,7 +130,7 @@ export default function PlaceScreen() {
         if (active) setTagState({ status: 'error', options: [] });
       });
     }
-    const countries: CountryCode[] = country ? [country] : ['KR', 'JP'];
+    const countries: CountryCode[] = filterOptionsCountry ? [filterOptionsCountry] : ['KR', 'JP'];
     for (const code of countries) {
       const current = regionStates[code];
       if (current.status === 'ready' || (current.status === 'error' && !isFilterSheetOpen)) continue;
@@ -121,26 +144,54 @@ export default function PlaceScreen() {
       });
     }
     return () => { active = false; };
-  }, [country, isFilterSheetOpen]);
+  }, [filterOptionsCountry, isFilterSheetOpen]);
 
   const regions = [...regionStates.KR.options, ...regionStates.JP.options];
   const tags = tagState.options;
-  const relevantRegionStates = country ? [regionStates[country]] : [regionStates.KR, regionStates.JP];
+  const relevantRegionStates = filterOptionsCountry ? [regionStates[filterOptionsCountry]] : [regionStates.KR, regionStates.JP];
   const optionsStatus = [tagState, ...relevantRegionStates].some((item) => item.status === 'error') ? 'error'
     : [tagState, ...relevantRegionStates].some((item) => item.status === 'loading') ? 'loading' : 'ready';
 
-  useEffect(() => {
+  latestQueryKey.current = queryKey;
+  function publishList(next: PopupListState) {
+    listStateRef.current = next;
+    setPopupListState(next);
+  }
+  function loadPage(after: string | null = null) {
+    if (listRequest.current || selectedTab !== '전체') return;
+    const current = listStateRef.current;
+    if (after && (current.queryKey !== queryKey || current.status !== 'ready' || current.nextCursor !== after)) return;
     const controller = new AbortController();
-    setPopupListState({ queryKey, status: 'loading', popups: [] });
-    getPopups(country, controller.signal, appliedDetailFilters)
-      .then((popups) => {
-        if (!controller.signal.aborted) setPopupListState({ queryKey, status: 'ready', popups });
-      })
-      .catch(() => {
-        if (!controller.signal.aborted) setPopupListState({ queryKey, status: 'error', popups: [] });
-      });
-    return () => controller.abort();
+    const coverImageFetchedAt = Date.now();
+    listRequest.current = controller;
+    publishList(after ? { ...current, loadingMore: true, moreError: false }
+      : { queryKey, status: 'loading', popups: [], nextCursor: null, loadingMore: false, moreError: false });
+    getPopupPage(country, controller.signal, { ...appliedDetailFilters, visitPeriod }, after)
+      .then(page => {
+        if (controller.signal.aborted || latestQueryKey.current !== queryKey) return;
+        const previous = after ? listStateRef.current.popups : [];
+        const seen = new Set(previous.map(popup => popup.publicId));
+        publishList({ queryKey, status: 'ready', popups: [...previous, ...page.popups.filter(popup => {
+          if (seen.has(popup.publicId)) return false;
+          seen.add(popup.publicId); return true;
+        }).map(popup => ({ ...popup, coverImageFetchedAt }))], nextCursor: page.nextCursor, loadingMore: false, moreError: false });
+      }).catch(() => {
+        if (controller.signal.aborted || latestQueryKey.current !== queryKey) return;
+        publishList(after ? { ...listStateRef.current, loadingMore: false, moreError: true }
+          : { queryKey, status: 'error', popups: [], nextCursor: null, loadingMore: false, moreError: false });
+      }).finally(() => { if (listRequest.current === controller) listRequest.current = null; });
+  }
+  useEffect(() => {
+    coverRecovery.current?.reset();
+    listRequest.current?.abort();
+    listRequest.current = null;
+    publishList({ queryKey, status: 'loading', popups: [], nextCursor: null, loadingMore: false, moreError: false });
   }, [queryKey]);
+  useEffect(() => {
+    if (selectedTab === '전체' && listStateRef.current.status === 'loading') loadPage();
+    // Retain data and active requests when switching tabs.
+  }, [selectedTab, queryKey]);
+  useEffect(() => () => { listRequest.current?.abort(); coverRecovery.current?.reset(); }, []);
 
   useEffect(() => {
     const timer = setInterval(() => setToday(seoulDateString()), 60 * 1000);
@@ -241,22 +292,43 @@ export default function PlaceScreen() {
   };
 
   const openFilterSheet = () => {
+    setDraftQuickFilters({ ...appliedFilters, countries: [...appliedFilters.countries], quickFeatures: [...appliedFilters.quickFeatures] });
+    setDraftVisitPeriod(visitPeriod);
     setDraftDetailFilters({ ...appliedDetailFilters, regionIds: [...appliedDetailFilters.regionIds], tagIds: [...appliedDetailFilters.tagIds] });
     setFilterSheetOpen(true);
   };
 
   const cancelFilterSheet = () => {
+    setDraftQuickFilters({ ...appliedFilters, countries: [...appliedFilters.countries], quickFeatures: [...appliedFilters.quickFeatures] });
+    setDraftVisitPeriod(visitPeriod);
     setDraftDetailFilters({ ...appliedDetailFilters, regionIds: [...appliedDetailFilters.regionIds], tagIds: [...appliedDetailFilters.tagIds] });
     setFilterSheetOpen(false);
   };
 
   const applyFilterSheet = () => {
+    if (draftQuickFilters.countries[0] !== country) regionSelection.current++;
+    setAppliedFilters(draftQuickFilters);
+    setVisitPeriod(draftVisitPeriod);
     setAppliedDetailFilters({ ...draftDetailFilters, regionIds: [...draftDetailFilters.regionIds], tagIds: [...draftDetailFilters.tagIds] });
     setFilterSheetOpen(false);
   };
 
-  const removeAppliedFilter = (group: 'countries' | 'quickFeatures' | 'regionIds' | 'tagIds' | 'status', id: string | number) => {
-    if (group === 'countries') {
+  const resetAppliedFilters = () => {
+    regionSelection.current++;
+    categorySelection.current++;
+    setVisitPeriod('all');
+    setDraftVisitPeriod('all');
+    setAppliedDetailFilters(emptyPopupFilters());
+    setDraftDetailFilters(emptyPopupFilters());
+    setAppliedFilters(createEmptyPlaceFilters());
+    setDraftQuickFilters(createEmptyPlaceFilters());
+  };
+
+  const removeAppliedFilter = (group: 'countries' | 'quickFeatures' | 'regionIds' | 'tagIds' | 'status' | 'period', id: string | number) => {
+    if (group === 'period') {
+      setVisitPeriod('all');
+      setDraftVisitPeriod('all');
+    } else if (group === 'countries') {
       regionSelection.current++;
       setAppliedFilters((current) => ({ ...current, countries: [] }));
       setAppliedDetailFilters((current) => ({ ...current, regionIds: [] }));
@@ -270,10 +342,6 @@ export default function PlaceScreen() {
     } else {
       setAppliedDetailFilters((current) => ({ ...current, status: undefined }));
     }
-  };
-
-  const toggleFavorite = (id: string) => {
-    setFavoriteIds((current) => toggleId(current, id));
   };
 
   const updateSearchQuery = (value: string) => {
@@ -296,6 +364,17 @@ export default function PlaceScreen() {
         ref={listRef}
         style={styles.list}
         data={selectedTab === '전체' ? searchedPopups : emptyPopups}
+        onEndReached={() => {
+          const current = listStateRef.current;
+          if (current.nextCursor && !current.moreError) loadPage(current.nextCursor);
+        }}
+        onEndReachedThreshold={0.5}
+        ListFooterComponent={selectedTab === '전체' ? popupListState.loadingMore
+          ? <Text style={styles.stateText}>팝업을 불러오는 중이에요.</Text>
+          : popupListState.moreError || status === 'error'
+            ? <Pressable onPress={() => loadPage(popupListState.moreError ? popupListState.nextCursor : null)}>
+              <Text style={styles.stateText}>다시 시도</Text>
+            </Pressable> : null : null}
         keyExtractor={(item) => item.publicId}
         numColumns={2}
         columnWrapperStyle={styles.gridRow}
@@ -335,16 +414,18 @@ export default function PlaceScreen() {
             </View>
 
             <View style={styles.searchField} onLayout={(event) => { searchTop.current = event.nativeEvent.layout.y; }}>
-              <Search size={20} color={colors.secondaryText} />
-              <TextInput
-                accessibilityLabel="팝업 검색"
-                placeholder="팝업을 검색해보세요"
-                placeholderTextColor={colors.secondaryText}
-                style={styles.searchInput}
-                returnKeyType="search"
-                value={searchQuery}
-                onChangeText={updateSearchQuery}
-              />
+              <View style={styles.searchInputRow}>
+                <Search size={20} color={colors.inactiveText} />
+                <TextInput
+                  accessibilityLabel="팝업 검색"
+                  placeholder="팝업을 검색해보세요"
+                  placeholderTextColor={colors.inactiveText}
+                  style={styles.searchInput}
+                  returnKeyType="search"
+                  value={searchQuery}
+                  onChangeText={updateSearchQuery}
+                />
+              </View>
               {searchQuery.length > 0 && (
                 <Pressable accessibilityRole="button" accessibilityLabel="검색어 지우기" onPress={() => updateSearchQuery('')} style={styles.clearSearch}>
                   <X size={18} color={colors.secondaryText} />
@@ -355,35 +436,35 @@ export default function PlaceScreen() {
             {selectedTab === '전체' && (
               <>
                 <View style={styles.filters}>
-                  <QuickFilterBar
-                    selectedFilters={appliedFilters}
-                    onToggleCountry={toggleCountry}
-                    onToggleFeature={(id: QuickFeatureId) =>
-                      setAppliedFilters((current) => ({ ...current, quickFeatures: toggleId(current.quickFeatures, id) }))}
-                    onOpenDetails={openFilterSheet}
-                  />
+                  {hasAppliedFilters ? (
+                    <AppliedFilterBar
+                      filters={appliedFilters}
+                      detailFilters={appliedDetailFilters}
+                      period={visitPeriod}
+                      regions={regions}
+                      tags={tags}
+                      onRemove={removeAppliedFilter}
+                      onReset={resetAppliedFilters}
+                      onOpenDetails={openFilterSheet}
+                    />
+                  ) : (
+                    <QuickFilterBar
+                      selectedFilters={appliedFilters}
+                      onToggleCountry={toggleCountry}
+                      onToggleFeature={(id: QuickFeatureId) =>
+                        setAppliedFilters((current) => ({ ...current, quickFeatures: toggleId(current.quickFeatures, id) }))}
+                      onOpenDetails={openFilterSheet}
+                    />
+                  )}
                 </View>
-                <AppliedFilterBar
-                  filters={appliedFilters}
-                  detailFilters={appliedDetailFilters}
-                  regions={regions}
-                  tags={tags}
-                  onRemove={removeAppliedFilter}
-                  onReset={() => {
-                    setAppliedDetailFilters(emptyPopupFilters());
-                    setAppliedFilters((current) => ({ ...current, quickFeatures: [] }));
-                  }}
-                />
-                <PlaceAllToolbar
-                  sort={sort}
-                  onSortChange={setSort}
-                  period={visitPeriod}
-                  onPeriodChange={setVisitPeriod}
-                />
               </>
             )}
-            {selectedTab === '탐색' && (
-              <>
+            <View
+              style={selectedTab !== '탐색' && styles.hiddenExplore}
+              pointerEvents={selectedTab === '탐색' ? 'auto' : 'none'}
+              accessibilityElementsHidden={selectedTab !== '탐색'}
+              importantForAccessibility={selectedTab === '탐색' ? 'auto' : 'no-hide-descendants'}
+            >
                 <TodayOpeningCarousel
                   key={country ?? 'ALL'}
                   items={endingSoonPopups}
@@ -391,48 +472,55 @@ export default function PlaceScreen() {
                   today={today}
                   loading={endingSoonLoading}
                   error={endingSoonState.status === 'error'}
-                  onPressPopup={(popup) => router.push({ pathname: '/places/[id]', params: { id: popup.publicId } })}
+                  onPressPopup={(popup) => openPopup(popup.publicId)}
                 />
-                {visiblePopups.length === 0 && <Text style={styles.stateText}>{stateMessage}</Text>}
                 <PlaceRegionSection
                   pages={placeRegionPages}
                   width={carouselWidth}
                   onPress={selectExploreRegion}
+                  isActive={selectedTab === '탐색'}
                 />
                 <PlaceWeeklySection
-                  popups={visiblePopups}
-                  onPressPopup={(popup) => router.push({ pathname: '/places/[id]', params: { id: popup.publicId } })}
+                  country={country}
+                  isActive={selectedTab === '탐색'}
+                  onPressPopup={(popup) => openPopup(popup.publicId)}
+                  isFavorite={isFavorite}
+                  isFavoriteDisabled={isFavoriteDisabled}
+                  onToggleFavorite={(popup) => void toggleFavorite(popup)}
                 />
                 <PlaceInterestSection onPressCategory={selectInterestCategory} />
-              </>
-            )}
+            </View>
           </View>
         )}
         renderItem={({ item }) => (
           <PopupGridCard
             item={item}
             width={cardWidth}
-            isFavorite={favoriteIds.includes(item.publicId)}
-            onToggleFavorite={toggleFavorite}
-            onPress={(popup) => router.push({ pathname: '/places/[id]', params: { id: popup.publicId } })}
+            isFavorite={isFavorite(item.publicId)}
+            isFavoriteDisabled={isFavoriteDisabled(item.publicId)}
+            onToggleFavorite={() => void toggleFavorite(item)}
+            onPress={(popup) => openPopup(popup.publicId)}
+            onRecoverCover={(popup) => coverRecovery.current!.recover(popup)}
           />
         )}
-        extraData={favoriteIds}
+        extraData={{ isFavorite, isFavoriteDisabled }}
       />
 
       {isSearchSticky && (
         <View style={[styles.stickySearch, { left: spacing.space16 + insets.left, right: spacing.space16 + insets.right }]}>
           <View style={[styles.searchField, styles.stickySearchField]}>
-            <Search size={20} color={colors.secondaryText} />
-            <TextInput
-              accessibilityLabel="팝업 검색"
-              placeholder="팝업을 검색해보세요"
-              placeholderTextColor={colors.secondaryText}
-              style={styles.searchInput}
-              returnKeyType="search"
-              value={searchQuery}
-              onChangeText={updateSearchQuery}
-            />
+            <View style={styles.searchInputRow}>
+              <Search size={20} color={colors.inactiveText} />
+              <TextInput
+                accessibilityLabel="팝업 검색"
+                placeholder="팝업을 검색해보세요"
+                placeholderTextColor={colors.inactiveText}
+                style={styles.searchInput}
+                returnKeyType="search"
+                value={searchQuery}
+                onChangeText={updateSearchQuery}
+              />
+            </View>
             {searchQuery.length > 0 && (
               <Pressable accessibilityRole="button" accessibilityLabel="검색어 지우기" onPress={() => updateSearchQuery('')} style={styles.clearSearch}>
                 <X size={18} color={colors.secondaryText} />
@@ -446,13 +534,29 @@ export default function PlaceScreen() {
       <PlaceFilterSheet
         visible={isFilterSheetOpen}
         filters={draftDetailFilters}
-        country={country}
+        quickFilters={draftQuickFilters}
+        onToggleCountry={(selectedCountry: CountryCode) => {
+          setDraftQuickFilters((current) => ({
+            ...current,
+            countries: current.countries.includes(selectedCountry) ? [] : [selectedCountry],
+          }));
+          setDraftDetailFilters((current) => ({ ...current, regionIds: [] }));
+        }}
+        onToggleFeature={(id: QuickFeatureId) =>
+          setDraftQuickFilters((current) => ({ ...current, quickFeatures: toggleId(current.quickFeatures, id) }))}
+        period={draftVisitPeriod}
+        onPeriodChange={setDraftVisitPeriod}
+        country={filterOptionsCountry}
         regions={regions}
         tags={tags}
         optionsStatus={optionsStatus}
         onClose={cancelFilterSheet}
         onApply={applyFilterSheet}
-        onReset={() => setDraftDetailFilters(emptyPopupFilters())}
+        onReset={() => {
+          setDraftQuickFilters(createEmptyPlaceFilters());
+          setDraftDetailFilters(emptyPopupFilters());
+          setDraftVisitPeriod('all');
+        }}
         onToggleRegion={toggleRegion}
         onToggleTag={(id: number) =>
           setDraftDetailFilters((current) => ({ ...current, tagIds: toggleId(current.tagIds, id) }))}
@@ -464,6 +568,7 @@ export default function PlaceScreen() {
 }
 
 const styles = StyleSheet.create({
+  hiddenExplore: { display: 'none' },
   container: {
     flex: 1,
     paddingTop: 8,
@@ -496,7 +601,7 @@ const styles = StyleSheet.create({
   tabText: {
     ...typography.body,
     fontWeight: '600',
-    color: colors.inactiveTabText,
+    color: colors.inactiveText,
   },
   selectedTabText: {
     fontWeight: '700',
@@ -522,10 +627,19 @@ const styles = StyleSheet.create({
     borderRadius: radius.radius12,
     backgroundColor: colors.moreButtonBackground,
   },
+  searchInputRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    columnGap: spacing.space8,
+  },
   searchInput: {
     flex: 1,
     paddingVertical: 0,
-    ...typography.body,
+    includeFontPadding: false,
+    textAlignVertical: 'center',
+    fontSize: typography.body.fontSize,
+    fontWeight: typography.body.fontWeight,
     color: colors.text,
   },
   clearSearch: {

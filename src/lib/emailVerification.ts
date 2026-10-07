@@ -33,7 +33,7 @@ export async function sendEmailVerification(email: string): Promise<void> {
   await requireSuccess(response);
 }
 
-export async function verifyEmailCode(email: string, code: string): Promise<void> {
+export async function verifyEmailCode(email: string, code: string): Promise<string> {
   const response = await fetch(API_BASE_URL + '/api/auth/email-verifications/verify', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -41,4 +41,11 @@ export async function verifyEmailCode(email: string, code: string): Promise<void
   });
   if (__DEV__) console.info('[SIGNUP] verification verify status:', response.status);
   await requireSuccess(response);
+
+  const body: unknown = await response.json();
+  if (!body || typeof body !== 'object' || !('signupProof' in body)
+    || typeof body.signupProof !== 'string' || body.signupProof.trim().length === 0) {
+    throw new Error('Invalid email verification response');
+  }
+  return body.signupProof;
 }

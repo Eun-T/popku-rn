@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { useRouter } from 'expo-router';
 import { ScrollView, StyleSheet, Text, useWindowDimensions, View, type ImageSourcePropType } from 'react-native';
 
 import { useHomePopups } from '../../hooks/useHomePopups';
@@ -28,8 +27,7 @@ function displayDate(isoDate: string): string {
   return isoDate.slice(5).replace('-', '.');
 }
 
-export default function HomeNewPopupSection() {
-  const router = useRouter();
+export default function HomeNewPopupSection({ onPressPopup }: { onPressPopup: (id: string) => void }) {
   const [selectedCountry, setSelectedCountry] = useState<Country>('KR');
   const { status, popups } = useHomePopups('new', selectedCountry);
   const { width } = useWindowDimensions();
@@ -67,7 +65,7 @@ export default function HomeNewPopupSection() {
             period={`${displayDate(popup.startDate)} ~ ${displayDate(popup.endDate)}`}
             title={popup.name}
             tags={[...(popup.regionName ? [popup.regionName] : []), ...popup.tags.map((tag) => tag.name)]}
-            onPress={() => router.push({ pathname: '/places/[id]', params: { id: popup.publicId } })}
+            onPress={() => onPressPopup(popup.publicId)}
           />
         ))}
       </ScrollView>
