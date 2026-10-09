@@ -1,3 +1,4 @@
+import { useTranslation } from '../../hooks/useTranslation';
 import { MapPin } from 'lucide-react-native';
 import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
@@ -45,6 +46,7 @@ type Props = {
 };
 
 export default function MapSearchOverlay({ query, search, places, resolvingPlaceId, resolveError, maxHeight, onSelect, onSelectPlace }: Props) {
+  const { t } = useTranslation();
   const canSearch = Array.from(query.trim()).length >= 2;
   const showPlaces = places.status === 'loading' || places.results.length > 0;
   const showPopups = search.status === 'loading' || search.status === 'error' || search.results.length > 0;
@@ -59,8 +61,8 @@ export default function MapSearchOverlay({ query, search, places, resolvingPlace
     >
       {canSearch && showPlaces && (
         <View style={styles.placeSection}>
-          <Text style={styles.sectionTitle}>장소</Text>
-          {places.status === 'loading' && <Text style={styles.message}>검색 중...</Text>}
+          <Text style={styles.sectionTitle}>{t("place.detail.basicInfo.place")}</Text>
+          {places.status === 'loading' && <Text style={styles.message}>{t("map.search.loading")}</Text>}
           {places.results.map((place) => (
             <Pressable
               key={place.placeId}
@@ -74,19 +76,19 @@ export default function MapSearchOverlay({ query, search, places, resolvingPlace
               <View style={styles.placeText}>
                 <Text style={styles.name} numberOfLines={1}>{place.title}</Text>
                 {!!place.subtitle && <Text style={styles.subtitle} numberOfLines={2}>{place.subtitle}</Text>}
-                {resolvingPlaceId === place.placeId && <Text style={styles.subtitle}>위치 확인 중...</Text>}
+                {resolvingPlaceId === place.placeId && <Text style={styles.subtitle}>{t("map.search.resolving")}</Text>}
               </View>
             </Pressable>
           ))}
-          {!!resolveError && <Text style={styles.message}>{resolveError}</Text>}
+          {!!resolveError && <Text style={styles.message}>{t("map.search.resolveFailed")}</Text>}
           {places.results.length > 0 && <GooglePlaceAttribution />}
         </View>
       )}
-      {canSearch && showPopups && <Text style={styles.sectionTitle}>팝업</Text>}
-      {canSearch && search.status === 'loading' && <Text style={styles.message}>검색 중...</Text>}
-      {canSearch && search.status === 'error' && <Text style={styles.message}>검색할 수 없어요. 다시 시도해 주세요.</Text>}
+      {canSearch && showPopups && <Text style={styles.sectionTitle}>{t("place.filters.eventTypes.popup")}</Text>}
+      {canSearch && search.status === 'loading' && <Text style={styles.message}>{t("map.search.loading")}</Text>}
+      {canSearch && search.status === 'error' && <Text style={styles.message}>{t("map.search.failed")}</Text>}
       {canSearch && isEmpty && (
-        <Text style={styles.message}>검색 결과가 없어요</Text>
+        <Text style={styles.message}>{t("map.search.empty")}</Text>
       )}
       {canSearch && search.status === 'success' && search.results.map((popup) => (
         <Pressable

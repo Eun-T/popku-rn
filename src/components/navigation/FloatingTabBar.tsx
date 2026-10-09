@@ -338,13 +338,18 @@ export default function FloatingTabBar({
     activeRoute?.key,
     activeRoute?.name,
   ]);
+  const barReady = indicatorReady && selectedCenter !== undefined;
 
-  if (pathname === "/profile/login" || pathname === "/profile/signup" || pathname === "/profile/favorites")
+  if (pathname === "/profile/login" || pathname === "/profile/signup")
     return null;
 
   return (
     <View
-      style={[styles.container, { bottom: Math.max(insets.bottom - 12, 12) }]}
+      pointerEvents={barReady ? "auto" : "none"}
+      style={[
+        styles.container,
+        { bottom: Math.max(insets.bottom - 12, 12) },
+      ]}
     >
       <Animated.View
         style={[styles.capsule, { transform: [{ scale: barScale }] }]}
@@ -368,9 +373,10 @@ export default function FloatingTabBar({
           pointerEvents="none"
           style={[StyleSheet.absoluteFill, styles.glassTint]}
         />
+        {/* Keep opacity off GlassView ancestors; reveal only the foreground together. */}
         <View
           ref={itemsRef}
-          style={styles.items}
+          style={[styles.items, { opacity: barReady ? 1 : 0 }]}
           onLayout={(event) => {
             setItemsWidth(event.nativeEvent.layout.width);
             itemsRef.current?.measureInWindow((x) => {
@@ -384,7 +390,7 @@ export default function FloatingTabBar({
             style={[
               styles.indicatorOverlay,
               {
-                opacity: indicatorReady && selectedCenter !== undefined ? 1 : 0,
+                opacity: barReady ? 1 : 0,
                 transform: [{ translateX: indicatorX }],
               },
             ]}

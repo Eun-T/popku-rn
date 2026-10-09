@@ -1,3 +1,4 @@
+import { useTranslation } from '../../hooks/useTranslation';
 import { ChevronDown } from 'lucide-react-native';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
@@ -18,6 +19,7 @@ export default function QuickFilterBar({
   onToggleFeature,
   onOpenDetails,
 }: QuickFilterBarProps) {
+  useTranslation();
   return (
     <View style={styles.row}>
       <ScrollView

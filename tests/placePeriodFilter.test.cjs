@@ -4,6 +4,8 @@ const { test } = require('node:test');
 const ts = require('typescript');
 const jsx = (type, props) => ({ type, props });
 function load(file, mocks = {}, globals = {}) {
+  mocks = require('./helpers/uiDependencies.cjs').withI18nDependencies(file, mocks);
+  globals = { __DEV__: false, ...globals };
   const code = ts.transpileModule(readFileSync(file, 'utf8'), { compilerOptions: {
     module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: false,
   } }).outputText;
@@ -155,13 +157,13 @@ test('Sheet period draft applies, reopens, cancels, resets and removes with sear
   };
   const mocks = {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx },
-    'expo-router': { useScrollToTop() {} },
+    'expo-router': { useScrollToTop() {}, useLocalSearchParams: () => ({}) },
     'lucide-react-native': { Bell: 'Bell', Search: 'Search', X: 'X' },
     'react-native': { FlatList: 'FlatList', Pressable: 'Pressable', Text: 'Text', TextInput: 'TextInput', View: 'View',
       StyleSheet: { create: s => s }, useWindowDimensions: () => ({ width: 390 }) },
     'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView', useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) },
     '../theme/tokens': theme, '../constants/placeFilters': filters,
-    '../constants/placeRegionMocks': { placeRegionPages: [] }, '../locales': { t: key => key },
+    '../constants/placeRegionMocks': { placeRegionPages: [] }, '../locales': require('./helpers/uiDependencies.cjs').loadPure('src/locales/index.ts'),
     '../hooks/usePopupNavigation': { usePopupNavigation: () => () => {} },
     '../hooks/usePopupFavorites': { usePopupFavorites: () => ({ isFavorite() {}, isFavoriteDisabled() {}, toggleFavorite() {} }) },
     '../lib/filterOptions': { getRegions: async () => [], getTags: async () => [{ id: 3, name: 'Category' }] },

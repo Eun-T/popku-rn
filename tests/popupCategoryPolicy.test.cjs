@@ -4,6 +4,7 @@ const { test } = require('node:test');
 const ts = require('typescript');
 
 function load(file, mocks = {}, globals = {}) {
+  mocks = require('./helpers/uiDependencies.cjs').withI18nDependencies(file, mocks);
   const code = ts.transpileModule(readFileSync(file, 'utf8'), { compilerOptions: {
     module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: false,
   } }).outputText;
@@ -41,8 +42,9 @@ test('Place category options retain IDs and multiple selected filters; queries p
   const toggled = [];
   const tree = Sheet({ visible: true, filters: { regionIds: [], tagIds: [1, 2] }, quickFilters: { countries: [], quickFeatures: [] }, tags: options, regions: [],
     optionsStatus: 'ready', onToggleTag: id => toggled.push(id) });
-  const group = nodes(tree).find(n => typeof n.type === 'function' && n.props.options === options);
+  const group = nodes(tree).find(n => typeof n.type === 'function' && n.props.options?.length === options.length);
   assert.ok(group);
+  assert.deepEqual(group.props.options, options, 'Korean display copies preserve every original ID/name');
   const chips = nodes(group.type(group.props)).filter(n => n.type === 'Pressable');
   assert.deepEqual(chips.map(n => n.props.children.props.children), names);
   assert.deepEqual(chips.filter(n => n.props.accessibilityState.selected).map(n => n.props.children.props.children), names.slice(0, 2));
@@ -60,6 +62,10 @@ test('Home cards receive one renamed category with existing region and navigatio
     startDate: '2026-10-02', endDate: '2026-10-11' };
   const opened = [], favorites = [];
   const common = { ...base, '../../hooks/useHomePopups': { useHomePopups: () => ({ status: 'ready', popups: [popup] }) },
+    'lucide-react-native': { Store: 'Store' },
+    'expo-router': { useRouter: () => ({ push() { throw new Error('Card presses must use onPressPopup'); } }) },
+    '../../lib/popups': { currentWeekRange: () => { throw new Error('Card presses must not navigate through more'); } },
+    '../../lib/popupStatus': { popupOperatingStatus: (start, end) => load('src/lib/popupStatus.ts').popupOperatingStatus(start, end, new Date(2026, 9, 8)) },
     '../common/FilterChips': { default: 'Chips' }, '../common/MoreButton': { default: 'Button' },
     '../../../assets/images/ranking-placeholder.png': 'poster',
     './HomePopupSkeleton': { HomeNewPopupSkeleton: 'Skeleton', HomeTrendingSkeleton: 'Skeleton', RankingSkeletonFooter: 'Footer' },

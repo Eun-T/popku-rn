@@ -13,7 +13,7 @@ import {
   popupGuidanceItems,
   type PopupGuidanceItem,
 } from "../../lib/popupGuidance";
-import { t } from "../../locales";
+import { useTranslation } from '../../hooks/useTranslation';
 import { colors, radius, spacing } from "../../theme/tokens";
 
 type Props = {
@@ -30,6 +30,7 @@ function GuidanceCard({
   item: PopupGuidanceItem;
   pageNumber?: number;
 }) {
+  const { t } = useTranslation();
   return (
     <View style={styles.card}>
       <View style={styles.heading}>
@@ -134,6 +135,7 @@ export default function PopupGuidanceCarousel({
   notice,
   benefits,
 }: Props) {
+  const { t } = useTranslation();
   const { fontScale } = useWindowDimensions();
   const items = popupGuidanceItems(notice, benefits);
   if (items.length === 0) return null;

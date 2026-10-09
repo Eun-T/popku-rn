@@ -4,6 +4,7 @@ const { test } = require('node:test');
 const ts = require('typescript');
 
 function load(file, mocks = {}) {
+  mocks = require('./helpers/uiDependencies.cjs').withUiDependencies(file, mocks);
   mocks = { '../../components/community/CommunityPostMenu': { __esModule: true, default: 'CommunityPostMenu' }, ...mocks };
   const module = { exports: {} };
   const code = ts.transpileModule(readFileSync(file, 'utf8'), { compilerOptions: {
@@ -16,8 +17,7 @@ function load(file, mocks = {}) {
   return module.exports;
 }
 const flush = () => new Promise(resolve => setImmediate(resolve));
-const nodes = tree => !tree || typeof tree !== 'object' ? [] : Array.isArray(tree)
-  ? tree.flatMap(nodes) : [tree, ...nodes(tree.props?.children)];
+const { nodes, flattenStyle } = require('./helpers/uiTree.cjs');
 const jsx = (type, props, key) => ({ type, props, key });
 const now = Date.parse('2026-10-04T10:03:00+09:00');
 const root = { id: 1, content: 'root body', createdAt: '2026-10-04T10:00:00+09:00', updatedAt: '2026-10-04T10:00:00+09:00',
@@ -33,6 +33,7 @@ function hooks() {
   let i = 0, r = 0, c = 0, e = 0, focus;
   return {
     react: {
+      useSyncExternalStore: (_subscribe, snapshot) => snapshot(),
       useState(initial) { const index = i++; if (!(index in state)) state[index] = initial;
         return [state[index], value => { state[index] = typeof value === 'function' ? value(state[index]) : value; }]; },
       useRef(initial) { return refs[r++] ??= { current: initial }; },
@@ -53,6 +54,7 @@ function setup(authOverride, targetType = 'POST') {
   let token = 'token';
   let generation = 0;
   const auth = authOverride ?? { getSavedAccessToken: async () => token,
+    getAuthUser: () => token ? { email: 'me' } : null, subscribeAuthUser: () => () => {},
     getAuthSession: async () => ({ accessToken: token, generation }),
     clearTokens: async expected => { if (expected !== undefined && expected !== generation) return false;
       token = null; generation++; refresh.clearCommunityLikes(); authListeners.forEach(fn => fn()); return true; },
@@ -70,7 +72,7 @@ function setup(authOverride, targetType = 'POST') {
   native.Alert = { alert: (...args) => alerts.push(args) };
   const mocks = (state, depth) => ({ react: state.react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': native,
     'expo-router': { useRouter: () => ({ push: route => routes.push(route), canGoBack: () => true, back() {} }),
-      useLocalSearchParams: () => ({ id: '1' }), useFocusEffect: fn => state.useFocusEffect(fn),
+      useLocalSearchParams: () => ({ id: '1' }), useFocusEffect: fn => state.useFocusEffect(fn), useScrollToTop() {},
       useNavigation: () => ({ getState: () => ({ index: 1, routes: [{ name: '(tabs)' }, { name: 'reviews/[id]' }] }) }) },
     'lucide-react-native': Object.fromEntries(['X', 'ChevronLeft', 'ChevronRight', 'MapPin', 'Star', 'Heart', 'MessageCircle', 'MoreHorizontal', 'Pencil', 'Settings'].map(name => [name, name])),
     'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView', useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) },
@@ -80,7 +82,7 @@ function setup(authOverride, targetType = 'POST') {
     [`${depth}/lib/communityLikes`]: { changeCommunityLike: async () => {} },
     [`${depth}/hooks/useCommunityNow`]: { useCommunityNow: () => ({ now, updateNow: noop }) },
     [`${depth}/lib/communityRefresh`]: { waitForCommunityRefresh: async () => {} },
-    [`${depth}/locales`]: { t: key => key }, [`${depth}/theme/communityColors`]: { communityColors: {} },
+    [`${depth}/locales`]: require('./helpers/uiDependencies.cjs').loadPure('src/locales/index.ts'), [`${depth}/theme/communityColors`]: { communityColors: {} },
     [`${depth}/theme/tokens`]: { spacing: { space24: 24 }, radius: {}, typography: { body: { fontWeight: '400' } } },
     [`${depth}/components/community/CommunityAuthor`]: { __esModule: true, default: 'CommunityAuthor' },
     [`${depth}/components/community/CommunityImageCarousel`]: { __esModule: true, default: 'CommunityImageCarousel' },
@@ -127,7 +129,7 @@ test('REVIEW API is public and uses review namespace with separate content/root/
   } finally { env.state.cleanup(); global.fetch = original; }
 });
 
-test('REVIEW comments reuse detail composer and sync counts into feed/PopupReviews without GET/revision or same-id POST changes', async () => {
+test('standalone REVIEW comment compatibility syncs counts (REVIEW UI unsupported) without GET/revision or same-id POST changes', async () => {
   const original = global.fetch, env = setup(undefined, 'REVIEW');
   const states = [hooks(), hooks(), hooks(), hooks()];
   const [feedState, detailState, popupState, postState] = states;
@@ -138,9 +140,14 @@ test('REVIEW comments reuse detail composer and sync counts into feed/PopupRevie
   const Detail = load('src/app/reviews/[id].tsx', env.mocks(detailState, '../..')).default;
   const PostDetail = load('src/app/community/[id].tsx', env.mocks(postState, '../..')).default;
   const Popup = load('src/components/place/PopupReviews.tsx', { ...env.mocks(popupState, '../..'),
+    '../../locales': require('./helpers/uiDependencies.cjs').loadPure('src/locales/index.ts'),
     '../community/CommunityPostItem': { __esModule: true, default: 'Card' } }).default;
   const list = () => nodes(feedState.render(Feed)).find(node => node.type === 'FlatList');
-  const detailProps = () => nodes(detailState.render(Detail)).find(node => node.type === 'CommunityComments').props;
+  const detailProps = () => {
+    const comments = nodes(detailState.render(Detail)).find(node => node.type === 'CommunityComments');
+    assert.equal(comments, undefined, 'REVIEW comments are intentionally unsupported in the app UI');
+    return { ...env.props, commentCount: list().props.data.find(item => item.type === 'REVIEW').commentCount };
+  };
   const popupCard = () => nodes(popupState.render(Popup, { publicId: 'popup-1', title: 'Popup' })).find(node => node.type === 'Card');
   const renderComments = () => env.state.render(env.Comments, detailProps());
   try {
@@ -155,6 +162,8 @@ test('REVIEW comments reuse detail composer and sync counts into feed/PopupRevie
     };
     list(); detailState.render(Detail); popupCard(); postState.render(PostDetail); await flush();
     assert.equal(detailProps().targetType, 'REVIEW'); assert.equal(detailProps().targetId, 1);
+    assert.equal(calls.some(call => call.url.includes('/comments')), false, 'REVIEW detail must not request unsupported comments');
+    // Exercise the retained API/component independently of the unsupported detail UI.
     renderComments(); await flush();
     assert.ok(button(renderComments(), '1번 댓글 메뉴'), 'REVIEW owner shares delete menu');
     const reads = calls.filter(call => call.options.method !== 'POST').length;
@@ -289,7 +298,7 @@ for (const targetType of ['POST', 'REVIEW']) test(`${targetType}: reply delete r
     assert.equal(button(env.render(), '댓글 입력').props.editable, false);
     resolve({ ok: true, json: async () => ({ commentCount: 3 }) }); await flush();
     assert.deepEqual(commentIds(env.render()), [1, 2, 4]); assert.equal(button(env.render(), '답글 취소'), undefined);
-    assert.ok(nodes(env.render()).some(node => node.props?.style?.fontWeight === '700' && node.props.children.join('') === '@C '));
+    assert.ok(nodes(env.render()).some(node => flattenStyle(node.props?.style).fontWeight === '700' && Array.isArray(node.props.children) && node.props.children.join('') === '@C '));
     assert.equal(env.refresh.mergeCommunityCommentCount({ ...post, type: targetType }, 0).commentCount, 3);
     assert.equal(button(env.render(), '댓글 입력').props.editable, true);
     net.respondDelete({ ok: true, json: async () => ({ commentCount: 0 }) }); confirmDelete(env, 1)(); await flush();
@@ -374,9 +383,9 @@ test(`${targetType}: list uses flat one-level indentation, separate bold mention
     const rows = nodes(tree).filter(node => node.key != null && [1, 2, 3].includes(node.key));
     assert.equal(rows.length, 3); assert.equal(rows[0].props.style[1], false);
     assert.equal(rows[1].props.style[1].marginLeft, 24); assert.equal(rows[2].props.style[1].marginLeft, 24);
-    const mention = nodes(rows[2]).find(node => node.type === 'Text' && node.props.style?.fontWeight === '700');
+    const mention = nodes(rows[2]).find(node => node.type === 'Text' && flattenStyle(node.props.style).fontWeight === '700');
     assert.deepEqual(mention.props.children, ['@', 'B', ' ']);
-    const body = nodes(rows[2]).find(node => node.type === 'Text' && node.props.style?.fontWeight === '400');
+    const body = nodes(rows[2]).find(node => node.type === 'Text' && flattenStyle(node.props.style).fontWeight === '400' && Array.isArray(node.props.children));
     assert.equal(body.props.children[1], 'third body');
     const authors = nodes(tree).filter(node => node.type === 'CommunityAuthor');
     assert.equal(authors.length, 3); assert.ok(authors.every(node => node.props.now === now && node.props.showTime === false));
@@ -392,7 +401,7 @@ test(`${targetType}: reply selection and cancellation; replying to a reply submi
   const original = global.fetch; const env = setup(undefined, targetType); const net = network();
   try {
     env.render(); await flush(); button(env.render(), 'B에게 답글').props.onPress(); await flush();
-    assert.ok(nodes(env.render()).some(node => node.props?.children?.join?.('') === '@B에게 답글'));
+    assert.ok(nodes(env.render()).some(node => node.props?.children === '@B에게 답글'));
     button(env.render(), '답글 취소').props.onPress(); assert.equal(button(env.render(), '답글 취소'), undefined);
     button(env.render(), 'C에게 답글').props.onPress(); await flush();
     net.respond({ ok: true, json: async () => ({ item: { ...third, id: 4, content: 'answer', replyToUser: { id: 3, nickname: 'C' } }, commentCount: 4 }) });

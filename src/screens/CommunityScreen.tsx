@@ -1,6 +1,7 @@
+import { useTranslation } from '../hooks/useTranslation';
+import { useFocusEffect, useRouter, useScrollToTop } from "expo-router";
 import { Pencil, Settings } from "lucide-react-native";
-import { useFocusEffect, useRouter } from "expo-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -21,37 +22,63 @@ import {
   FLOATING_TAB_BAR_BOTTOM_GAP,
   FLOATING_TAB_BAR_HEIGHT,
 } from "../components/navigation/FloatingTabBar";
-import { getCommunityFeed, type CommunityCategory, type CommunityFeedItem, type CommunitySort } from "../lib/community";
-import { communityFeedRevision, subscribeCommunityLikes, subscribeCommunityCommentCounts, subscribeCommunityPostChanges } from "../lib/communityFeedRefresh";
-import { changeCommunityLike } from "../lib/communityLikes";
-import { subscribeAuthSession } from "../lib/auth";
 import { useCommunityNow } from "../hooks/useCommunityNow";
+import { getAuthUser, subscribeAuthUser, subscribeAuthSession } from "../lib/auth";
+import {
+  getCommunityFeed,
+  type CommunityCategory,
+  type CommunityFeedItem,
+  type CommunitySort,
+} from "../lib/community";
+import {
+  communityFeedRevision,
+  subscribeCommunityCommentCounts,
+  subscribeCommunityLikes,
+  subscribeCommunityPostChanges,
+} from "../lib/communityFeedRefresh";
+import { changeCommunityLike } from "../lib/communityLikes";
 import { waitForCommunityRefresh } from "../lib/communityRefresh";
-import { t } from "../locales";
 import { communityColors } from "../theme/communityColors";
-import { radius, spacing, typography } from "../theme/tokens";
+import { colors, radius, spacing, typography } from "../theme/tokens";
 
-const categories: readonly CommunityCategory[] = ["ALL", "REVIEW", "QUESTION", "FREE"];
-const sortOrders: readonly CommunitySort[] = ["LATEST", "POPULAR"];
+const categories: readonly CommunityCategory[] = [
+  "ALL",
+  "REVIEW",
+  "QUESTION",
+  "FREE",
+];
 
 export default function CommunityScreen() {
+  const { t } = useTranslation();
+  const translation = useRef(t);
+  useEffect(() => { translation.current = t; }, [t]);
   const router = useRouter();
+  const authUser = useSyncExternalStore(subscribeAuthUser, getAuthUser, getAuthUser);
+  const listRef = useRef<FlatList<CommunityFeedItem>>(null);
+  useScrollToTop(listRef);
   const navigationLocked = useRef(false);
   // This focus callback must stay independent of feed filters, requests and ticks.
-  useFocusEffect(useCallback(() => { navigationLocked.current = false; }, []));
-  const pushOnce = useCallback((href: Parameters<typeof router.push>[0]) => {
-    if (navigationLocked.current) return;
-    navigationLocked.current = true;
-    try {
-      router.push(href);
-    } catch {
+  useFocusEffect(
+    useCallback(() => {
       navigationLocked.current = false;
-      Alert.alert('화면을 열지 못했어요', '잠시 후 다시 시도해 주세요.');
-    }
-  }, [router]);
+    }, []),
+  );
+  const pushOnce = useCallback(
+    (href: Parameters<typeof router.push>[0]) => {
+      if (navigationLocked.current) return;
+      navigationLocked.current = true;
+      try {
+        router.push(href);
+      } catch {
+        navigationLocked.current = false;
+        Alert.alert(t("place.detail.reviews.openFailed"), t("place.detail.tryLater"));
+      }
+    },
+    [router, t],
+  );
   const { now, updateNow } = useCommunityNow();
   const [category, setCategory] = useState<CommunityCategory>("ALL");
-  const [sort, setSort] = useState<CommunitySort>("LATEST");
+  const [sort] = useState<CommunitySort>("LATEST");
   const [posts, setPosts] = useState<CommunityFeedItem[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -63,77 +90,140 @@ export default function CommunityScreen() {
   const generation = useRef(0);
   const inFlight = useRef(false);
   const controller = useRef<AbortController | null>(null);
-  const loadedRequest = useRef<{ category: CommunityCategory; sort: CommunitySort; retryKey: number; revision: number } | null>(null);
+  const loadedRequest = useRef<{
+    category: CommunityCategory;
+    sort: CommunitySort;
+    retryKey: number;
+    revision: number;
+  } | null>(null);
   const insets = useSafeAreaInsets();
   const horizontalPadding = {
     paddingLeft: spacing.space16 + insets.left,
     paddingRight: spacing.space16 + insets.right,
   };
 
-  useEffect(() => subscribeCommunityLikes((id, state, type = 'POST') => {
-    setPosts((items) => items.map((item) => (!state || item.type === type)
-      ? state ? item.id === id ? { ...item, ...state } : item : { ...item, liked: false }
-      : item));
-  }), []);
-  useEffect(() => subscribeAuthSession(() => setRetryKey((value) => value + 1)), []);
-  useEffect(() => subscribeCommunityCommentCounts((id, count, type = 'POST') => {
-    setPosts((items) => items.map((item) => item.type === type && item.id === id
-      ? { ...item, commentCount: count } : item));
-  }), []);
-  useEffect(() => subscribeCommunityPostChanges((id, patch, type = 'POST') => {
-    setPosts((items) => items.flatMap((item) => item.type === type && item.id === id
-      ? patch ? [{ ...item, ...patch }] : [] : [item]));
-  }), []);
+  useEffect(
+    () =>
+      subscribeCommunityLikes((id, state, type = "POST") => {
+        setPosts((items) =>
+          items.map((item) =>
+            !state || item.type === type
+              ? state
+                ? item.id === id
+                  ? { ...item, ...state }
+                  : item
+                : { ...item, liked: false }
+              : item,
+          ),
+        );
+      }),
+    [],
+  );
+  useEffect(
+    () => subscribeAuthSession(() => setRetryKey((value) => value + 1)),
+    [],
+  );
+  useEffect(
+    () =>
+      subscribeCommunityCommentCounts((id, count, type = "POST") => {
+        setPosts((items) =>
+          items.map((item) =>
+            item.type === type && item.id === id
+              ? { ...item, commentCount: count }
+              : item,
+          ),
+        );
+      }),
+    [],
+  );
+  useEffect(
+    () =>
+      subscribeCommunityPostChanges((id, patch, type = "POST") => {
+        setPosts((items) =>
+          items.flatMap((item) =>
+            item.type === type && item.id === id
+              ? patch
+                ? [{ ...item, ...patch }]
+                : []
+              : [item],
+          ),
+        );
+      }),
+    [],
+  );
 
-  useEffect(() => () => {
-    controller.current?.abort();
-    generation.current += 1;
-    inFlight.current = false;
-    loadedRequest.current = null;
-  }, []);
+  useEffect(
+    () => () => {
+      controller.current?.abort();
+      generation.current += 1;
+      inFlight.current = false;
+      loadedRequest.current = null;
+    },
+    [],
+  );
 
-  const loadFirstPage = useCallback((pullRefresh = false) => {
-    const startedAt = Date.now();
-    updateNow();
-    const current = ++generation.current;
-    controller.current?.abort();
-    const request = new AbortController();
-    controller.current = request;
-    inFlight.current = true;
-    loadedRequest.current = { category, sort, retryKey, revision: communityFeedRevision() };
-    if (!pullRefresh) setPosts([]);
-    setNextCursor(null);
-    setLoading(!pullRefresh);
-    setRefreshing(pullRefresh);
-    setLoadingMore(false);
-    setError(false);
-    setLoadMoreError(false);
-    void getCommunityFeed(category, sort, null, request.signal).then((page) => {
-      if (current !== generation.current) return;
-      setPosts(page.items);
-      setNextCursor(page.nextCursor);
+  const loadFirstPage = useCallback(
+    (pullRefresh = false) => {
+      const startedAt = Date.now();
       updateNow();
-    }).catch(() => {
-      if (current === generation.current && !request.signal.aborted) setError(true);
-    }).finally(async () => {
-      if (pullRefresh) await waitForCommunityRefresh(startedAt, request.signal);
-      if (current === generation.current) {
-        inFlight.current = false;
-        setLoading(false);
-        setRefreshing(false);
-      }
-    });
-  }, [category, sort, retryKey, updateNow]);
+      const current = ++generation.current;
+      controller.current?.abort();
+      const request = new AbortController();
+      controller.current = request;
+      inFlight.current = true;
+      loadedRequest.current = {
+        category,
+        sort,
+        retryKey,
+        revision: communityFeedRevision(),
+      };
+      if (!pullRefresh) setPosts([]);
+      setNextCursor(null);
+      setLoading(!pullRefresh);
+      setRefreshing(pullRefresh);
+      setLoadingMore(false);
+      setError(false);
+      setLoadMoreError(false);
+      void getCommunityFeed(category, sort, null, request.signal)
+        .then((page) => {
+          if (current !== generation.current) return;
+          setPosts(page.items);
+          setNextCursor(page.nextCursor);
+          updateNow();
+        })
+        .catch(() => {
+          if (current === generation.current && !request.signal.aborted)
+            setError(true);
+        })
+        .finally(async () => {
+          if (pullRefresh)
+            await waitForCommunityRefresh(startedAt, request.signal);
+          if (current === generation.current) {
+            inFlight.current = false;
+            setLoading(false);
+            setRefreshing(false);
+          }
+        });
+    },
+    [category, sort, retryKey, updateNow],
+  );
 
-  useFocusEffect(useCallback(() => {
-    updateNow();
-    const previous = loadedRequest.current;
-    if (!previous || previous.category !== category || previous.sort !== sort
-      || previous.retryKey !== retryKey || previous.revision !== communityFeedRevision()) {
-      loadFirstPage();
-    }
-    // Keep the list and active requests on blur; only unmount/filter/refresh cancels them.
-  }, [category, sort, retryKey, loadFirstPage, updateNow]));
+  useFocusEffect(
+    useCallback(() => {
+      updateNow();
+      const previous = loadedRequest.current;
+      if (
+        !previous ||
+        previous.category !== category ||
+        previous.sort !== sort ||
+        previous.retryKey !== retryKey ||
+        previous.revision !== communityFeedRevision()
+      ) {
+        loadFirstPage();
+      }
+      // Keep the list and active requests on blur; only unmount/filter/refresh cancels them.
+    }, [category, sort, retryKey, loadFirstPage, updateNow]),
+  );
 
   const refresh = useCallback(() => {
     if (inFlight.current) return;
@@ -141,30 +231,44 @@ export default function CommunityScreen() {
   }, [loadFirstPage]);
 
   const loadMore = useCallback(() => {
-    if (!nextCursor || inFlight.current || loading || refreshing || loadMoreError) return;
+    if (
+      !nextCursor ||
+      inFlight.current ||
+      loading ||
+      refreshing ||
+      loadMoreError
+    )
+      return;
     const current = generation.current;
     const cursor = nextCursor;
     const request = new AbortController();
     controller.current = request;
     inFlight.current = true;
     setLoadingMore(true);
-    void getCommunityFeed(category, sort, cursor, request.signal).then((page) => {
-      if (current !== generation.current) return;
-      setPosts((previous) => {
-        const items = new Map(previous.map((item) => [`${item.type}:${item.id}`, item]));
-        // Keep row positions, but use the server's newest values for overlapping IDs.
-        for (const item of page.items) items.set(`${item.type}:${item.id}`, item);
-        return [...items.values()];
+    void getCommunityFeed(category, sort, cursor, request.signal)
+      .then((page) => {
+        if (current !== generation.current) return;
+        setPosts((previous) => {
+          const items = new Map(
+            previous.map((item) => [`${item.type}:${item.id}`, item]),
+          );
+          // Keep row positions, but use the server's newest values for overlapping IDs.
+          for (const item of page.items)
+            items.set(`${item.type}:${item.id}`, item);
+          return [...items.values()];
+        });
+        setNextCursor(page.nextCursor === cursor ? null : page.nextCursor);
+      })
+      .catch(() => {
+        if (current === generation.current && !request.signal.aborted)
+          setLoadMoreError(true);
+      })
+      .finally(() => {
+        if (current === generation.current) {
+          inFlight.current = false;
+          setLoadingMore(false);
+        }
       });
-      setNextCursor(page.nextCursor === cursor ? null : page.nextCursor);
-    }).catch(() => {
-      if (current === generation.current && !request.signal.aborted) setLoadMoreError(true);
-    }).finally(() => {
-      if (current === generation.current) {
-        inFlight.current = false;
-        setLoadingMore(false);
-      }
-    });
   }, [category, sort, nextCursor, loading, refreshing, loadMoreError]);
 
   return (
@@ -175,36 +279,94 @@ export default function CommunityScreen() {
           accessibilityLabel={t("community.settings")}
           style={styles.headerIcon}
         >
-          <Settings size={24} color={communityColors.text} />
+          {/* <Settings size={24} color={communityColors.text} /> */}
         </View>
       </View>
 
       <FlatList
+        ref={listRef}
         style={styles.list}
         refreshing={refreshing}
         onRefresh={refresh}
         data={posts}
         extraData={now}
         keyExtractor={(post) => `${post.type}:${post.id}`}
-        renderItem={({ item }) => <CommunityPostItem post={item} now={now}
-          onPressLike={item.type === 'REVIEW' || (item.type === 'POST' && (item.category === 'QUESTION' || item.category === 'FREE'))
-            ? () => { void changeCommunityLike(item, () => pushOnce('/profile/login'),
-              () => Alert.alert('좋아요를 변경하지 못했어요', '잠시 후 다시 시도해 주세요.')); } : undefined}
-          onPressPost={item.type === 'POST' && (item.category === 'QUESTION' || item.category === 'FREE')
-            ? () => pushOnce({ pathname: '/community/[id]', params: { id: String(item.id) } }) : undefined}
-          onPressReview={item.type === 'REVIEW'
-            ? () => pushOnce({ pathname: '/reviews/[id]', params: { id: String(item.id) } }) : undefined}
-          onPressPlace={(publicId) =>
-          pushOnce({ pathname: '/places/[id]', params: { id: publicId } })} />}
+        renderItem={({ item }) => (
+          <CommunityPostItem
+            post={item}
+            now={now}
+            onPressLike={
+              item.type === "REVIEW" ||
+              (item.type === "POST" &&
+                (item.category === "QUESTION" || item.category === "FREE"))
+                ? () => {
+                    void changeCommunityLike(
+                      item,
+                      () => pushOnce("/profile/login"),
+                      () =>
+                        Alert.alert(
+                          translation.current("place.detail.reviews.likeFailed"),
+                          translation.current("place.detail.tryLater"),
+                        ),
+                    );
+                  }
+                : undefined
+            }
+            onPressPost={
+              item.type === "POST" &&
+              (item.category === "QUESTION" || item.category === "FREE")
+                ? () =>
+                    pushOnce({
+                      pathname: "/community/[id]",
+                      params: { id: String(item.id) },
+                    })
+                : undefined
+            }
+            onPressReview={
+              item.type === "REVIEW"
+                ? () =>
+                    pushOnce({
+                      pathname: "/reviews/[id]",
+                      params: { id: String(item.id) },
+                    })
+                : undefined
+            }
+            onPressPlace={(publicId) =>
+              pushOnce({ pathname: "/places/[id]", params: { id: publicId } })
+            }
+          />
+        )}
         onEndReached={loadMore}
         onEndReachedThreshold={0.5}
-        ListEmptyComponent={!loading ? (
-          <View style={styles.empty}><Text style={styles.emptyText}>
-            {error ? '게시글을 불러오지 못했어요' : '아직 게시글이 없어요'}
-          </Text>{error && <Pressable onPress={() => setRetryKey((value) => value + 1)}><Text style={styles.emptyText}>다시 시도</Text></Pressable>}</View>
-        ) : null}
-        ListFooterComponent={loading || loadingMore ? <ActivityIndicator style={styles.empty} color={communityColors.charcoal} />
-          : loadMoreError ? <Pressable onPress={() => setLoadMoreError(false)} style={styles.empty}><Text style={styles.emptyText}>다시 시도</Text></Pressable> : null}
+        ListEmptyComponent={
+          !loading ? (
+            <View style={styles.empty}>
+              <Text style={styles.emptyText}>
+                {error ? t("community.feed.loadFailed") : t("community.feed.empty")}
+              </Text>
+              {error && (
+                <Pressable onPress={() => setRetryKey((value) => value + 1)}>
+                  <Text style={styles.emptyText}>{t("community.detail.retry")}</Text>
+                </Pressable>
+              )}
+            </View>
+          ) : null
+        }
+        ListFooterComponent={
+          loading || loadingMore ? (
+            <ActivityIndicator
+              style={styles.empty}
+              color={communityColors.charcoal}
+            />
+          ) : loadMoreError ? (
+            <Pressable
+              onPress={() => setLoadMoreError(false)}
+              style={styles.empty}
+            >
+              <Text style={styles.emptyText}>{t("community.detail.retry")}</Text>
+            </Pressable>
+          ) : null
+        }
         ItemSeparatorComponent={() => <View style={styles.separator} />}
         contentContainerStyle={[
           styles.listContent,
@@ -244,39 +406,19 @@ export default function CommunityScreen() {
                         selected && styles.selectedCategoryText,
                       ]}
                     >
-                      {t(`community.category.${item.toLowerCase()}`)}
+                      {item === "REVIEW"
+                        ? t("community.reviewFilterLabel")
+                        : t(`community.category.${item.toLowerCase()}`)}
                     </Text>
                   </Pressable>
                 );
               })}
             </ScrollView>
-            <View style={styles.sortRow}>
-              {sortOrders.map((item) => {
-                const selected = sort === item;
-                return (
-                  <Pressable
-                    key={item}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected }}
-                    onPress={() => setSort(item)}
-                  >
-                    <Text
-                      style={[
-                        styles.sortText,
-                        selected && styles.selectedSortText,
-                      ]}
-                    >
-                      {t(`community.sort.${item.toLowerCase()}`)}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
           </View>
         }
       />
 
-      <Pressable
+      {authUser && <Pressable
         style={[
           styles.writeButton,
           {
@@ -290,11 +432,11 @@ export default function CommunityScreen() {
         ]}
         accessibilityLabel={t("community.write")}
         accessibilityRole="button"
-        onPress={() => pushOnce('/community/write')}
+        onPress={() => pushOnce("/community/write")}
       >
         <Pencil size={18} color={communityColors.white} />
         <Text style={styles.writeText}>{t("community.write")}</Text>
-      </Pressable>
+      </Pressable>}
     </SafeAreaView>
   );
 }
@@ -311,7 +453,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     marginBottom: spacing.space12,
   },
-  title: { ...typography.titleL, color: communityColors.text },
+  title: { ...typography.titleL, color: colors.text },
   headerIcon: {
     width: 24,
     height: 32,
@@ -320,30 +462,23 @@ const styles = StyleSheet.create({
   },
   list: { flex: 1 },
   listContent: { flexGrow: 1 },
-  categoryScroll: { marginTop: spacing.space12 },
+  categoryScroll: { marginTop: spacing.space12, marginBottom: spacing.space8 },
   categoryRow: { flexDirection: "row", columnGap: spacing.space8 },
   categoryChip: {
     height: 36,
     paddingHorizontal: spacing.space16,
     borderRadius: radius.full,
     borderWidth: 1,
-    borderColor: communityColors.mutedSurface,
-    backgroundColor: communityColors.mutedSurface,
+    borderColor: colors.border,
+    backgroundColor: colors.background,
     alignItems: "center",
     justifyContent: "center",
   },
-  selectedChip: { borderColor: communityColors.charcoal, backgroundColor: communityColors.charcoal },
-  categoryText: { ...typography.label, color: communityColors.text },
-  selectedCategoryText: { color: communityColors.white },
-  sortRow: {
-    flexDirection: "row",
-    columnGap: spacing.space20,
-    marginTop: spacing.space24,
-  },
-  sortText: { ...typography.label, color: communityColors.secondaryText },
-  selectedSortText: { fontWeight: "700", color: communityColors.charcoal },
+  selectedChip: { borderColor: colors.text, backgroundColor: colors.text },
+  categoryText: { ...typography.label, color: colors.text },
+  selectedCategoryText: { color: colors.background },
   separator: { height: 1, backgroundColor: communityColors.divider },
-  empty: { paddingVertical: spacing.space40, alignItems: 'center' },
+  empty: { paddingVertical: spacing.space40, alignItems: "center" },
   emptyText: { ...typography.label, color: communityColors.secondaryText },
   writeButton: {
     position: "absolute",
@@ -353,7 +488,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     columnGap: spacing.space8,
     borderRadius: radius.full,
-    backgroundColor: communityColors.charcoal,
+    backgroundColor: colors.text,
     shadowColor: "#000000",
     shadowOpacity: 0.15,
     shadowRadius: 12,

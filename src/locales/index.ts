@@ -1,11 +1,13 @@
 import ja from './ja.json';
 import ko from './ko.json';
+import { languageStore, type Locale } from './languageStore';
 
-export type Locale = 'ko' | 'ja';
+export type { Locale, LanguagePreference } from './languageStore';
 
 const defaultLocale: Locale = 'ko';
-const currentLocale: Locale = defaultLocale;
-export function getLocale(): Locale { return currentLocale; }
+export function getLocale(): Locale { return languageStore.getSnapshot().resolvedLanguage; }
+// Stage 1 changes UI only; preserve the existing server content request policy.
+export function getApiLocale(): Locale { return defaultLocale; }
 const dictionaries: Record<Locale, unknown> = { ko, ja };
 
 function lookup(dictionary: unknown, key: string): string | undefined {
@@ -26,7 +28,11 @@ function lookup(dictionary: unknown, key: string): string | undefined {
 }
 
 export function t(key: string, params?: Record<string, string | number>): string {
-  const message = lookup(dictionaries[currentLocale], key)
+  return translate(getLocale(), key, params);
+}
+
+export function translate(locale: Locale, key: string, params?: Record<string, string | number>): string {
+  const message = lookup(dictionaries[locale], key)
     ?? lookup(dictionaries[defaultLocale], key)
     ?? key;
 

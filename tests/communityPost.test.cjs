@@ -5,6 +5,7 @@ const { test } = require('node:test');
 const ts = require('typescript');
 
 function load(file, mocks) {
+  mocks = require('./helpers/uiDependencies.cjs').withUiDependencies(file, mocks);
   if (file !== 'src/lib/communityFeedRefresh.ts') mocks = { './communityFeedRefresh': load('src/lib/communityFeedRefresh.ts', {}), ...mocks };
   const source = readFileSync(path.join(__dirname, '..', file), 'utf8');
   const code = ts.transpileModule(source, { compilerOptions: {
@@ -26,8 +27,6 @@ function writeScreen(createPost, imageOptions = {}) {
   const state = [];
   const refs = [];
   let hook = 0;
-  let beforeRemove;
-  const navigation = { addListener: (_, callback) => { beforeRemove = callback; return () => {}; } };
   const router = { backCalls: 0, replaceCalls: 0, canGoBack: () => true, back() { this.backCalls++; }, replace() { this.replaceCalls++; } };
   const react = {
     useEffect(effect) { effect(); },
@@ -48,9 +47,13 @@ function writeScreen(createPost, imageOptions = {}) {
   ].map((name) => [name, name]));
   primitive.Platform = { OS: 'ios' };
   primitive.StyleSheet = { create: (styles) => styles };
+  const guard = require('./helpers/preventRemove.cjs').removalDriver(react);
+  const alerts = [];
+  primitive.Alert = { alert: (...args) => alerts.push(args) };
   const Screen = load('src/app/community/write.tsx', {
     'react/jsx-runtime': { jsx, jsxs: jsx },
-    'expo-router': { useRouter: () => router, useNavigation: () => navigation, useLocalSearchParams: () => ({}) },
+    'expo-router': { useRouter: () => router, useNavigation: () => guard.navigation, useLocalSearchParams: () => ({}) },
+    'expo-router/react-navigation': { usePreventRemove: guard.usePreventRemove },
     '../../lib/auth': { clearTokens: async () => {} },
     'lucide-react-native': { ChevronLeft: 'ChevronLeft', ImagePlus: 'ImagePlus', X: 'X' },
     react,
@@ -77,7 +80,7 @@ function writeScreen(createPost, imageOptions = {}) {
   return {
     router,
     get feedRefreshes() { return feedRefreshes; },
-    tryLeave() { let prevented = false; beforeRemove?.({ preventDefault() { prevented = true; } }); return prevented; },
+    tryLeave() { const count = guard.completed.length; guard.request({ type: 'GO_BACK' }); return guard.completed.length === count; },
     render() { hook = 0; return Screen(); },
   };
 }

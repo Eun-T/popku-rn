@@ -12,6 +12,8 @@ export const colors = {
   inactiveText: '#9CA3AF',
   inactiveTabText: '#B8BEC8',
   border: '#E5E7EB',
+  paginationActive: '#494B4F',
+  paginationInactive: '#E5E7EB',
   brandGradient: ['#22C55E', '#86EFAC'],
 } as const;
 
@@ -26,6 +28,7 @@ export const typography = {
 } as const;
 
 export const spacing = {
+  space2: 2,
   space4: 4,
   space6: 6,
   space8: 8,
@@ -33,6 +36,7 @@ export const spacing = {
   space16: 16,
   space20: 20,
   space24: 24,
+  space28: 28,
   space32: 32,
   space40: 40,
   space56: 56,

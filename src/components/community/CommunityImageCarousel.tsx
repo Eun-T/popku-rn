@@ -1,13 +1,14 @@
+import { useTranslation } from '../../hooks/useTranslation';
 import { useState } from 'react';
 import { FlatList, Image, StyleSheet, View } from 'react-native';
 
-import { t } from '../../locales';
 import { communityColors } from '../../theme/communityColors';
-import { radius, spacing } from '../../theme/tokens';
+import { colors, radius, spacing } from '../../theme/tokens';
 
 type Props = { images: string[] };
 
 export default function CommunityImageCarousel({ images }: Props) {
+  const { t, resolvedLanguage } = useTranslation();
   const [width, setWidth] = useState(0);
   const [page, setPage] = useState(0);
   if (!images.length) return null;
@@ -20,6 +21,7 @@ export default function CommunityImageCarousel({ images }: Props) {
         {width > 0 ? <FlatList
           key={width}
           data={images}
+          extraData={resolvedLanguage}
           horizontal
           pagingEnabled
           bounces={false}
@@ -48,5 +50,5 @@ const styles = StyleSheet.create({
   viewport: { width: '100%', aspectRatio: 1, borderRadius: radius.radius8, overflow: 'hidden', backgroundColor: communityColors.mutedSurface },
   indicator: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', columnGap: spacing.space6, marginTop: spacing.space12 },
   dot: { width: 6, height: 6, borderRadius: radius.full, backgroundColor: communityColors.divider },
-  activeDot: { width: 18, backgroundColor: communityColors.charcoal },
+  activeDot: { width: 18, backgroundColor: colors.paginationActive },
 });

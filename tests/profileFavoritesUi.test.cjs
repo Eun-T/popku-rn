@@ -5,6 +5,7 @@ const { test } = require('node:test');
 const ts = require('typescript');
 
 function load(file, mocks) {
+  mocks = require('./helpers/uiDependencies.cjs').withUiDependencies(file, mocks);
   const source = readFileSync(path.join(__dirname, '..', file), 'utf8');
   const code = ts.transpileModule(source, { compilerOptions: {
     module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022,
@@ -42,7 +43,9 @@ test('logged in profile opens favorites', () => {
   const navigation = [];
   const Profile = load('src/app/(tabs)/profile/index.tsx', {
     'react': { useCallback: (callback) => callback, useState: () => [false, () => {}],
+      useRef: initial => ({ current: initial }),
       useSyncExternalStore: () => ({ nickname: '사용자', email: 'user@example.com' }) },
+    'expo-blur': { BlurTargetView: 'BlurTargetView', BlurView: 'BlurView' },
     'react/jsx-runtime': runtime,
     'expo-router': { useFocusEffect() {}, useRouter: () => ({ push: (route) => navigation.push(route) }) },
     'lucide-react-native': { Heart: 'Heart', Star: 'Star' },
@@ -52,29 +55,32 @@ test('logged in profile opens favorites', () => {
   });
   const tree = Profile();
   assert.match(visibleText(tree), /내 활동/);
-  nodes(tree).find((node) => node.props?.accessibilityLabel === '찜한 팝업 보기').props.onPress();
-  assert.deepEqual(navigation, ['/profile/favorites']);
+  const menu = require('./helpers/profileMenu.cjs').profileMenu({ nickname: '사용자', email: 'user@example.com' });
+  const action = menu.find('찜한 팝업'); assert.equal(action.props.disabled, false); action.props.onPress();
+  assert.deepEqual(menu.routes, ['/profile/favorites']);
+  const anonymous = require('./helpers/profileMenu.cjs').profileMenu(null).find('찜한 팝업');
+  assert.equal(anonymous.props.disabled, true); assert.equal(anonymous.props.onPress, undefined);
 });
 
 function favorites(initialPopups, status = 'ready') {
   const navigation = [];
   const state = [status, 0];
-  const FavoritePopups = load('src/app/(tabs)/profile/favorites.tsx', {
-    '../../../hooks/usePopupNavigation': { usePopupNavigation: () => (id) => navigation.push({ pathname: '/places/[id]', params: { id } }) },
+  const FavoritePopups = load('src/app/profile/favorites.tsx', {
+    '../../hooks/usePopupNavigation': { usePopupNavigation: () => (id) => navigation.push({ pathname: '/places/[id]', params: { id } }) },
     'react': { useCallback: (callback) => callback, useState: (initial) => [state.shift() ?? initial, () => {}],
-      useSyncExternalStore: () => initialPopups },
+      useRef: initial => ({ current: initial }), useSyncExternalStore: (_subscribe, getSnapshot) => getSnapshot() },
     'react/jsx-runtime': runtime,
     'expo-router': { useFocusEffect() {}, useRouter: () => ({ canGoBack: () => true,
       back: () => navigation.push('back'), push: (route) => navigation.push(route),
-      replace: (route) => navigation.push(route) }) },
+      replace: (route) => navigation.push(route), dismissTo: (route) => navigation.push(route) }) },
     'lucide-react-native': { ChevronLeft: 'ChevronLeft', Heart: 'Heart' },
     'react-native': native,
     'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView' },
-    '../../../lib/auth': { clearTokens: async () => {} },
-    '../../../lib/favorites': { getFavoritePopups: async () => initialPopups, FavoriteUnauthorizedError: class extends Error {} },
-    '../../../lib/favoriteCache': { getFavoriteCache: () => initialPopups, subscribeFavoriteCache: () => () => {} },
-    '../../../theme/tokens': theme,
-    '../../../../assets/images/ranking-placeholder.png': 'placeholder',
+    '../../lib/auth': { clearTokens: async () => {} },
+    '../../lib/favorites': { getFavoritePopups: async () => initialPopups, FavoriteUnauthorizedError: class extends Error {} },
+    '../../lib/favoriteCache': { getFavoriteCache: () => initialPopups, favoriteSessionGeneration: () => 0, subscribeFavoriteCache: () => () => {} },
+    '../../theme/tokens': theme,
+    '../../../assets/images/ranking-placeholder.png': 'placeholder',
   });
   return { tree: FavoritePopups(), navigation };
 }
@@ -105,7 +111,7 @@ test('favorite dates render safely when either or both dates are missing', () =>
     const popup = { publicId: 'dated-popup', name: '날짜 확인', coverImageUrl: null,
       startDate, endDate, tags: [] };
     const { tree } = favorites([popup]);
-    const period = nodes(tree).find((node) => node.type === 'Text' && node.props?.numberOfLines === 1);
+    const period = nodes(tree).find((node) => node.type === 'Text' && node.props?.numberOfLines === 1 && node.props.style?.marginTop === 8);
     assert.equal(visibleText(period), expected);
   }
 });

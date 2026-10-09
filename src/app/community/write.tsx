@@ -1,23 +1,26 @@
+import { useTranslation } from '../../hooks/useTranslation';
 import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
+import { usePreventRemove } from 'expo-router/react-navigation';
 import { ChevronLeft, ImagePlus, X } from 'lucide-react-native';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CommunityApiError, createCommunityPost, getCommunityPostForEdit, updateCommunityPost } from '../../lib/community';
 import { markCommunityFeedChanged, publishCommunityPostChange } from '../../lib/communityFeedRefresh';
 import { clearTokens } from '../../lib/auth';
+import { draftLoginHref } from '../../lib/loginReturn';
 import { logCommunityError } from '../../lib/communityDiagnostics';
 import { ImageSelectionError, MAX_POST_IMAGES, publishPostWithImages, updatePostWithImages, selectPostImages, type ImageEditAttempt, type ImagePostAttempt, type PostImage } from '../../lib/communityImages';
-import { t } from '../../locales';
 import { communityColors } from '../../theme/communityColors';
-import { radius, spacing, typography } from '../../theme/tokens';
+import { colors, radius, spacing, typography } from '../../theme/tokens';
 
 type WriteCategory = 'QUESTION' | 'FREE';
 const categories: readonly WriteCategory[] = ['QUESTION', 'FREE'];
 type DraftImage = { id: string; uri: string; processing: boolean; image?: PostImage; retainedId?: number };
 
 export default function CommunityWriteScreen() {
+  const { t } = useTranslation();
   const router = useRouter();
   const { editId } = useLocalSearchParams<{ editId?: string }>();
   const editing = editId !== undefined;
@@ -42,10 +45,20 @@ export default function CommunityWriteScreen() {
   const allowLeaveRef = useRef(false);
   const imageSequenceRef = useRef(0);
   const mountedRef = useRef(true);
+  const originalDraft = useRef<{ content: string; imageIds: number[] } | null>(null);
+  const confirmingLeave = useRef(false);
   const authenticationRequired = imageAttemptRef.current?.authRequired || editAttemptRef.current?.authRequired;
   const locked = submitting || pendingConfirmation || loadingEdit || editLoadError;
   const imagesReady = images.every((image) => !image.processing && (image.image || image.retainedId));
   const canRegister = content.trim().length > 0 && !submitting && !loadingEdit && !editLoadError && !selectingImages && imagesReady;
+  const hasChanges = editing
+    ? originalDraft.current !== null && (content !== originalDraft.current.content
+      || images.length !== originalDraft.current.imageIds.length
+      || images.some((image, index) => image.retainedId !== originalDraft.current!.imageIds[index]))
+    : content.trim().length > 0 || images.length > 0;
+  const removalLocked = () => submittingRef.current || selectingRef.current
+    || !!(imageAttemptRef.current && !imageAttemptRef.current.authRequired)
+    || !!(editAttemptRef.current && !editAttemptRef.current.authRequired);
 
   useEffect(() => {
     if (!editing) return;
@@ -53,6 +66,7 @@ export default function CommunityWriteScreen() {
     setLoadingEdit(true); setEditLoadError(false);
     void getCommunityPostForEdit(postId, request.signal).then((post) => {
       if (request.signal.aborted) return;
+      originalDraft.current = { content: post.content, imageIds: [...post.imageIds!] };
       setCategory(post.category); setContent(post.content);
       setImages(post.images.map((uri, index) => ({ id: `retained-${post.imageIds![index]}`, uri,
         retainedId: post.imageIds![index], processing: false })));
@@ -61,7 +75,7 @@ export default function CommunityWriteScreen() {
       setEditLoadError(true);
       if (error instanceof CommunityApiError && error.status === 401) {
         const invalidated = await clearTokens(error.authGeneration).catch(() => true);
-        if (invalidated !== false && !request.signal.aborted) router.push('/profile/login');
+        if (invalidated !== false && !request.signal.aborted) router.push(draftLoginHref(navigation));
       }
     }).finally(() => { if (!request.signal.aborted) setLoadingEdit(false); });
     return () => request.abort();
@@ -72,9 +86,19 @@ export default function CommunityWriteScreen() {
     return () => { mountedRef.current = false; };
   }, []);
 
-  useEffect(() => navigation.addListener('beforeRemove', (event) => {
-    if (!allowLeaveRef.current && (submittingRef.current || imageAttemptRef.current || editAttemptRef.current)) event.preventDefault();
-  }), [navigation]);
+  usePreventRemove(hasChanges || submitting || selectingImages || (pendingConfirmation && !authenticationRequired), ({ data }) => {
+    if (allowLeaveRef.current) { navigation.dispatch(data.action); return; }
+    if (removalLocked() || confirmingLeave.current) return;
+    confirmingLeave.current = true;
+    Alert.alert(t('review.write.leaveTitle'), t('review.write.leaveMessage'), [
+      { text: t('review.write.continue'), style: 'cancel', onPress: () => { confirmingLeave.current = false; } },
+      { text: t('review.write.leave'), style: 'destructive', onPress: () => {
+        if (!confirmingLeave.current) return;
+        confirmingLeave.current = false;
+        if (mountedRef.current && !removalLocked()) navigation.dispatch(data.action);
+      } },
+    ], { cancelable: false });
+  });
 
   async function handleSelectImages() {
     if (locked || submittingRef.current || selectingRef.current || imageAttemptRef.current || editAttemptRef.current || images.length >= MAX_POST_IMAGES) return;
@@ -101,14 +125,14 @@ export default function CommunityWriteScreen() {
         onFailed(index) {
           if (!mountedRef.current) return;
           setImages((current) => current.filter((item) => item.id !== ids[index]));
-          setImageError(t('community.imageError.conversion'));
+          setImageError('community.imageError.conversion');
         },
       }, images.length);
     }
     catch (error) {
       if (!mountedRef.current) return;
       setImageError(error instanceof ImageSelectionError
-        ? t(`community.imageError.${error.reason}`) : t('community.imageError.conversion'));
+        ? `community.imageError.${error.reason}` : 'community.imageError.conversion');
     } finally { selectingRef.current = false; if (mountedRef.current) setSelectingImages(false); }
   }
 
@@ -134,7 +158,11 @@ export default function CommunityWriteScreen() {
         markCommunityFeedChanged();
       }
       allowLeaveRef.current = true;
-      router.back();
+      confirmingLeave.current = false;
+      if (mountedRef.current) {
+        if (router.canGoBack()) router.back();
+        else router.replace('/(tabs)/community');
+      }
     } catch (error) {
       logCommunityError('REGISTER', {
         ...(error instanceof CommunityApiError ? { status: error.status, responseBody: error.responseBody } : {}),
@@ -143,9 +171,8 @@ export default function CommunityWriteScreen() {
       setPendingConfirmation(imageAttemptRef.current !== null || editAttemptRef.current !== null);
       if (error instanceof CommunityApiError && error.status === 401) {
         // Keep the mounted draft. A prior unknown commit retains its immutable token, but authentication must not trap navigation.
-        allowLeaveRef.current = true;
         const invalidated = await clearTokens(error.authGeneration).catch(() => true);
-        if (invalidated !== false && mountedRef.current) router.push('/profile/login');
+        if (invalidated !== false && mountedRef.current) router.push(draftLoginHref(navigation));
       }
     } finally {
       submittingRef.current = false;
@@ -212,7 +239,7 @@ export default function CommunityWriteScreen() {
           />
           {submitError ? <Text accessibilityRole="alert" style={styles.submitError}>{t(editing ? 'community.edit.failed' : 'community.writeFailed')}</Text> : null}
           {pendingConfirmation ? <Text accessibilityRole="alert" style={styles.submitError}>{t(editing ? 'community.edit.confirmRetry' : 'community.imageConfirmRetry')}</Text> : null}
-          {imageError ? <Text accessibilityRole="alert" style={styles.submitError}>{imageError}</Text> : null}
+          {imageError ? <Text accessibilityRole="alert" style={styles.submitError}>{t(imageError)}</Text> : null}
 
           {images.length > 0 ? <ScrollView
             horizontal
@@ -282,7 +309,7 @@ const styles = StyleSheet.create({
     height: 44,
     paddingHorizontal: spacing.space16,
     borderRadius: radius.radius8,
-    backgroundColor: communityColors.charcoal,
+    backgroundColor: colors.text,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -296,13 +323,15 @@ const styles = StyleSheet.create({
     height: 36,
     paddingHorizontal: spacing.space16,
     borderRadius: radius.full,
-    backgroundColor: communityColors.mutedSurface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.background,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  selectedChip: { backgroundColor: communityColors.charcoal },
-  categoryText: { ...typography.label, color: communityColors.text },
-  selectedCategoryText: { color: communityColors.white },
+  selectedChip: { borderColor: colors.text, backgroundColor: colors.text },
+  categoryText: { ...typography.label, color: colors.text },
+  selectedCategoryText: { color: colors.background },
   contentInput: {
     minHeight: 220,
     marginTop: spacing.space24,
@@ -337,5 +366,5 @@ const styles = StyleSheet.create({
   imagePreview: { width: 88, height: 88, flexShrink: 0 },
   previewImage: { width: '100%', height: '100%', borderRadius: radius.radius8 },
   imageProcessing: { position: 'absolute', left: spacing.space8, bottom: spacing.space8, padding: spacing.space4, borderRadius: radius.full, backgroundColor: communityColors.white },
-  removeImage: { position: 'absolute', top: 0, right: 0, width: 28, height: 28, borderRadius: radius.full, backgroundColor: communityColors.charcoal, alignItems: 'center', justifyContent: 'center' },
+  removeImage: { position: 'absolute', top: 0, right: 0, width: 28, height: 28, borderRadius: radius.full, backgroundColor: colors.text, alignItems: 'center', justifyContent: 'center' },
 });

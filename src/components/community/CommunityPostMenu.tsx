@@ -1,16 +1,17 @@
+import { useTranslation } from '../../hooks/useTranslation';
 import { Pencil, Trash2 } from 'lucide-react-native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Modal, PanResponder, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { t } from '../../locales';
 import { communityColors } from '../../theme/communityColors';
 import { radius, spacing } from '../../theme/tokens';
 
-type Props = { onSelect: (index: number) => void; showEdit?: boolean; showDelete?: boolean };
+type Props = { onSelect: (index: number) => void; showEdit?: boolean; showDelete?: boolean; edgeToEdge?: boolean };
 const DESTRUCTIVE_RED = '#DC2626';
 
-export default function CommunityPostMenu({ onSelect, showEdit = true, showDelete = true }: Props) {
+export default function CommunityPostMenu({ onSelect, showEdit = true, showDelete = true, edgeToEdge = false }: Props) {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const [presented, setPresented] = useState(true);
   const translateY = useRef(new Animated.Value(220)).current;
@@ -61,8 +62,11 @@ export default function CommunityPostMenu({ onSelect, showEdit = true, showDelet
           <Pressable accessibilityRole="button" accessibilityLabel={t('community.cancel')}
             onPress={() => dismiss(0)} style={StyleSheet.absoluteFill} />
         </Animated.View>
-        <Animated.View accessibilityViewIsModal style={[styles.sheet,
-          { marginBottom: Math.max(insets.bottom, spacing.space16), transform: [{ translateY }] }]}>
+        <Animated.View accessibilityViewIsModal style={[styles.sheet, edgeToEdge && styles.edgeSheet,
+          edgeToEdge ? { paddingBottom: insets.bottom + spacing.space8,
+            paddingLeft: insets.left + spacing.space20, paddingRight: insets.right + spacing.space20 }
+            : { marginBottom: Math.max(insets.bottom, spacing.space16) },
+          { transform: [{ translateY }] }]}>
           <View style={styles.handleArea} {...panResponder.panHandlers}><View style={styles.handle} /></View>
           {showEdit && <><Pressable accessibilityRole="button" onPress={() => dismiss(1)}
             style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}>
@@ -86,6 +90,8 @@ const styles = StyleSheet.create({
   backdrop: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0, 0, 0, 0.4)' },
   sheet: { marginHorizontal: spacing.space16, paddingHorizontal: spacing.space20, paddingBottom: spacing.space8,
     borderRadius: radius.radius24, backgroundColor: communityColors.background, overflow: 'hidden' },
+  edgeSheet: { marginHorizontal: 0, marginBottom: 0, borderRadius: 0,
+    borderTopLeftRadius: radius.radius24, borderTopRightRadius: radius.radius24 },
   handleArea: { height: 32, alignItems: 'center', justifyContent: 'center' },
   handle: { width: 36, height: 4, borderRadius: 2, backgroundColor: communityColors.secondaryText, opacity: 0.4 },
   row: { height: 56, flexDirection: 'row', alignItems: 'center', columnGap: spacing.space12 },

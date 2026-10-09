@@ -1,3 +1,5 @@
+import { useTranslation } from '../../../hooks/useTranslation';
+import { accountUiKey, accountUiText } from '../../../locales/accountUi';
 import { useEffect, useRef, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Check, ChevronLeft, ChevronRight } from 'lucide-react-native';
@@ -5,9 +7,12 @@ import { Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleS
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { checkEmailAvailability, EmailVerificationApiError, sendEmailVerification, verifyEmailCode } from '../../../lib/emailVerification';
-import { clearTokens, DEVICE_ID, getCurrentUser, saveTokens, setAuthUser } from '../../../lib/auth';
+import { authSessionGeneration, DEVICE_ID } from '../../../lib/auth';
+import { useLoginAttempt } from '../../../hooks/useLoginAttempt';
+import { completedSignupHref, loginHref, parseLoginReturn } from '../../../lib/loginReturn';
 import { clearGoogleSignup, completeGoogleSignup, getGoogleSignupToken, GoogleAuthApiError } from '../../../lib/googleAuth';
 import { checkNicknameAvailability } from '../../../lib/nicknameAvailability';
+import { normalizeNickname, isValidNickname, isValidPassword } from '../../../lib/accountPolicy';
 import { registerUser, SignupApiError, type SignupRequest } from '../../../lib/signup';
 import { colors, radius, spacing, typography } from '../../../theme/tokens';
 
@@ -33,6 +38,7 @@ function ConsentMark({ checked }: { checked: boolean }) {
 }
 
 function ConsentRow({ label, checked, onToggle, onOpenDetails }: ConsentRowProps) {
+  const { t } = useTranslation();
   return (
     <View style={styles.consentRow}>
       <Pressable
@@ -47,7 +53,7 @@ function ConsentRow({ label, checked, onToggle, onOpenDetails }: ConsentRowProps
       <Pressable
         style={styles.consentDetails}
         accessibilityRole="button"
-        accessibilityLabel={label + ' 자세히 보기'}
+        accessibilityLabel={label + accountUiText(t, " 자세히 보기")}
         onPress={onOpenDetails}
       >
         <Text style={styles.consentLabel}>{label}</Text>
@@ -55,21 +61,6 @@ function ConsentRow({ label, checked, onToggle, onOpenDetails }: ConsentRowProps
       </Pressable>
     </View>
   );
-}
-
-function normalizeNickname(value: string): string {
-  return value.replace(/^[\u0000-\u0020]+|[\u0000-\u0020]+$/g, '').normalize('NFC');
-}
-
-function isValidNickname(value: string): boolean {
-  const length = Array.from(value).length;
-  return length >= 2 && length <= 10 && /^[\p{L}\p{Nd}\p{Mn}_]+$/u.test(value);
-}
-
-function isValidPassword(value: string): boolean {
-  return /^[\x21-\x7e]{8,72}$/.test(value)
-    && /[A-Za-z]/.test(value)
-    && /[0-9]/.test(value);
 }
 
 function sendErrorMessage(error: unknown): string {
@@ -132,8 +123,13 @@ function googleJoinErrorMessage(error: unknown): string {
 }
 
 export default function SignUpEmail() {
+  const { t } = useTranslation();
   const router = useRouter();
-  const { mode } = useLocalSearchParams<{ mode?: string }>();
+  const params = useLocalSearchParams<{ mode?: string; intent?: string; publicId?: string; resumeKey?: string }>();
+  const { mode } = params;
+  const target = parseLoginReturn(params);
+  const scope = JSON.stringify(target);
+  const authentication = useLoginAttempt(scope);
   const isGoogle = mode === 'google';
   const [signupStep, setSignupStep] = useState<SignupStep>(isGoogle ? 'nickname' : 'emailPassword');
   const [email, setEmail] = useState('');
@@ -206,8 +202,11 @@ export default function SignUpEmail() {
   }, [signupStep]);
 
   useEffect(() => {
-    if (isGoogle && !getGoogleSignupToken()) router.replace('/profile/login');
-  }, [isGoogle, router]);
+    if (isGoogle && !getGoogleSignupToken()) {
+      if (target) router.dismissTo(loginHref(target));
+      else router.replace('/profile/login');
+    }
+  }, [isGoogle, router, scope]);
 
   useEffect(() => () => {
     if (isGoogle) clearGoogleSignup();
@@ -236,7 +235,7 @@ export default function SignUpEmail() {
     if (signupStep === 'nickname') {
       if (isGoogle) {
         clearGoogleSignup();
-        router.dismissTo('/profile/login');
+        router.dismissTo(target ? loginHref(target) : '/profile/login');
         return;
       }
       Keyboard.dismiss();
@@ -247,7 +246,7 @@ export default function SignUpEmail() {
       return;
     }
     if (router.canGoBack()) router.back();
-    else router.replace('/profile/login');
+    else router.replace(target ? loginHref(target) : '/profile/login');
   }
 
   function handlePasswordNext() {
@@ -298,6 +297,8 @@ export default function SignUpEmail() {
 
   async function handleJoin() {
     if (!canJoin || joiningRef.current || signupDraft.nickname === null) return;
+    const attempt = isGoogle ? authentication.begin() : null;
+    if (isGoogle && !attempt) return;
     joiningRef.current = true;
     setJoining(true);
     setJoinError('');
@@ -306,19 +307,15 @@ export default function SignUpEmail() {
       privacyPolicy: signupDraft.privacyAccepted,
       marketing: signupDraft.marketingAccepted,
     };
-    let googleTokensSaved = false;
     try {
       if (isGoogle) {
         const signupToken = getGoogleSignupToken();
         if (!signupToken) {
-          setJoinError('Google 가입 시간이 만료됐어요. 다시 로그인해 주세요.');
+          setJoinError(accountUiKey('Google 가입 시간이 만료됐어요. 다시 로그인해 주세요.'));
           return;
         }
         const tokens = await completeGoogleSignup({ signupToken, nickname: signupDraft.nickname, consents, deviceId: DEVICE_ID });
-        await saveTokens(tokens);
-        googleTokensSaved = true;
-        const currentUser = await getCurrentUser(tokens.accessToken);
-        setAuthUser(currentUser);
+        if (!await authentication.authenticate(attempt!, tokens) || !authentication.complete(attempt!)) return;
       } else {
         if (!signupProof) return;
         const request: SignupRequest = {
@@ -332,22 +329,23 @@ export default function SignUpEmail() {
         setSignupProof(null);
       }
     } catch (error) {
-      if (googleTokensSaved) {
-        try { await clearTokens(); } catch { /* Keep the original error visible. */ }
-      }
+      if (attempt && !await authentication.fail(attempt)) return;
       if (!isGoogle && error instanceof SignupApiError && error.status === 403) {
         setSignupProof(null);
         setVerificationStage('email');
         setCode('');
-        setEmailError('이메일 인증을 다시 진행해 주세요.');
+        setEmailError(accountUiKey('이메일 인증을 다시 진행해 주세요.'));
         setSignupStep('emailPassword');
         return;
       }
-      setJoinError(isGoogle ? googleJoinErrorMessage(error) : joinErrorMessage(error));
+      setJoinError(accountUiKey(isGoogle ? googleJoinErrorMessage(error) : joinErrorMessage(error)));
       return;
     } finally {
-      joiningRef.current = false;
-      setJoining(false);
+      if (!attempt || authentication.active(attempt)) {
+        joiningRef.current = false;
+        setJoining(false);
+      }
+      if (attempt) authentication.release(attempt);
     }
     setPassword('');
     setPasswordConfirmation('');
@@ -358,9 +356,10 @@ export default function SignUpEmail() {
     Keyboard.dismiss();
     if (isGoogle) {
       clearGoogleSignup();
-      router.replace('/(tabs)');
+      if (target) router.dismissTo(completedSignupHref(target, authSessionGeneration()));
+      else router.replace('/(tabs)');
     } else {
-      router.dismissTo('/profile/login');
+      router.dismissTo(target ? loginHref(target) : '/profile/login');
     }
   }
 
@@ -403,7 +402,7 @@ export default function SignUpEmail() {
       const available = await checkEmailAvailability(targetEmail);
       if (requestVersionRef.current !== version) return;
       if (!available) {
-        setEmailError('이미 가입된 이메일이에요.');
+        setEmailError(accountUiKey('이미 가입된 이메일이에요.'));
         return;
       }
       await sendEmailVerification(targetEmail);
@@ -414,7 +413,7 @@ export default function SignUpEmail() {
       setResendSecondsLeft(RESEND_COOLDOWN_SECONDS);
       setVerificationStage('code');
     } catch (error) {
-      if (requestVersionRef.current === version) setEmailError(sendErrorMessage(error));
+      if (requestVersionRef.current === version) setEmailError(accountUiKey(sendErrorMessage(error)));
     } finally {
       finishRequest(version);
     }
@@ -433,7 +432,7 @@ export default function SignUpEmail() {
       setSecondsLeft(VERIFICATION_SECONDS);
       setResendSecondsLeft(RESEND_COOLDOWN_SECONDS);
     } catch (error) {
-      if (requestVersionRef.current === version) setCodeError(sendErrorMessage(error));
+      if (requestVersionRef.current === version) setCodeError(accountUiKey(sendErrorMessage(error)));
     } finally {
       finishRequest(version);
     }
@@ -452,7 +451,7 @@ export default function SignUpEmail() {
       Keyboard.dismiss();
       setVerificationStage('verified');
     } catch (error) {
-      if (requestVersionRef.current === version) setCodeError(verifyErrorMessage(error));
+      if (requestVersionRef.current === version) setCodeError(accountUiKey(verifyErrorMessage(error)));
     } finally {
       finishRequest(version);
     }
@@ -476,22 +475,22 @@ export default function SignUpEmail() {
         >
           <View style={styles.header}>
             <Pressable
-              accessibilityLabel="뒤로가기"
+              accessibilityLabel={accountUiText(t, "뒤로가기")}
               onPress={handleBack}
               style={styles.backButton}
             >
               <ChevronLeft size={24} color={colors.text} />
             </Pressable>
-            <Text style={styles.title}>회원가입</Text>
+            <Text style={styles.title}>{accountUiText(t, "회원가입")}</Text>
           </View>
 
           <View style={styles.form}>
             {signupStep === 'emailPassword' ? (
               <>
-                <Text style={styles.prompt}>이메일을 입력해 주세요</Text>
+                <Text style={styles.prompt}>{accountUiText(t, "이메일을 입력해 주세요")}</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder="이메일"
+                  placeholder={accountUiText(t, "이메일")}
                   placeholderTextColor={colors.secondaryText}
                   keyboardType="email-address"
                   autoCapitalize="none"
@@ -500,21 +499,21 @@ export default function SignUpEmail() {
                   value={email}
                   onChangeText={handleEmailChange}
                 />
-                {emailError ? <Text style={styles.error}>{emailError}</Text> : null}
+                {emailError ? <Text style={styles.error}>{accountUiText(t, emailError)}</Text> : null}
                 {verificationStage === 'email' ? (
                   <Pressable
                     style={[styles.submit, (!canReceiveCode || pending !== null) && styles.disabled]}
                     disabled={!canReceiveCode || pending !== null}
                     onPress={() => void handleReceiveCode()}
                   >
-                    <Text style={styles.submitText}>인증번호 받기</Text>
+                    <Text style={styles.submitText}>{accountUiText(t, "인증번호 받기")}</Text>
                   </Pressable>
                 ) : (
                   <View style={styles.verificationSection}>
                     <View style={styles.codeInputContainer}>
                       <TextInput
                         style={[styles.input, styles.codeInput]}
-                        placeholder="인증번호 6자리"
+                        placeholder={accountUiText(t, "인증번호 6자리")}
                         placeholderTextColor={colors.secondaryText}
                         keyboardType="number-pad"
                         maxLength={6}
@@ -531,41 +530,41 @@ export default function SignUpEmail() {
                         onPress={() => void handleVerify()}
                       >
                         <Text style={[styles.inlineVerifyText, (verificationStage === 'code' && (!canVerify || pending !== null)) && styles.inactiveVerifyText]}>
-                          {verificationStage === 'verified' ? '인증완료' : '인증하기'}
+                          {verificationStage === 'verified' ? accountUiText(t, "인증완료") : accountUiText(t, "인증하기")}
                         </Text>
                       </Pressable>
                     </View>
                     {verificationStage === 'code' ? (
                       <>
-                        {codeError ? <Text style={styles.error}>{codeError}</Text> : null}
+                        {codeError ? <Text style={styles.error}>{accountUiText(t, codeError)}</Text> : null}
                         <View style={styles.verificationOptions}>
                           <Text style={styles.timer}>{remainingTime}</Text>
                           <Pressable disabled={pending !== null || resendSecondsLeft > 0} onPress={() => void handleResend()}>
-                            <Text style={[styles.resend, (pending !== null || resendSecondsLeft > 0) && styles.disabled]}>인증번호 재전송</Text>
+                            <Text style={[styles.resend, (pending !== null || resendSecondsLeft > 0) && styles.disabled]}>{accountUiText(t, "인증번호 재전송")}</Text>
                           </Pressable>
                         </View>
                   </>
                 ) : (
-                  <Text style={styles.verifiedMessage}>이메일 인증이 완료됐어요.</Text>
+                  <Text style={styles.verifiedMessage}>{accountUiText(t, "이메일 인증이 완료됐어요.")}</Text>
                 )}
               </View>
             )}
             {verificationStage === 'verified' ? (
               <View style={styles.passwordSection}>
-                <Text style={styles.prompt}>비밀번호를 입력해 주세요</Text>
+                <Text style={styles.prompt}>{accountUiText(t, "비밀번호를 입력해 주세요")}</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder="비밀번호"
+                  placeholder={accountUiText(t, "비밀번호")}
                   placeholderTextColor={colors.secondaryText}
                   secureTextEntry
                   autoComplete="new-password"
                   value={password}
                   onChangeText={setPassword}
                 />
-                <Text style={styles.passwordHint}>영문과 숫자를 포함해 8자 이상 입력해 주세요.</Text>
+                <Text style={styles.passwordHint}>{accountUiText(t, "영문과 숫자를 포함해 8자 이상 입력해 주세요.")}</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder="비밀번호 확인"
+                  placeholder={accountUiText(t, "비밀번호 확인")}
                   placeholderTextColor={colors.secondaryText}
                   secureTextEntry
                   autoComplete="new-password"
@@ -573,72 +572,72 @@ export default function SignUpEmail() {
                   onChangeText={setPasswordConfirmation}
                   onBlur={() => setConfirmationTouched(true)}
                 />
-                {showPasswordMismatch ? <Text style={styles.error}>비밀번호가 일치하지 않아요.</Text> : null}
+                {showPasswordMismatch ? <Text style={styles.error}>{accountUiText(t, "비밀번호가 일치하지 않아요.")}</Text> : null}
                 <Pressable style={[styles.submit, !canContinue && styles.disabled]} disabled={!canContinue} onPress={handlePasswordNext}>
-                  <Text style={styles.submitText}>다음</Text>
+                  <Text style={styles.submitText}>{accountUiText(t, "다음")}</Text>
                 </Pressable>
               </View>
             ) : null}
               </>
             ) : signupStep === 'nickname' ? (
               <>
-                <Text style={styles.prompt}>닉네임을 입력해 주세요</Text>
+                <Text style={styles.prompt}>{accountUiText(t, "닉네임을 입력해 주세요")}</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder="닉네임"
+                  placeholder={accountUiText(t, "닉네임")}
                   placeholderTextColor={colors.secondaryText}
                   autoCapitalize="none"
                   value={nickname}
                   onChangeText={handleNicknameChange}
                 />
-                <Text style={styles.nicknameHint}>2~10자로 입력해 주세요.</Text>
+                <Text style={styles.nicknameHint}>{accountUiText(t, "2~10자로 입력해 주세요.")}</Text>
                 {nickname.length > 0 && !nicknameIsValid ? (
-                  <Text style={styles.error}>문자·숫자·밑줄로 2~10자 입력해 주세요.</Text>
+                  <Text style={styles.error}>{accountUiText(t, "문자·숫자·밑줄로 2~10자 입력해 주세요.")}</Text>
                 ) : confirmedNickname === normalizedNickname ? (
-                  <Text style={styles.nicknameAvailable}>사용 가능한 닉네임이에요.</Text>
+                  <Text style={styles.nicknameAvailable}>{accountUiText(t, "사용 가능한 닉네임이에요.")}</Text>
                 ) : nicknameError === 'taken' ? (
-                  <Text style={styles.error}>이미 사용 중인 닉네임이에요.</Text>
+                  <Text style={styles.error}>{accountUiText(t, "이미 사용 중인 닉네임이에요.")}</Text>
                 ) : nicknameError === 'request' ? (
-                  <Text style={styles.error}>닉네임을 확인하지 못했어요. 다시 시도해 주세요.</Text>
+                  <Text style={styles.error}>{accountUiText(t, "닉네임을 확인하지 못했어요. 다시 시도해 주세요.")}</Text>
                 ) : null}
                 <Pressable
                   style={[styles.submit, (!canContinueNickname || nicknameChecking) && styles.disabled]}
                   disabled={!canContinueNickname || nicknameChecking}
                   onPress={() => void handleNicknameNext()}
                 >
-                  <Text style={styles.submitText}>{nicknameChecking ? '확인 중...' : '다음'}</Text>
+                  <Text style={styles.submitText}>{nicknameChecking ? accountUiText(t, "확인 중...") : accountUiText(t, "다음")}</Text>
                 </Pressable>
               </>
             ) : (
               <>
-                <Text style={styles.prompt}>약관에 동의해 주세요</Text>
+                <Text style={styles.prompt}>{accountUiText(t, "약관에 동의해 주세요")}</Text>
                 <View style={styles.consentList}>
                   <Pressable
                     style={styles.allConsentRow}
                     accessibilityRole="checkbox"
-                    accessibilityLabel="전체 동의"
+                    accessibilityLabel={accountUiText(t, "전체 동의")}
                     accessibilityState={{ checked: allAccepted }}
                     onPress={handleAllConsentToggle}
                   >
                     <View style={styles.consentCheckboxTouch}>
                       <ConsentMark checked={allAccepted} />
                     </View>
-                    <Text style={styles.consentLabel}>전체 동의</Text>
+                    <Text style={styles.consentLabel}>{accountUiText(t, "전체 동의")}</Text>
                   </Pressable>
                   <ConsentRow
-                    label="[필수] 서비스 이용약관"
+                    label={accountUiText(t, "[필수] 서비스 이용약관")}
                     checked={termsAccepted}
                     onToggle={() => setTermsAccepted((value) => !value)}
                     onOpenDetails={() => handleConsentDetails('terms')}
                   />
                   <ConsentRow
-                    label="[필수] 개인정보 처리방침"
+                    label={accountUiText(t, "[필수] 개인정보 처리방침")}
                     checked={privacyAccepted}
                     onToggle={() => setPrivacyAccepted((value) => !value)}
                     onOpenDetails={() => handleConsentDetails('privacy')}
                   />
                   <ConsentRow
-                    label="[선택] 마케팅 정보 수신 동의"
+                    label={accountUiText(t, "[선택] 마케팅 정보 수신 동의")}
                     checked={marketingAccepted}
                     onToggle={() => setMarketingAccepted((value) => !value)}
                     onOpenDetails={() => handleConsentDetails('marketing')}
@@ -649,9 +648,9 @@ export default function SignUpEmail() {
                   disabled={!canJoin || joining}
                   onPress={() => void handleJoin()}
                 >
-                  <Text style={styles.submitText}>{joining ? '가입 중...' : '가입하기'}</Text>
+                  <Text style={styles.submitText}>{joining ? accountUiText(t, "가입 중...") : accountUiText(t, "가입하기")}</Text>
                 </Pressable>
-                {joinError ? <Text style={styles.error}>{joinError}</Text> : null}
+                {joinError ? <Text style={styles.error}>{accountUiText(t, joinError)}</Text> : null}
               </>
             )}
           </View>

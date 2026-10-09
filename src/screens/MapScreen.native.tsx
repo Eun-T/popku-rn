@@ -1,3 +1,5 @@
+import { useTranslation } from '../hooks/useTranslation';
+import { getTagDisplayName } from '../locales/filterLabels';
 import { useMapPopups } from '../hooks/useMapPopups';
 import { usePopupNavigation } from '../hooks/usePopupNavigation';
 import { MaterialIcons } from "@expo/vector-icons";
@@ -22,6 +24,13 @@ import {
   useWindowDimensions,
 } from "react-native";
 import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
+import Reanimated, {
+  cancelAnimation,
+  Easing as ReanimatedEasing,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Circle, Path } from "react-native-svg";
 import Supercluster from "supercluster";
@@ -29,7 +38,8 @@ import Supercluster from "supercluster";
 import { searchPopups, type PopupMapMarker, type PopupSearchResult } from "../lib/popups";
 import { autocompletePlaces, resolvePlace, type PlaceAttribution, type PlaceSuggestion } from "../lib/placeSearch";
 import { isPlaceCameraComplete, placeCameraRegion, type SearchRegion } from "../lib/mapPlaceCamera";
-import { getLocale } from "../locales";
+import { expandedMarkerPopups, hasValidCoordinates, type MapBounds } from "../lib/mapMarkerBounds";
+import { getApiLocale } from "../locales";
 import MapPopupListSheet from "../components/map/MapPopupListSheet";
 import MapPopupPreviewCard from "../components/map/MapPopupPreviewCard";
 import MapSearchOverlay, { GooglePlaceAttribution, type PlaceSearchState, type PopupSearchState } from "../components/map/MapSearchOverlay";
@@ -51,13 +61,6 @@ type PopupClusterProperties = { popupId: string };
 type MapMarkerItem =
   | { type: "popup"; popup: PopupMapMarker }
   | { type: "cluster"; id: number; count: number; latitude: number; longitude: number };
-
-type MapBounds = {
-  minLat: number;
-  maxLat: number;
-  minLng: number;
-  maxLng: number;
-};
 
 type PendingSearchAction = {
   kind: "popup";
@@ -98,6 +101,13 @@ const tagFilters = [
 
 type MarkerTag = Exclude<(typeof tagFilters)[number], "전체">;
 
+// Display only: preserve existing filter state and marker category strings.
+const tagFilterIds: Record<MarkerTag, number> = {
+  "캐릭터/IP": 1, "게임/디지털": 2, "연예/크리에이터": 3,
+  "패션": 4, "뷰티": 5, "F&B": 6, "아트/전시": 7,
+  "문구/소품": 8, "라이프": 9, "패밀리/펫": 10, "기타": 11,
+};
+
 type MarkerIconName = ComponentProps<typeof MaterialIcons>["name"];
 
 const markerStyles: Record<
@@ -121,21 +131,6 @@ function markerStyleFor(name: PopupMapMarker["primaryTag"]) {
   return name && Object.prototype.hasOwnProperty.call(markerStyles, name)
     ? markerStyles[name as MarkerTag]
     : markerStyles["기타"];
-}
-
-function hasValidCoordinates(
-  popup: PopupMapMarker,
-): boolean {
-  return (
-    typeof popup.latitude === "number" &&
-    Number.isFinite(popup.latitude) &&
-    popup.latitude >= -90 &&
-    popup.latitude <= 90 &&
-    typeof popup.longitude === "number" &&
-    Number.isFinite(popup.longitude) &&
-    popup.longitude >= -180 &&
-    popup.longitude <= 180
-  );
 }
 
 function ClusterMapMarker({
@@ -164,6 +159,7 @@ function ClusterMapMarker({
 }
 
 export default function MapScreen() {
+  const { t, resolvedLanguage } = useTranslation();
   const router = useRouter();
   const openPopup = usePopupNavigation();
   const { popupId } = useLocalSearchParams<{ popupId?: string }>();
@@ -198,6 +194,10 @@ export default function MapScreen() {
   const [placeAttributions, setPlaceAttributions] = useState<PlaceAttribution[]>([]);
   const [keyboardTop, setKeyboardTop] = useState<number | null>(null);
   const [searchMoveVersion, setSearchMoveVersion] = useState(0);
+  const [selectedPopup, setSelectedPopup] = useState<PopupMapMarker | null>(null);
+  const selectedPopupId = selectedPopup?.id;
+  const pendingPopupId = pendingSearchAction.current?.kind === "popup"
+    ? pendingSearchAction.current.id : undefined;
   const filteredPopups = useMemo(
     () => selectedTag === "전체"
       ? popups
@@ -230,7 +230,8 @@ export default function MapScreen() {
   )));
   const markerItems = useMemo((): MapMarkerItem[] => {
     if (mapRegion.latitudeDelta < CLUSTERING_LATITUDE_DELTA) {
-      return filteredPopups.filter(hasValidCoordinates).map((popup) => ({ type: "popup", popup }));
+      return expandedMarkerPopups(filteredPopups, mapBounds, selectedPopupId, pendingPopupId)
+        .map((popup) => ({ type: "popup", popup }));
     }
 
     return clusterIndex.getClusters([
@@ -252,7 +253,8 @@ export default function MapScreen() {
       const popup = popupsById.get(feature.properties.popupId);
       return popup ? [{ type: "popup", popup }] : [];
     });
-  }, [clusterIndex, clusterZoom, filteredPopups, mapBounds, mapRegion.latitudeDelta, popupsById]);
+  }, [clusterIndex, clusterZoom, filteredPopups, mapBounds, mapRegion.latitudeDelta,
+    popupsById, selectedPopupId, pendingPopupId, searchMoveVersion]);
   const visiblePopups = useMemo(
     () => filteredPopups.filter((popup) => hasValidCoordinates(popup)
       && popup.latitude >= mapBounds.minLat
@@ -261,7 +263,6 @@ export default function MapScreen() {
       && popup.longitude <= mapBounds.maxLng),
     [filteredPopups, mapBounds],
   );
-  const [selectedPopup, setSelectedPopup] = useState<PopupMapMarker | null>(null);
   const [markerHeights, setMarkerHeights] = useState<Record<string, number>>({});
   const [previewPopup, setPreviewPopup] = useState<PopupMapMarker | null>(null);
   const [isListOpen, setIsListOpen] = useState(false);
@@ -270,7 +271,10 @@ export default function MapScreen() {
   const [actionHeight, setActionHeight] = useState(0);
   const [previewHeight, setPreviewHeight] = useState(0);
   const bottomTransition = useRef(new Animated.Value(0)).current;
-  const sheetTransition = useRef(new Animated.Value(0)).current;
+  const sheetTransition = useSharedValue(0);
+  const sheetAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: (1 - sheetTransition.get()) * sheetHeight }],
+  }));
   const hasSelectedPopup = selectedPopup !== null && !isListOpen;
   const hasPreviewPopup = previewPopup !== null;
   const bottomInset = Math.max(insets.bottom, 28);
@@ -316,7 +320,7 @@ export default function MapScreen() {
             setSearchState({ status: "error", results: [] });
           }
         });
-      autocompletePlaces({ query, languageCode: getLocale(), sessionToken }, controller.signal)
+      autocompletePlaces({ query, languageCode: getApiLocale(), sessionToken }, controller.signal)
         .then((results) => {
           if (!controller.signal.aborted && searchRequestVersion.current === version) {
             setPlaceSearchState({ status: "success", results });
@@ -406,6 +410,8 @@ export default function MapScreen() {
 
   const moveToPopup = async (popupId: string, clearQuery: boolean, showError: boolean) => {
     closeSearch();
+    // A new command supersedes an older camera completion even while awaiting data.
+    pendingSearchAction.current = null;
     if (clearQuery) setSearchQuery("");
     const version = searchRequestVersion.current;
     setIsListOpen(false);
@@ -419,12 +425,12 @@ export default function MapScreen() {
         popup = refreshed.find((item) => item.id === popupId);
       } catch {
         if (searchRequestVersion.current !== version) return;
-        if (showError) Alert.alert("팝업을 불러올 수 없어요", "잠시 후 다시 시도해 주세요.");
+        if (showError) Alert.alert(t("map.popupLoadFailed"), t("place.detail.tryLater"));
         return;
       }
     }
     if (!popup || !hasValidCoordinates(popup) || !mapRef.current) {
-      if (showError) Alert.alert("팝업을 찾을 수 없어요", "목록을 새로고침한 뒤 다시 시도해 주세요.");
+      if (showError) Alert.alert(t("map.popupMissing"), t("map.refreshAndRetry"));
       return;
     }
 
@@ -511,7 +517,7 @@ export default function MapScreen() {
       }
       if (!permission.granted) {
         setShowsUserLocation(false);
-        Alert.alert("위치 권한 필요", "현재 위치를 보려면 위치 권한을 허용해 주세요.");
+        Alert.alert(t("map.locationPermissionTitle"), t("map.locationPermissionDescription"));
         return;
       }
 
@@ -526,7 +532,7 @@ export default function MapScreen() {
         longitudeDelta: initialRegion.longitudeDelta,
       }, 350);
     } catch {
-      Alert.alert("위치를 찾을 수 없어요", "위치 서비스를 확인한 뒤 다시 시도해 주세요.");
+      Alert.alert(t("map.locationFailed"), t("map.checkLocationService"));
     } finally {
       locatingRef.current = false;
       setIsLocating(false);
@@ -539,20 +545,19 @@ export default function MapScreen() {
 
   useEffect(() => {
     if (sheetHeight === 0) return;
-    Animated.timing(sheetTransition, {
-      toValue: isListOpen ? 1 : 0,
+    sheetTransition.set(withTiming(isListOpen ? 1 : 0, {
       duration: 400,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
-    return () => sheetTransition.stopAnimation();
+      easing: ReanimatedEasing.out(ReanimatedEasing.cubic),
+    }));
+    return () => cancelAnimation(sheetTransition);
   }, [isListOpen, sheetHeight, sheetTransition]);
 
   useEffect(() => {
-    if (selectedPopup && !filteredPopups.some((popup) => popup.id === selectedPopup.id)) {
-      setSelectedPopup(null);
+    if (selectedPopup) {
+      const current = popupsById.get(selectedPopup.id) ?? null;
+      if (current !== selectedPopup) setSelectedPopup(current);
     }
-  }, [filteredPopups, selectedPopup]);
+  }, [popupsById, selectedPopup]);
 
   useEffect(() => {
     if (selectedPopup && !markerItems.some((item) =>
@@ -585,10 +590,6 @@ export default function MapScreen() {
   const previewTranslateY = bottomTransition.interpolate({
     inputRange: [0, 1],
     outputRange: [previewHeight + 12, 0],
-  });
-  const sheetTranslateY = sheetTransition.interpolate({
-    inputRange: [0, 1],
-    outputRange: [sheetHeight, 0],
   });
 
 
@@ -646,8 +647,16 @@ export default function MapScreen() {
           mapMoving.current = false;
           const bounds = boundsForRegion(region);
           regionChangeVersion.current += 1;
-          setMapRegion(region);
-          setMapBounds(bounds);
+          // Keep equal snapshots stable without skipping pending completion or
+          // the version increment that protects the initial native bounds read.
+          setMapRegion((current) => current.latitude === region.latitude
+            && current.longitude === region.longitude
+            && current.latitudeDelta === region.latitudeDelta
+            && current.longitudeDelta === region.longitudeDelta ? current : region);
+          setMapBounds((current) => current.minLat === bounds.minLat
+            && current.maxLat === bounds.maxLat
+            && current.minLng === bounds.minLng
+            && current.maxLng === bounds.maxLng ? current : bounds);
           console.log("Map bounds:", bounds);
           const pending = pendingSearchAction.current;
           if (pending && details?.isGesture) {
@@ -753,15 +762,15 @@ export default function MapScreen() {
         })}
       </MapView>
       {filterBottom !== null && (
-        <Animated.View
+        <Reanimated.View
           pointerEvents={isListOpen && sheetHeight > 0 ? "auto" : "none"}
           onLayout={(event) => setSheetHeight(event.nativeEvent.layout.height)}
           style={[
             styles.listSheet,
             {
               opacity: sheetHeight > 0 ? 1 : 0,
-              transform: [{ translateY: sheetTranslateY }],
             },
+            sheetAnimatedStyle,
           ]}
         >
           <View style={[styles.listSheetContent, { top: filterBottom }]}>
@@ -773,7 +782,7 @@ export default function MapScreen() {
               onPopupPress={(id) => openPopup(id)}
             />
           </View>
-        </Animated.View>
+        </Reanimated.View>
       )}
       {isSearchMode && (
         <View pointerEvents="box-none" style={styles.searchOverlay}>
@@ -817,21 +826,22 @@ export default function MapScreen() {
             setIsSearchMode(true);
           }}
           onChangeText={changeSearchQuery}
-          placeholder="장소나 팝업을 검색해보세요"
+          placeholder={t("map.search.placeholder")}
           placeholderTextColor={colors.secondaryText}
           returnKeyType="search"
           underlineColorAndroid="transparent"
         />
         {searchQuery.length > 0 && (
-          <Pressable accessibilityRole="button" accessibilityLabel="검색어 지우기" hitSlop={8} onPress={() => changeSearchQuery("")}>
+          <Pressable accessibilityRole="button" accessibilityLabel={t("place.all.clearSearch")} hitSlop={8} onPress={() => changeSearchQuery("")}>
             <X size={18} color={colors.secondaryText} />
           </Pressable>
         )}
         {isSearchMode && (
           <Pressable accessibilityRole="button" onPress={closeSearch} style={styles.searchCancelButton}>
-            <Text style={styles.searchCancel}>취소</Text>
+            <Text style={styles.searchCancel}>{t("community.cancel")}</Text>
           </Pressable>
         )}
+        <View pointerEvents="none" style={[styles.tagFilterBorder, { borderColor: colors.border }]} />
       </View>
       <ScrollView
         horizontal
@@ -865,7 +875,7 @@ export default function MapScreen() {
                 ]}
                 numberOfLines={1}
               >
-                {tag}
+                {tag === "전체" ? t("community.category.all") : getTagDisplayName({ id: tagFilterIds[tag], name: tag }, resolvedLanguage)}
               </Text>
               <View
                 pointerEvents="none"
@@ -878,7 +888,7 @@ export default function MapScreen() {
       {actionHeight > 0 && (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="현재 위치로 이동"
+          accessibilityLabel={t("map.currentLocation")}
           accessibilityState={{ disabled: isLocating }}
           disabled={isLocating}
           onPress={moveToCurrentLocation}
@@ -909,7 +919,7 @@ export default function MapScreen() {
             onPress={() => setIsListOpen((open) => !open)}
           >
             <Text style={styles.viewPopupsButtonText}>
-              {isListOpen ? "지도로 돌아가기" : `이 지역 팝업 ${visiblePopups.length}개 보기`}
+              {isListOpen ? t("map.returnToMap") : t("map.viewPopups", { count: visiblePopups.length })}
             </Text>
           </Pressable>
         </View>

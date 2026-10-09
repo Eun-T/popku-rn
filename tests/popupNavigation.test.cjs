@@ -63,7 +63,7 @@ const entries = [
   ['home new', 'src/components/home/HomeNewPopupSection.tsx', 'onPressPopup', 1],
   ['places weekly and grid', 'src/screens/PlaceScreen.tsx', 'openPopup', 3],
   ['map list and preview', 'src/screens/MapScreen.native.tsx', 'openPopup', 2],
-  ['favorites', 'src/app/(tabs)/profile/favorites.tsx', 'openPopup', 1],
+  ['favorites', 'src/app/profile/favorites.tsx', 'openPopup', 1],
 ];
 function callbacks(file, callee, open, id) {
   const ast = source(file);

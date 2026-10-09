@@ -1,6 +1,7 @@
+import { useTranslation } from '../hooks/useTranslation';
 import { usePopupNavigation } from '../hooks/usePopupNavigation';
 import { useEffect, useRef, useState } from 'react';
-import { useScrollToTop } from 'expo-router';
+import { useScrollToTop, useLocalSearchParams } from 'expo-router';
 import { Bell, Search, X } from 'lucide-react-native';
 import { FlatList, Pressable, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -28,6 +29,7 @@ import {
 } from '../constants/placeFilters';
 import { colors, radius, spacing, typography } from '../theme/tokens';
 import { t } from '../locales';
+import { getExploreRegionId, getExploreTagId } from '../locales/filterLabels';
 import {
   emptyPopupFilters,
   getEndingSoonPopups,
@@ -42,12 +44,6 @@ import { usePopupFavorites } from '../hooks/usePopupFavorites';
 
 const tabs = ['탐색', '전체'] as const;
 type PlaceTab = (typeof tabs)[number];
-const categoryTagNames: Partial<Record<InterestId, string>> = {
-  animeCharacter: '캐릭터/IP',
-  beauty: '뷰티',
-  game: '게임/디지털',
-  fashion: '패션',
-};
 const emptyPopups: readonly PublicPopup[] = [];
 type PopupListState = { queryKey: string; status: 'loading' | 'ready' | 'error'; popups: PublicPopup[]; nextCursor: string | null; loadingMore: boolean; moreError: boolean };
 type OptionsState<T> = { status: 'loading' | 'ready' | 'error'; options: T[] };
@@ -62,7 +58,14 @@ function toggleId<T extends string | number>(ids: T[], id: T): T[] {
 }
 
 export default function PlaceScreen() {
+  const { resolvedLanguage } = useTranslation();
+  useEffect(() => {
+    if (__DEV__) console.log('[EndingSoon] Place mount');
+    return () => { if (__DEV__) console.log('[EndingSoon] Place unmount'); };
+  }, []);
   const openPopup = usePopupNavigation();
+  const entry = useLocalSearchParams<{ tab?: string; countryCode?: string; openingFrom?: string; openingTo?: string; homeNewEntry?: string }>();
+  const consumedEntry = useRef<string | undefined>(undefined);
   const listRef = useRef<FlatList<PublicPopup>>(null);
   const [selectedTab, setSelectedTab] = useState<PlaceTab>('탐색');
   const scrollYRef = useRef(0);
@@ -83,7 +86,7 @@ export default function PlaceScreen() {
   const [isFilterSheetOpen, setFilterSheetOpen] = useState(false);
   const [visitPeriod, setVisitPeriod] = useState<VisitPeriod>('all');
   const [draftVisitPeriod, setDraftVisitPeriod] = useState<VisitPeriod>('all');
-  const { isFavorite, isFavoriteDisabled, toggleFavorite } = usePopupFavorites();
+  const { isFavorite, isFavoriteDisabled, toggleFavorite, favoritesStatus, retryFavorites } = usePopupFavorites();
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchSticky, setSearchSticky] = useState(false);
   const searchTop = useRef(Number.POSITIVE_INFINITY);
@@ -117,8 +120,30 @@ export default function PlaceScreen() {
     || appliedDetailFilters.regionIds.length > 0
     || appliedDetailFilters.tagIds.length > 0
     || appliedDetailFilters.status !== undefined
-    || visitPeriod !== 'all';
-  const queryKey = [country ?? '', regionIdsKey, tagIdsKey, appliedDetailFilters.status ?? '', visitPeriod, visitPeriod === 'all' ? '' : today].join('|');
+    || visitPeriod !== 'all' || appliedDetailFilters.openingFrom !== undefined;
+  const queryKey = [country ?? '', regionIdsKey, tagIdsKey, appliedDetailFilters.status ?? '', visitPeriod, visitPeriod === 'all' ? '' : today, appliedDetailFilters.openingFrom ?? '', appliedDetailFilters.openingTo ?? ''].join('|');
+
+  useEffect(() => {
+    if (!entry.homeNewEntry || consumedEntry.current === entry.homeNewEntry || entry.tab !== 'all'
+      || (entry.countryCode !== 'KR' && entry.countryCode !== 'JP')
+      || !entry.openingFrom || !entry.openingTo
+      || !/^\d{4}-\d{2}-\d{2}$/.test(entry.openingFrom) || !/^\d{4}-\d{2}-\d{2}$/.test(entry.openingTo)) return;
+    consumedEntry.current = entry.homeNewEntry;
+    regionSelection.current++;
+    categorySelection.current++;
+    const quick = { ...createEmptyPlaceFilters(), countries: [entry.countryCode as CountryCode] };
+    const detail = { ...emptyPopupFilters(), openingFrom: entry.openingFrom, openingTo: entry.openingTo };
+    setAppliedFilters(quick);
+    setDraftQuickFilters(quick);
+    setAppliedDetailFilters(detail);
+    setDraftDetailFilters(detail);
+    setVisitPeriod('all');
+    setDraftVisitPeriod('all');
+    setSearchQuery('');
+    setFilterSheetOpen(false);
+    setSelectedTab('전체');
+    listRef.current?.scrollToOffset({ offset: 0, animated: false });
+  }, [entry.homeNewEntry, entry.tab, entry.countryCode, entry.openingFrom, entry.openingTo]);
 
   useEffect(() => {
     let active = true;
@@ -200,11 +225,14 @@ export default function PlaceScreen() {
 
   useEffect(() => {
     const controller = new AbortController();
+    if (__DEV__) console.log('[EndingSoon] API start', { country: country ?? 'ALL', today });
     getEndingSoonPopups(country, controller.signal)
       .then((popups) => {
+        if (__DEV__) console.log('[EndingSoon] API success', { aborted: controller.signal.aborted, count: popups.length });
         if (!controller.signal.aborted) setEndingSoonState({ country, status: 'ready', popups });
       })
       .catch(() => {
+        if (__DEV__) console.log('[EndingSoon] API failure', { aborted: controller.signal.aborted });
         if (!controller.signal.aborted) setEndingSoonState((current) => ({
           country, status: 'error', popups: current.country === country ? current.popups : [],
         }));
@@ -223,8 +251,8 @@ export default function PlaceScreen() {
     ? endingSoonState.popups.filter((popup) => popup.startDate <= today && popup.endDate >= today && popup.endDate <= endingSoonEnd).slice(0, 7)
     : emptyPopups;
   const endingSoonLoading = endingSoonState.country !== country || endingSoonState.status === 'loading';
-  const stateMessage = status === 'loading' ? '팝업을 불러오는 중이에요.'
-    : status === 'error' ? '팝업을 불러오지 못했어요.' : '표시할 팝업이 없어요.';
+  const stateMessage = status === 'loading' ? t('place.all.loading')
+    : status === 'error' ? t('home.loadFailed') : t('place.all.empty');
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const contentPadding = {
@@ -243,7 +271,7 @@ export default function PlaceScreen() {
     if (source) {
       getRegions(source.country).then((options) => {
         if (selection !== regionSelection.current) return;
-        const matched = options.find((region) => region.name === t(source.labelKey));
+        const matched = options.find((region) => region.id === getExploreRegionId(source.id));
         setAppliedDetailFilters((current) => ({ ...current, regionIds: matched ? [matched.id] : [] }));
       }).catch(() => { /* The filter options effect shows the request error. */ });
     }
@@ -251,14 +279,14 @@ export default function PlaceScreen() {
   };
 
   const selectInterestCategory = async (id: InterestId) => {
-    const tagName = categoryTagNames[id];
-    if (!tagName) return;
+    const tagId = getExploreTagId(id);
+    if (tagId === undefined) return;
     const selection = ++categorySelection.current;
     try {
       const options = tagState.status === 'ready' ? tagState.options : await getTags();
       if (selection !== categorySelection.current) return;
       if (tagState.status !== 'ready') setTagState({ status: 'ready', options });
-      const tag = options.find((option) => option.name === tagName);
+      const tag = options.find((option) => option.id === tagId);
       if (!tag) return;
 
       setAppliedFilters((current) => ({ ...createEmptyPlaceFilters(), countries: current.countries }));
@@ -324,8 +352,11 @@ export default function PlaceScreen() {
     setDraftQuickFilters(createEmptyPlaceFilters());
   };
 
-  const removeAppliedFilter = (group: 'countries' | 'quickFeatures' | 'regionIds' | 'tagIds' | 'status' | 'period', id: string | number) => {
-    if (group === 'period') {
+  const removeAppliedFilter = (group: 'countries' | 'quickFeatures' | 'regionIds' | 'tagIds' | 'status' | 'period' | 'openingWeek', id: string | number) => {
+    if (group === 'openingWeek') {
+      setAppliedDetailFilters((current) => ({ ...current, openingFrom: undefined, openingTo: undefined }));
+      setDraftDetailFilters((current) => ({ ...current, openingFrom: undefined, openingTo: undefined }));
+    } else if (group === 'period') {
       setVisitPeriod('all');
       setDraftVisitPeriod('all');
     } else if (group === 'countries') {
@@ -355,11 +386,15 @@ export default function PlaceScreen() {
   return (
     <SafeAreaView edges={['top', 'bottom']} style={styles.container}>
       <View style={[styles.header, contentPadding]}>
-        <Text style={styles.title}>플레이스</Text>
-        <Bell size={24} color={colors.text} accessibilityLabel="알림" />
+        <Text style={styles.title}>{t('place.title')}</Text>
+        {/* <Bell size={24} color={colors.text} accessibilityLabel="알림" /> */}
       </View>
 
       <View style={styles.listArea}>
+      {favoritesStatus === 'error' && <Pressable accessibilityRole="button" accessibilityLabel={t('home.favoriteRetry')}
+        onPress={() => { void retryFavorites(); }} style={contentPadding}>
+        <Text style={styles.stateText}>{t('home.favoriteLoadFailed')}</Text>
+      </Pressable>}
       <FlatList
         ref={listRef}
         style={styles.list}
@@ -370,10 +405,10 @@ export default function PlaceScreen() {
         }}
         onEndReachedThreshold={0.5}
         ListFooterComponent={selectedTab === '전체' ? popupListState.loadingMore
-          ? <Text style={styles.stateText}>팝업을 불러오는 중이에요.</Text>
+          ? <Text style={styles.stateText}>{t('place.all.loading')}</Text>
           : popupListState.moreError || status === 'error'
             ? <Pressable onPress={() => loadPage(popupListState.moreError ? popupListState.nextCursor : null)}>
-              <Text style={styles.stateText}>다시 시도</Text>
+              <Text style={styles.stateText}>{t('community.detail.retry')}</Text>
             </Pressable> : null : null}
         keyExtractor={(item) => item.publicId}
         numColumns={2}
@@ -407,7 +442,7 @@ export default function PlaceScreen() {
                     }}
                     style={[styles.tab, isSelected && styles.selectedTab]}
                   >
-                    <Text style={[styles.tabText, isSelected && styles.selectedTabText]}>{tab}</Text>
+                    <Text style={[styles.tabText, isSelected && styles.selectedTabText]}>{t(tab === '탐색' ? 'place.explore.tab' : 'community.category.all')}</Text>
                   </Pressable>
                 );
               })}
@@ -417,8 +452,8 @@ export default function PlaceScreen() {
               <View style={styles.searchInputRow}>
                 <Search size={20} color={colors.inactiveText} />
                 <TextInput
-                  accessibilityLabel="팝업 검색"
-                  placeholder="팝업을 검색해보세요"
+                  accessibilityLabel={t('place.all.search')}
+                  placeholder={t('place.all.searchPlaceholder')}
                   placeholderTextColor={colors.inactiveText}
                   style={styles.searchInput}
                   returnKeyType="search"
@@ -427,7 +462,7 @@ export default function PlaceScreen() {
                 />
               </View>
               {searchQuery.length > 0 && (
-                <Pressable accessibilityRole="button" accessibilityLabel="검색어 지우기" onPress={() => updateSearchQuery('')} style={styles.clearSearch}>
+                <Pressable accessibilityRole="button" accessibilityLabel={t('place.all.clearSearch')} onPress={() => updateSearchQuery('')} style={styles.clearSearch}>
                   <X size={18} color={colors.secondaryText} />
                 </Pressable>
               )}
@@ -503,7 +538,7 @@ export default function PlaceScreen() {
             onRecoverCover={(popup) => coverRecovery.current!.recover(popup)}
           />
         )}
-        extraData={{ isFavorite, isFavoriteDisabled }}
+        extraData={{ isFavorite, isFavoriteDisabled, resolvedLanguage }}
       />
 
       {isSearchSticky && (
@@ -512,8 +547,8 @@ export default function PlaceScreen() {
             <View style={styles.searchInputRow}>
               <Search size={20} color={colors.inactiveText} />
               <TextInput
-                accessibilityLabel="팝업 검색"
-                placeholder="팝업을 검색해보세요"
+                accessibilityLabel={t('place.all.search')}
+                placeholder={t('place.all.searchPlaceholder')}
                 placeholderTextColor={colors.inactiveText}
                 style={styles.searchInput}
                 returnKeyType="search"
@@ -522,7 +557,7 @@ export default function PlaceScreen() {
               />
             </View>
             {searchQuery.length > 0 && (
-              <Pressable accessibilityRole="button" accessibilityLabel="검색어 지우기" onPress={() => updateSearchQuery('')} style={styles.clearSearch}>
+              <Pressable accessibilityRole="button" accessibilityLabel={t('place.all.clearSearch')} onPress={() => updateSearchQuery('')} style={styles.clearSearch}>
                 <X size={18} color={colors.secondaryText} />
               </Pressable>
             )}
@@ -626,6 +661,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.space16,
     borderRadius: radius.radius12,
     backgroundColor: colors.moreButtonBackground,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   searchInputRow: {
     flex: 1,

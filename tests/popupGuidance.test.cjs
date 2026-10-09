@@ -41,6 +41,7 @@ test('measured pager keeps common box height while swiping and resets on width c
     'react-native': { ScrollView: 'ScrollView', Text: 'Text', View: 'View', StyleSheet: { create: value => value }, useWindowDimensions: () => ({ fontScale: 1 }) },
     '../../lib/popupGuidance': mod.exports,
     '../../locales': { t: key => key },
+    '../../hooks/useTranslation': { useTranslation: () => ({ resolvedLanguage: 'ko', t: key => key }) },
     '../../theme/tokens': { colors: {}, radius: {}, spacing: {} },
   };
   const source = ts.transpileModule(fs.readFileSync('src/components/place/PopupGuidanceCarousel.tsx', 'utf8'), {

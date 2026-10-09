@@ -13,9 +13,14 @@ export class FavoriteUnauthorizedError extends Error {
   constructor(public readonly authGeneration?: number) { super('Favorite authentication required'); }
 }
 
+export class FavoriteSessionChangedError extends Error {
+  constructor() { super('Favorite session changed'); }
+}
+
 async function updateFavorite(publicId: string, method: 'POST' | 'DELETE', popup?: PublicPopup): Promise<PopupFavoriteResponse> {
   const sessionGeneration = favoriteSessionGeneration();
   const { accessToken: token, generation } = await getAuthSession();
+  if (sessionGeneration !== favoriteSessionGeneration()) throw new FavoriteSessionChangedError();
   if (__DEV__) console.info('[FAVORITE] request', { method, publicId, tokenPresent: !!token });
   if (!token) throw new FavoriteUnauthorizedError(generation);
   const controller = new AbortController();
@@ -56,19 +61,32 @@ export function unfavoritePopup(publicId: string): Promise<PopupFavoriteResponse
 
 export async function getFavoritePopups(signal?: AbortSignal): Promise<PublicPopup[]> {
   const generation = favoriteCacheGeneration();
+  const sessionGeneration = favoriteSessionGeneration();
   const { accessToken: token, generation: authGeneration } = await getAuthSession();
+  if (sessionGeneration !== favoriteSessionGeneration()) throw new FavoriteSessionChangedError();
   if (!token) throw new FavoriteUnauthorizedError(authGeneration);
-  const response = await fetch(`${API_BASE_URL}/api/users/me/favorites`, {
-    headers: { Authorization: `Bearer ${token}` }, signal,
-  });
-  if (__DEV__) console.info('[FAVORITE] list response', { status: response.status });
-  if (response.status === 401) throw new FavoriteUnauthorizedError(authGeneration);
-  if (!response.ok) throw new Error('Favorite list request failed');
-  const body: unknown = await response.json();
-  if (!body || typeof body !== 'object' || !('popups' in body) || !Array.isArray(body.popups)) {
-    throw new Error('Invalid favorite list response');
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  if (signal?.aborted) abort();
+  else signal?.addEventListener('abort', abort, { once: true });
+  const timeout = setTimeout(abort, 12000);
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/users/me/favorites`, {
+      headers: { Authorization: `Bearer ${token}` }, signal: controller.signal,
+    });
+    if (__DEV__) console.info('[FAVORITE] list response', { status: response.status });
+    if (response.status === 401) throw new FavoriteUnauthorizedError(authGeneration);
+    if (!response.ok) throw new Error('Favorite list request failed');
+    const body: unknown = await response.json();
+    if (!body || typeof body !== 'object' || !('popups' in body) || !Array.isArray(body.popups)) {
+      throw new Error('Invalid favorite list response');
+    }
+    const popups = body.popups as PublicPopup[];
+    if (controller.signal.aborted) throw new Error('Favorite list request aborted');
+    saveFavoriteCache(popups, generation);
+    return popups;
+  } finally {
+    clearTimeout(timeout);
+    signal?.removeEventListener('abort', abort);
   }
-  const popups = body.popups as PublicPopup[];
-  saveFavoriteCache(popups, generation);
-  return popups;
 }

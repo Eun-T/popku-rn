@@ -4,6 +4,7 @@ const { test } = require('node:test');
 const ts = require('typescript');
 
 function load(file, mocks, globals = {}) {
+  mocks = require('./helpers/uiDependencies.cjs').withUiDependencies(file, mocks);
   mocks = { '../../components/community/CommunityPostMenu': { __esModule: true, default: 'CommunityPostMenu' }, ...mocks };
   const code = ts.transpileModule(readFileSync(file, 'utf8'), { compilerOptions: {
     module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022,
@@ -139,6 +140,7 @@ test('review invalidation targets only subscribed popup and uses existing feed r
 function hooks() {
   const slots = [], effects = []; let index = 0;
   const react = {
+    useSyncExternalStore: (_subscribe, snapshot) => snapshot(),
     useState(initial) { const i = index++; slots[i] ??= { value: initial }; return [slots[i].value, next => { slots[i].value = typeof next === 'function' ? next(slots[i].value) : next; }]; },
     useRef(initial) { const i = index++; return slots[i] ??= { current: initial }; },
     useEffect(fn, deps) { const i = index++; if (!slots[i] || deps.some((value, j) => value !== slots[i].deps[j])) {
@@ -224,11 +226,12 @@ test('review detail reuses author/carousel, locks popup navigation and never ref
       '../../lib/communityFeedRefresh': { subscribeCommunityLikes: () => () => {}, subscribeCommunityCommentCounts: () => () => {}, subscribeCommunityPostChanges: () => () => {} },
       '../../lib/communityLikes': { changeCommunityLike: async () => {} },
       '../../lib/reviews': { getReviewDetail: async (id, signal) => { reads.push({ id, signal }); return detailFixture(count); } },
-      '../../locales': { t: key => key }, '../../theme/communityColors': { communityColors: {} }, '../../theme/tokens': theme,
+      '../../locales': require('./helpers/uiDependencies.cjs').loadPure('src/locales/index.ts'), '../../theme/communityColors': { communityColors: {} }, '../../theme/tokens': theme,
     }).default;
     state.render(Screen); await flush(); const tree = state.render(Screen);
     assert.deepEqual(nodes(tree).find(node => node.type === 'Carousel').props.images, detailFixture(count).images.map(image => image.url));
-    assert.equal(nodes(tree).find(node => node.type === 'Author').props.now, 100);
+    assert.ok(nodes(tree).some(node => node.props?.children === detailFixture(count).author.nickname));
+    assert.ok(nodes(tree).some(node => node.props?.children === require('./helpers/uiDependencies.cjs').loadPure('src/lib/communityTime.ts').formatCommunityTime(detailFixture(count).createdAt, 100)));
     assert.ok(nodes(tree).some(node => node.props?.children === 'review body'));
     const link = button(tree, 'Popup One'); link.props.onPress(); link.props.onPress();
     if (origin === 'same-popup') {
@@ -241,7 +244,7 @@ test('review detail reuses author/carousel, locks popup navigation and never ref
       assert.equal(stack.routes.at(-1).key, 'review-key', 'popup back returns to REVIEW');
     }
     focus(); state.render(Screen); assert.equal(reads.length, 1);
-    button(tree, 'community.writeBack').props.onPress(); assert.equal(routes.at(-1), 'back');
+    button(tree, '뒤로가기').props.onPress(); assert.equal(routes.at(-1), 'back');
     assert.equal(stack.routes.at(-1).key, origin === 'different-popup' ? 'popup-key' : 'community-key');
     assert.equal(nodes(tree).filter(node => node.type === 'Pressable').length, 3, 'back, popup and like are actionable');
     state.cleanup(); assert.equal(reads[0].signal.aborted, true);
@@ -252,16 +255,18 @@ test('review detail reuses author/carousel, locks popup navigation and never ref
 test('write screen requires rating, keeps draft on failure, blocks rapid registration and returns to popup after success', async () => {
   const state = hooks(), routes = [], writes = [], invalidations = [], clears = []; let beforeRemove, resolve, fail = false;
   const env = api();
+  const guard = require('./helpers/preventRemove.cjs').removalDriver(state.react);
   const Screen = load('src/app/reviews/write.tsx', {
     react: state.react, 'react/jsx-runtime': runtime, 'react-native': native, 'lucide-react-native': { Star: 'Star' },
-    'expo-router': { useLocalSearchParams: () => ({ publicId: 'popup' }), useNavigation: () => ({ addListener: (_, fn) => { beforeRemove = fn; return () => {}; } }),
+    'expo-router': { useLocalSearchParams: () => ({ publicId: 'popup' }), useNavigation: () => guard.navigation,
       useRouter: () => ({ canGoBack: () => true, back: () => routes.push('back'), push: route => routes.push(route) }) },
+    'expo-router/react-navigation': { usePreventRemove: guard.usePreventRemove },
     'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView', useSafeAreaInsets: () => ({ left: 0, right: 0 }) },
     '../../lib/popups': { getPopupDetail: async () => ({ publicId: 'popup', name: 'Current Popup' }) },
     '../../lib/auth': { clearTokens: async generation => { clears.push(generation); return false; } }, '../../lib/community': { CommunityApiError: ApiError },
     '../../lib/communityImages': { MAX_POST_IMAGES: 5, selectPostImages: async () => [], ImageSelectionError: class extends Error {} },
     '../../lib/reviews': { ...env, createReview: (...args) => { writes.push(args); return fail ? Promise.reject(new ApiError(401, '', 4)) : new Promise(done => { resolve = done; }); }, reviewsCreated: id => invalidations.push(id) },
-    '../../locales': { t: key => key }, '../../theme/communityColors': { communityColors: {} }, '../../theme/tokens': theme,
+    '../../locales': require('./helpers/uiDependencies.cjs').loadPure('src/locales/index.ts'), '../../theme/communityColors': { communityColors: {} }, '../../theme/tokens': theme,
   }).default;
   let tree = state.render(Screen); await flush(); tree = state.render(Screen);
   assert.equal(button(tree, '등록').props.disabled, true);
@@ -274,7 +279,7 @@ test('write screen requires rating, keeps draft on failure, blocks rapid registr
   assert.deepEqual(clears, [4]); assert.deepEqual(routes, [], 'old 401 cannot redirect new session');
   fail = false; button(tree, '등록').props.onPress(); button(tree, '등록').props.onPress();
   assert.equal(writes.length, 2, 'one failing request and one pending request');
-  let prevented = false; beforeRemove({ preventDefault() { prevented = true; } }); assert.equal(prevented, true);
+  state.render(Screen); guard.request({ type: 'GO_BACK' }); assert.equal(guard.completed.length, 0);
   resolve({ id: 1 }); await flush(); assert.deepEqual(routes, ['back']); assert.deepEqual(invalidations, ['popup']);
   assert.deepEqual(writes.at(-1), ['popup', 4, 'my visit']); state.cleanup();
 });
@@ -287,7 +292,7 @@ test('popup review tab empty/error states, authenticated entry lock, pagination 
     react: state.react, 'react/jsx-runtime': runtime, 'react-native': native,
     'expo-router': { useRouter: () => ({ push: route => routes.push(route) }), useFocusEffect: fn => { if (fn !== focus) { focus = fn; fn(); } } },
     '../community/CommunityPostItem': { __esModule: true, default: 'Card' }, '../../hooks/useCommunityNow': { useCommunityNow: () => ({ now: 100 }) },
-    '../../lib/auth': { getAuthSession: async () => ({ accessToken: token }), subscribeAuthSession: () => () => {} },
+    '../../lib/auth': { getAuthUser: () => token ? { email: 'me' } : null, subscribeAuthUser: () => () => {}, getAuthSession: async () => ({ accessToken: token }), subscribeAuthSession: () => () => {} },
     '../../lib/communityFeedRefresh': { subscribeCommunityLikes: () => () => {}, subscribeCommunityCommentCounts: () => () => {}, subscribeCommunityPostChanges: () => () => {} },
     '../../lib/communityLikes': { changeCommunityLike: async () => {} },
     '../../lib/reviews': { getPopupReviews: async (id, cursor) => { reads.push([id, cursor]); return result; }, subscribeReviews: fn => { listener = fn; return () => {}; } },
@@ -296,12 +301,12 @@ test('popup review tab empty/error states, authenticated entry lock, pagination 
   const props = { publicId: 'popup', title: 'Popup' };
   state.render(Tab, props); await flush(); let tree = state.render(Tab, props);
   assert.ok(nodes(tree).some(node => node.props?.children === '아직 방문 리뷰가 없어요'));
-  button(tree, '방문 리뷰 작성').props.onPress(); button(tree, '방문 리뷰 작성').props.onPress(); await flush();
-  assert.deepEqual(routes, ['/profile/login']);
-  token = 'token'; focus(); button(tree, '방문 리뷰 작성').props.onPress(); await flush();
+  button(tree, '로그인하고 리뷰 작성하기').props.onPress(); button(tree, '로그인하고 리뷰 작성하기').props.onPress(); await flush();
+  assert.deepEqual(routes, [{ pathname: '/login', params: { intent: 'review', publicId: 'popup' } }]);
+  token = 'token'; focus(); tree = state.render(Tab, props); button(tree, '방문 리뷰 작성').props.onPress(); await flush();
   assert.equal(routes[1].params.publicId, 'popup'); assert.equal(routes[1].pathname, '/reviews/write');
-  result = { items: [item], nextCursor: '1' }; listener('other'); state.render(Tab, props); assert.equal(reads.length, 1);
-  listener('popup'); state.render(Tab, props); await flush(); tree = state.render(Tab, props);
+  result = { items: [item], nextCursor: '1' }; listener('other', 'created'); state.render(Tab, props); assert.equal(reads.length, 1);
+  listener('popup', 'created'); state.render(Tab, props); await flush(); tree = state.render(Tab, props);
   assert.equal(nodes(tree).filter(node => node.type === 'Card').length, 1);
   assert.ok(button(tree, '방문 리뷰 작성'));
   focus();
@@ -375,10 +380,12 @@ test('review edits protect old detail/feed/popup GETs and preserve typed reactio
 test('review edit screen reuses form, removes retained image, adds only new image and preserves draft on 401', async () => {
   const state = hooks(), routes = [], calls = [], changes = [], clears = []; let resolve, failing = true;
   const env = api();
+  const guard = require('./helpers/preventRemove.cjs').removalDriver(state.react);
   const Screen = load('src/app/reviews/write.tsx', {
     react: state.react, 'react/jsx-runtime': runtime, 'react-native': native, 'lucide-react-native': { Star: 'Star' },
-    'expo-router': { useLocalSearchParams: () => ({ editId: '10' }), useNavigation: () => ({ addListener: () => () => {} }),
+    'expo-router': { useLocalSearchParams: () => ({ editId: '10' }), useNavigation: () => guard.navigation,
       useRouter: () => ({ canGoBack: () => true, back: () => routes.push('back'), push: route => routes.push(route) }) },
+    'expo-router/react-navigation': { usePreventRemove: guard.usePreventRemove },
     'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView', useSafeAreaInsets: () => ({ left: 0, right: 0 }) },
     '../../lib/popups': { getPopupDetail: async () => { throw new Error('edit must not fetch/select popup'); } },
     '../../lib/auth': { clearTokens: async generation => { clears.push(generation); return true; } }, '../../lib/community': { CommunityApiError: ApiError },
@@ -387,7 +394,7 @@ test('review edit screen reuses form, removes retained image, adds only new imag
     '../../lib/reviews': { ...env, getReviewDetail: async (id, signal, edit) => { assert.equal(edit, true); return { ...detailFixture(2), isOwner: true }; },
       updateReviewWithImages: (...args) => { calls.push(args); return failing ? Promise.reject(new ApiError(401, '', 4)) : new Promise(done => { resolve = done; }); },
       reviewUpdated: review => changes.push(review), reviewsCreated: () => { throw new Error('edit must not bump revision'); } },
-    '../../locales': { t: key => key }, '../../theme/communityColors': { communityColors: {} }, '../../theme/tokens': theme,
+    '../../locales': require('./helpers/uiDependencies.cjs').loadPure('src/locales/index.ts'), '../../theme/communityColors': { communityColors: {} }, '../../theme/tokens': theme,
   }).default;
   state.render(Screen); await flush(); let tree = state.render(Screen);
   assert.equal(button(tree, '별점 4점').props.accessibilityState.selected, true);
@@ -398,7 +405,7 @@ test('review edit screen reuses form, removes retained image, adds only new imag
   button(tree, '사진 추가').props.onPress(); await flush(); tree = state.render(Screen);
   button(tree, '별점 5점').props.onPress(); nodes(tree).find(node => node.type === 'TextInput').props.onChangeText('edited');
   tree = state.render(Screen); button(tree, '수정 완료').props.onPress(); await flush(); tree = state.render(Screen);
-  assert.deepEqual(clears, [4]); assert.equal(routes.at(-1), '/profile/login');
+  assert.deepEqual(clears, [4]); assert.deepEqual(routes.at(-1), { pathname: '/login', params: { intent: 'resume', resumeKey: 'write' } });
   assert.equal(nodes(tree).find(node => node.type === 'TextInput').props.value, 'edited');
   assert.equal(nodes(tree).filter(node => node.type === 'Image').length, 2);
   failing = false; routes.length = 0;
@@ -428,7 +435,7 @@ test('owner REVIEW menu retains edit navigation and also enables deletion', asyn
       '../../lib/communityFeedRefresh': env.refresh,
       '../../lib/communityLikes': { changeCommunityLike: async () => {} },
       '../../lib/reviews': { ...env, getReviewDetail: async () => ({ ...detailFixture(), isOwner }) },
-      '../../locales': { t: key => key }, '../../theme/communityColors': { communityColors: {} }, '../../theme/tokens': theme,
+      '../../locales': require('./helpers/uiDependencies.cjs').loadPure('src/locales/index.ts'), '../../theme/communityColors': { communityColors: {} }, '../../theme/tokens': theme,
     }).default;
     state.render(Screen); await flush(); let tree = state.render(Screen);
     if (!isOwner) assert.equal(button(tree, '리뷰 메뉴'), undefined);
@@ -436,11 +443,17 @@ test('owner REVIEW menu retains edit navigation and also enables deletion', asyn
       const open = button(tree, '리뷰 메뉴').props.onPress; open(); open();
       tree = state.render(Screen);
       const menu = nodes(tree).find(node => node.type === 'CommunityPostMenu');
+      assert.equal(menu.props.edgeToEdge, true);
       assert.notEqual(menu.props.showDelete, false);
       menu.props.onSelect(1); menu.props.onSelect(1);
       assert.deepEqual(routes, [{ pathname: '/reviews/write', params: { editId: '10' } }]);
       focus(); state.render(Screen);
       assert.equal(env.revisions, 0);
+      env.reviewUpdated({ ...detailFixture(2), rating: 5, content: 'edited through the existing writer' });
+      tree = state.render(Screen);
+      assert.ok(nodes(tree).some(node => node.props?.children === 'edited through the existing writer'));
+      assert.ok(nodes(tree).some(node => node.props?.children === '5.0'));
+      assert.deepEqual(nodes(tree).find(node => node.type === 'Carousel').props.images, detailFixture(2).images.map(image => image.url));
     }
     state.cleanup();
   }
@@ -480,12 +493,14 @@ test('REVIEW delete API uses authenticated REVIEW namespace and does not treat r
 });
 
 test('REVIEW delete confirmation cancels, locks duplicates and mutations, then pops to original popup/community', async () => {
-  for (const origin of ['community', 'popup']) {
+  for (const origin of ['community', 'popup', 'profile']) {
     const state = hooks(), alerts = [], routes = []; let resolve, focus;
     const env = api({ fetch: () => new Promise(done => { resolve = done; }) });
     const { StackRouter } = require('expo-router/build/react-navigation/routers/StackRouter.js');
     const router = StackRouter({ initialRouteName: '(tabs)' });
-    const previous = origin === 'popup' ? { key: 'popup', name: 'places/[id]', params: { id: 'popup-1' } } : { key: 'community', name: '(tabs)' };
+    const previous = origin === 'popup' ? { key: 'popup', name: 'places/[id]', params: { id: 'popup-1' } }
+      : { key: origin, name: '(tabs)', ...(origin === 'profile' ? { state: { key: 'tabs-original', index: 0,
+        routes: [{ key: 'my-review-list', name: 'profile', state: { index: 0, routes: [{ key: 'my-reviews', name: 'reviews' }] } }] } } : {}) };
     let stack = { type: 'stack', key: 'root', index: 1, routeNames: ['(tabs)', 'places/[id]', 'reviews/[id]'],
       routes: [previous, { key: 'review', name: 'reviews/[id]', params: { id: '10' } }], preloadedRoutes: [] };
     const Screen = load('src/app/reviews/[id].tsx', {
@@ -501,7 +516,7 @@ test('REVIEW delete confirmation cancels, locks duplicates and mutations, then p
       '../../lib/auth': { ...env.auth, subscribeAuthSession: () => () => {} }, '../../lib/community': { CommunityApiError: ApiError },
       '../../lib/communityFeedRefresh': env.refresh, '../../lib/communityLikes': { changeCommunityLike: () => { throw new Error('like must be locked'); } },
       '../../lib/reviews': { ...env, getReviewDetail: async () => ({ ...detailFixture(), isOwner: true }) },
-      '../../locales': { t: key => key }, '../../theme/communityColors': { communityColors: {} }, '../../theme/tokens': theme,
+      '../../locales': require('./helpers/uiDependencies.cjs').loadPure('src/locales/index.ts'), '../../theme/communityColors': { communityColors: {} }, '../../theme/tokens': theme,
     }).default;
     const render = () => state.render(Screen);
     const confirm = () => {
@@ -517,14 +532,17 @@ test('REVIEW delete confirmation cancels, locks duplicates and mutations, then p
     assert.equal(env.calls.length, 1); assert.deepEqual(routes, []);
     let tree = render();
     assert.equal(button(tree, '리뷰 메뉴').props.disabled, true);
-    assert.equal(nodes(tree).find(node => node.type === 'CommunityComments').props.mutationDisabled, true);
+    const comments = nodes(tree).find(node => node.type === 'CommunityComments');
+    assert.equal(comments, undefined, 'REVIEW comments are intentionally unsupported');
+    assert.equal(button(tree, '좋아요').props.disabled, true, 'supported likes remain locked during deletion');
     button(tree, '좋아요').props.onPress();
     for (const failure of [403, 404, 500, 'old401', 'current401']) {
       if (failure === 'old401') env.setSession({ accessToken: 'new', generation: 9 });
       resolve(response({}, typeof failure === 'number' ? failure : 401)); await flush();
       tree = render();
       assert.ok(button(tree, '리뷰 메뉴')); assert.equal(button(tree, '리뷰 메뉴').props.disabled, false);
-      assert.equal(nodes(tree).find(node => node.type === 'CommunityComments').props.commentCount, 3);
+      assert.equal(env.refresh.mergeCommunityPostChange(detailFixture(), 0).commentCount, 3, 'failed deletion preserves server comment data');
+      assert.equal(nodes(tree).some(node => node.type === 'CommunityComments'), false);
       assert.ok(env.refresh.mergeCommunityPostChange(detailFixture(), 0));
       if (failure === 'current401') {
         assert.deepEqual(routes, ['/profile/login']); assert.equal(env.clears.at(-1), 9);
@@ -536,6 +554,7 @@ test('REVIEW delete confirmation cancels, locks duplicates and mutations, then p
     assert.equal(env.calls.length, 6);
     resolve(response({}, 204)); await flush(); tree = render();
     assert.deepEqual(routes, ['back']); assert.equal(stack.routes.at(-1).key, previous.key);
+    assert.equal(stack.routes.at(-1), previous, 'deletion resumes the same origin including the mounted profile list');
     assert.equal(nodes(tree).some(node => node.type === 'CommunityComments'), false);
     assert.equal(env.revisions, 0); state.cleanup();
   }

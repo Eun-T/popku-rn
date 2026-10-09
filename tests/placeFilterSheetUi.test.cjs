@@ -4,6 +4,7 @@ const { test } = require('node:test');
 const ts = require('typescript');
 const jsx = (type, props, key) => ({ type, props, key });
 function load(file, mocks = {}) {
+  mocks = require('./helpers/uiDependencies.cjs').withI18nDependencies(file, mocks);
   const code = ts.transpileModule(readFileSync(file, 'utf8'), { compilerOptions: {
     module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: false,
   } }).outputText;

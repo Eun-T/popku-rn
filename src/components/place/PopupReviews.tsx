@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from '../../hooks/useTranslation';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import CommunityPostItem from '../community/CommunityPostItem';
+import ReviewActions from '../reviews/ReviewActions';
 import { useCommunityNow } from '../../hooks/useCommunityNow';
-import { getAuthSession, subscribeAuthSession } from '../../lib/auth';
+import { getAuthSession, getAuthUser, subscribeAuthSession, subscribeAuthUser } from '../../lib/auth';
+import { loginHref } from '../../lib/loginReturn';
 import { subscribeCommunityLikes, subscribeCommunityCommentCounts, subscribeCommunityPostChanges } from '../../lib/communityFeedRefresh';
 import { changeCommunityLike } from '../../lib/communityLikes';
 import type { CommunityFeedItem } from '../../lib/community';
@@ -13,7 +16,9 @@ import { radius, spacing, typography } from '../../theme/tokens';
 
 type Props = { publicId: string; title: string };
 export default function PopupReviews({ publicId, title }: Props) {
+  const { t } = useTranslation();
   const router = useRouter();
+  const authUser = useSyncExternalStore(subscribeAuthUser, getAuthUser, getAuthUser);
   const { now } = useCommunityNow();
   const [items, setItems] = useState<CommunityFeedItem[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -24,8 +29,13 @@ export default function PopupReviews({ publicId, title }: Props) {
   const navigationLocked = useRef(false);
   const mounted = useRef(true);
   const request = useRef<AbortController | null>(null);
+  const failedCursor = useRef<string | null>(null);
   useFocusEffect(useCallback(() => { navigationLocked.current = false; }, []));
-  useEffect(() => subscribeReviews(changed => { if (changed === publicId) setRevision(value => value + 1); }), [publicId]);
+  useEffect(() => subscribeReviews((changed, kind) => {
+    if (changed !== publicId || kind !== 'created') return;
+    request.current?.abort();
+    setRevision(value => value + 1);
+  }), [publicId]);
   useEffect(() => subscribeAuthSession(() => setRevision(value => value + 1)), []);
   useEffect(() => subscribeCommunityCommentCounts((id, count, type) => {
     setItems(current => current.map(item => type === 'REVIEW' && item.type === type && item.id === id
@@ -44,8 +54,10 @@ export default function PopupReviews({ publicId, title }: Props) {
     return () => { mounted.current = false; request.current?.abort(); };
   }, []);
   useEffect(() => {
-    request.current?.abort(); busy.current = false;
     setItems([]); setCursor(null);
+  }, [publicId]);
+  useEffect(() => {
+    request.current?.abort(); busy.current = false;
     void load(null);
     return () => request.current?.abort();
   }, [publicId, revision]);
@@ -54,6 +66,7 @@ export default function PopupReviews({ publicId, title }: Props) {
     if (busy.current) return;
     busy.current = true;
     const controller = new AbortController(); request.current = controller;
+    failedCursor.current = after;
     setLoading(true); setError(false);
     try {
       const page = await getPopupReviews(publicId, after, controller.signal);
@@ -72,46 +85,48 @@ export default function PopupReviews({ publicId, title }: Props) {
       if (!mounted.current) return;
       router.push(session.accessToken
         ? { pathname: '/reviews/write', params: { publicId, title } }
-        : '/profile/login');
+        : loginHref({ intent: 'review', publicId }));
     } catch {
       navigationLocked.current = false;
-      if (mounted.current) Alert.alert('화면을 열지 못했어요', '잠시 후 다시 시도해 주세요.');
+      if (mounted.current) Alert.alert(t('place.detail.reviews.openFailed'), t('place.detail.tryLater'));
     }
   }
   function openReview(reviewId: number) {
     if (navigationLocked.current) return;
     navigationLocked.current = true;
     try { router.push({ pathname: '/reviews/[id]', params: { id: String(reviewId) } }); }
-    catch { navigationLocked.current = false; Alert.alert('화면을 열지 못했어요', '잠시 후 다시 시도해 주세요.'); }
+    catch { navigationLocked.current = false; Alert.alert(t('place.detail.reviews.openFailed'), t('place.detail.tryLater')); }
   }
   function login() {
     if (navigationLocked.current) return;
     navigationLocked.current = true;
     try { router.push('/profile/login'); }
-    catch { navigationLocked.current = false; Alert.alert('화면을 열지 못했어요', '잠시 후 다시 시도해 주세요.'); }
+    catch { navigationLocked.current = false; Alert.alert(t('place.detail.reviews.openFailed'), t('place.detail.tryLater')); }
   }
-  const writeButton = <Pressable accessibilityRole="button" accessibilityLabel="방문 리뷰 작성" onPress={() => { void write(); }} style={styles.write}>
-    <Text style={styles.writeText}>방문 리뷰 작성</Text>
+  const writeLabel = authUser ? t('place.detail.reviews.write') : t('place.detail.reviews.loginWrite');
+  const writeButton = <Pressable accessibilityRole="button" accessibilityLabel={writeLabel} onPress={() => { void write(); }} style={styles.write}>
+    <Text style={styles.writeText}>{writeLabel}</Text>
   </Pressable>;
   return <View style={styles.container}>
     {items.length > 0 && writeButton}
     {!loading && !error && items.length === 0 && <View style={styles.empty}>
-      <Text style={styles.title}>아직 방문 리뷰가 없어요</Text>
-      <Text style={styles.description}>이 팝업에 다녀오셨나요?{'\n'}첫 번째 리뷰를 남겨보세요.</Text>
+      <Text style={styles.title}>{t('place.detail.reviews.empty')}</Text>
+      <Text style={styles.description}>{t('place.detail.reviews.emptyDescription')}</Text>
       {writeButton}
     </View>}
     {items.map(item => <View key={item.id} style={styles.item}><CommunityPostItem post={item} now={now}
+      reviewActions={<ReviewActions review={item} />}
       onPressLike={item.type === 'REVIEW' ? () => { void changeCommunityLike(item, login,
-        () => Alert.alert('좋아요를 변경하지 못했어요', '잠시 후 다시 시도해 주세요.')); } : undefined}
+        () => Alert.alert(t('place.detail.reviews.likeFailed'), t('place.detail.tryLater'))); } : undefined}
       onPressReview={item.type === 'REVIEW' ? () => openReview(item.id) : undefined} /></View>)}
     {loading && <ActivityIndicator style={styles.status} color={communityColors.charcoal} />}
     {error && <View style={styles.status}>
-      <Text style={styles.description}>방문 리뷰를 불러오지 못했어요</Text>
-      <Pressable accessibilityRole="button" onPress={() => { void load(items.length ? cursor : null); }}><Text style={styles.retry}>다시 시도</Text></Pressable>
+      <Text style={styles.description}>{t('place.detail.reviews.loadFailed')}</Text>
+      <Pressable accessibilityRole="button" onPress={() => { void load(failedCursor.current); }}><Text style={styles.retry}>{t('community.detail.retry')}</Text></Pressable>
       {items.length === 0 && writeButton}
     </View>}
     {!loading && !error && cursor && <Pressable accessibilityRole="button" onPress={() => { void load(cursor); }} style={styles.more}>
-      <Text style={styles.retry}>리뷰 더 보기</Text>
+      <Text style={styles.retry}>{t('place.detail.reviews.more')}</Text>
     </Pressable>}
   </View>;
 }

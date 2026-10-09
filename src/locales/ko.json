@@ -1,7 +1,27 @@
 {
   "common": {},
   "home": {
-    "title": "메인 홈"
+    "title": "메인 홈",
+    "trending": {
+      "title": "지금 뜨는 팝업 🔥",
+      "description": "요즘 인기 있는 팝업을 모아봤어요!",
+      "emptyTitle": "진행 중인 팝업이 없어요",
+      "emptyDescription": "새로운 팝업을 준비 중이에요",
+      "showAll": "TOP 10 모두 보기"
+    },
+    "new": {
+      "title": "이번 주 새로 열려요 ✨",
+      "description": "이번 주 새롭게 오픈하는 팝업을 만나보세요!",
+      "empty": "이번 주 새로 여는 팝업이 없어요."
+    },
+    "loadFailed": "팝업을 불러오지 못했어요.",
+    "favoriteRetry": "찜 상태 다시 시도",
+    "favoriteLoadFailed": "찜 상태를 불러오지 못했어요. 다시 시도",
+    "more": "더보기",
+    "card": {
+      "addFavorite": "{title} 찜하기",
+      "removeFavorite": "{title} 찜 취소"
+    }
   },
   "place": {
     "title": "플레이스",
@@ -36,6 +56,45 @@
         "FOOD": "무엇을 맛볼 수 있어요?",
         "SPACE": "어떤 공간이에요?",
         "HIGHLIGHT": "놓치면 아쉬운 건?"
+      },
+      "schedulePending": "일정 미정",
+      "infoTab": "팝업 정보",
+      "share": "공유하기",
+      "favorited": "찜했어요",
+      "favoriteFailed": "찜을 변경하지 못했어요",
+      "tryLater": "잠시 후 다시 시도해 주세요.",
+      "loadFailed": "팝업 정보를 불러오지 못했습니다.",
+      "ratingReviews": "평균 별점 {rating}점, 방문 리뷰로 이동",
+      "noRatingReviews": "별점 없음, 방문 리뷰로 이동",
+      "openReviews": "방문 리뷰로 이동",
+      "reviewCount": "후기 {count}개",
+      "reviewLabel": "후기",
+      "location": "위치",
+      "viewOnMap": "지도에서 팝업 보기",
+      "directions": "길찾기",
+      "directionMaps": {
+        "google": "Google 지도",
+        "naver": "네이버 지도",
+        "apple": "Apple 지도",
+        "unavailable": "길찾기에 필요한 위치 정보가 없습니다.",
+        "failed": "지도 앱을 열지 못했습니다. 다시 시도해 주세요.",
+        "naverWeb": "네이버 웹 지도에서 목적지를 직접 검색해 주세요: {destination}. 일본 장소의 길찾기는 구글 또는 애플 지도를 이용해 주세요."
+      },
+      "reportInformation": "정보 수정 제보하기",
+      "reportInformationButton": "정보 수정 제보 →",
+      "imageFailed": "이미지를 불러올 수 없습니다",
+      "reviews": {
+        "openFailed": "화면을 열지 못했어요",
+        "write": "방문 리뷰 작성",
+        "loginWrite": "로그인하고 리뷰 작성하기",
+        "empty": "아직 방문 리뷰가 없어요",
+        "emptyDescription": "이 팝업에 다녀오셨나요?\n첫 번째 리뷰를 남겨보세요.",
+        "likeFailed": "좋아요를 변경하지 못했어요",
+        "loadFailed": "방문 리뷰를 불러오지 못했어요",
+        "more": "리뷰 더 보기",
+        "photo": "후기 사진 {index}",
+        "like": "좋아요",
+        "unlike": "좋아요 취소"
       }
     },
     "explore": {
@@ -49,7 +108,15 @@
       "previous": "이전 팝업",
       "next": "다음 팝업",
       "back": "뒤로 가기",
-      "notFound": "팝업 정보를 찾을 수 없습니다."
+      "notFound": "팝업 정보를 찾을 수 없습니다.",
+      "tab": "탐색",
+      "endingSoonTitle": "곧 끝나요",
+      "endingSoonDescription": "종료가 가까운 팝업을 모았어요!",
+      "endingSoonEmpty": "5일 안에 종료되는 팝업이 없어요.",
+      "endsToday": "오늘 종료",
+      "weeklyTitle": "이번 주 뭐가 뜰까?",
+      "loadFailedRetry": "팝업을 불러오지 못했어요. 다시 시도",
+      "weeklyPage": "주간 팝업 {index}페이지"
     },
     "all": {
       "sort": {
@@ -75,6 +142,17 @@
         "osakaBeauty": "오사카 뷰티 마켓 팝업",
         "busanLifestyle": "부산 라이프스타일 팝업",
         "kyotoCharacter": "교토 캐릭터 전시 팝업"
+      },
+      "loading": "팝업을 불러오는 중이에요.",
+      "empty": "표시할 팝업이 없어요.",
+      "search": "팝업 검색",
+      "searchPlaceholder": "팝업을 검색해보세요",
+      "clearSearch": "검색어 지우기",
+      "openingWeek": "이번 주 오픈",
+      "card": {
+        "upcoming": "오픈예정",
+        "ended": "종료됨",
+        "ongoing": "진행중"
       }
     },
     "filters": {
@@ -84,7 +162,8 @@
       },
       "quick": {
         "preReservation": "사전예약",
-        "benefit": "혜택"
+        "benefit": "혜택",
+        "_label": "빠른 필터"
       },
       "eventTypes": {
         "_label": "행사 유형",
@@ -118,7 +197,16 @@
         "fukuoka": "후쿠오카",
         "nagoya": "나고야",
         "sapporo": "삿포로",
-        "yokohama": "요코하마"
+        "yokohama": "요코하마",
+        "yongsan": "용산",
+        "otherSeoul": "서울 기타",
+        "gyeonggiIncheon": "경기·인천",
+        "daeguGyeongbuk": "대구·경북",
+        "daejeonChungcheong": "대전·충청",
+        "gwangjuJeolla": "광주·전라",
+        "gangwon": "강원",
+        "jeju": "제주",
+        "otherJapan": "일본 기타"
       },
       "interests": {
         "_label": "관심 분야",
@@ -128,7 +216,11 @@
         "beauty": "뷰티",
         "foodBeverage": "F&B",
         "exhibitionArt": "아트/전시",
-        "lifestyle": "라이프"
+        "lifestyle": "라이프",
+        "entertainment": "연예/크리에이터",
+        "stationery": "문구/소품",
+        "familyPet": "패밀리/펫",
+        "other": "기타"
       },
       "operationStatuses": {
         "_label": "운영 상태",
@@ -144,13 +236,37 @@
       "collapse": "접기",
       "collapseRegions": "지역 접기",
       "moreRegions": "지역 {count}개 더 보기",
-      "remove": "{label} 필터 삭제"
+      "remove": "{label} 필터 삭제",
+      "loading": "필터 항목을 불러오는 중이에요.",
+      "loadFailed": "필터 항목을 불러오지 못했어요."
     }
   },
   "map": {
-    "title": "지도"
+    "title": "지도",
+    "search": {
+      "placeholder": "장소나 팝업을 검색해보세요",
+      "loading": "검색 중...",
+      "resolving": "위치 확인 중...",
+      "failed": "검색할 수 없어요. 다시 시도해 주세요.",
+      "empty": "검색 결과가 없어요",
+      "resolveFailed": "위치를 불러올 수 없어요. 다시 선택해 주세요."
+    },
+    "currentLocation": "현재 위치로 이동",
+    "returnToMap": "지도로 돌아가기",
+    "viewPopups": "이 지역 팝업 {count}개 보기",
+    "popupLoadFailed": "팝업을 불러올 수 없어요",
+    "popupMissing": "팝업을 찾을 수 없어요",
+    "refreshAndRetry": "목록을 새로고침한 뒤 다시 시도해 주세요.",
+    "locationPermissionTitle": "위치 권한 필요",
+    "locationPermissionDescription": "현재 위치를 보려면 위치 권한을 허용해 주세요.",
+    "locationFailed": "위치를 찾을 수 없어요",
+    "checkLocationService": "위치 서비스를 확인한 뒤 다시 시도해 주세요.",
+    "listLoading": "팝업을 불러오는 중이에요",
+    "listEmpty": "이 지역에 해당하는 팝업이 없어요"
   },
   "community": {
+    "commentCountWithUnit": "댓글 {count}개",
+    "compactCommentCount": "댓글 {count}",
     "postMenu": "게시글 메뉴",
     "cancel": "취소",
     "edit": {
@@ -200,6 +316,7 @@
       "question": "질문",
       "free": "자유"
     },
+    "reviewFilterLabel": "방문 리뷰",
     "sort": {
       "latest": "최신순",
       "popular": "인기순"
@@ -221,9 +338,309 @@
         "kyotoQuestion": "교토에서 이번 주에 가볼 만한 캐릭터 팝업이 있을까요? 장소는 아직 정하지 않았어요. 이동하기 편한 곳이면 좋겠습니다.",
         "busanInfo": "부산 팝업 현장에서는 오후부터 입장 대기가 조금 늘었어요. 포토존은 안쪽에 있고, 안내 데스크에서 운영 시간을 다시 확인할 수 있습니다."
       }
+    },
+    "feed": {
+      "loadFailed": "게시글을 불러오지 못했어요",
+      "empty": "아직 게시글이 없어요"
+    },
+    "comments": {
+      "authFailed": "로그인 정보를 확인하지 못했어요. 다시 시도해 주세요.",
+      "lengthExceeded": "댓글은 {count}자 이하로 입력해 주세요.",
+      "createFailed": "댓글을 등록하지 못했어요. 잠시 후 다시 시도해 주세요.",
+      "deleteFailed": "댓글을 삭제하지 못했어요",
+      "deleteTitle": "댓글을 삭제할까요?",
+      "deleteMessage": "삭제한 댓글은 되돌릴 수 없습니다.",
+      "loadFailed": "댓글을 불러오지 못했어요.",
+      "retry": "댓글 다시 시도",
+      "empty": "아직 댓글이 없어요.",
+      "replyTo": "{nickname}에게 답글",
+      "reply": "답글",
+      "writeReply": "답글쓰기",
+      "menu": "{id}번 댓글 메뉴",
+      "cancelReply": "답글 취소",
+      "input": "댓글 입력",
+      "placeholder": "댓글을 입력해주세요...",
+      "register": "댓글 등록"
     }
   },
   "my": {
     "title": "마이페이지"
+  },
+  "language": {
+    "screenTitle": "언어 설정",
+    "settings": "설정",
+    "title": "앱 언어",
+    "description": "앱에 표시할 언어를 선택하세요. 팝업 조회 국가와는 별도로 적용됩니다.",
+    "system": "시스템 설정",
+    "ko": "한국어",
+    "ja": "日本語",
+    "systemDescription": "기기 언어를 따릅니다. 지원하지 않는 언어는 한국어로 표시됩니다.",
+    "saveError": "언어 설정을 저장하지 못했습니다. 다시 선택해 주세요.",
+    "readError": "저장된 언어 설정을 읽지 못해 시스템 설정을 적용했습니다.",
+    "back": "뒤로가기"
+  },
+  "review": {
+    "menu": "리뷰 메뉴",
+    "deleteTitle": "리뷰를 삭제할까요?",
+    "deleteFailed": "리뷰를 삭제하지 못했어요",
+    "editOpenFailed": "수정 화면을 열지 못했어요",
+    "missing": "방문 리뷰를 찾을 수 없어요.",
+    "loadFailed": "방문 리뷰를 불러오지 못했어요.",
+    "write": {
+      "editTitle": "방문 리뷰 수정",
+      "save": "수정 완료",
+      "register": "등록",
+      "ratingPrompt": "이번 방문은 어떠셨나요?",
+      "rating": "별점 {value}점",
+      "contentPrompt": "후기를 남겨주세요",
+      "content": "방문 후기 내용",
+      "placeholder": "방문 경험을 들려주세요",
+      "contentTooLong": "후기 내용이 저장 가능한 길이를 초과했어요.",
+      "photos": "사진",
+      "maxPhotos": "최대 5장",
+      "addPhoto": "사진 추가",
+      "removePhoto": "사진 {index} 삭제",
+      "reviewLoadFailed": "리뷰를 확인하지 못했어요. 다시 시도",
+      "popupLoadFailed": "팝업을 확인하지 못했어요. 다시 시도",
+      "duplicate": "이 팝업에 이미 방문 리뷰를 남겼어요.",
+      "editFailed": "리뷰를 수정하지 못했어요. 잠시 후 다시 시도해 주세요.",
+      "createFailed": "리뷰를 등록하지 못했어요. 잠시 후 다시 시도해 주세요.",
+      "editPending": "수정 결과를 확인하지 못했어요. 같은 내용으로 수정 완료를 다시 눌러 주세요.",
+      "createPending": "등록 결과를 확인하지 못했어요. 같은 내용으로 등록을 다시 눌러 주세요.",
+      "leaveTitle": "작성을 그만둘까요?",
+      "leaveMessage": "저장하지 않은 내용은 사라져요.",
+      "continue": "계속 작성",
+      "leave": "나가기"
+    }
+  },
+  "profile": {
+    "title": "마이페이지",
+    "activity": "내 활동",
+    "unavailable": "아직 사용할 수 없는 메뉴입니다.",
+    "loadingUser": "사용자 정보 불러오는 중",
+    "loginTitle": "로그인하고 내 활동을 확인해보세요",
+    "loginDescription": "관심 팝업과 작성한 리뷰·글을 한곳에서 확인할 수 있어요",
+    "login": "로그인",
+    "userLoadFailed": "사용자 정보를 불러오지 못했습니다.",
+    "service": "서비스",
+    "notices": "공지사항",
+    "inquiries": "문의하기",
+    "policies": "약관/정책",
+    "retry": "다시 시도하기",
+    "posts": {
+      "title": "내가 쓴 게시글",
+      "loading": "게시글 불러오는 중",
+      "loadingMore": "게시글 추가 로딩",
+      "more": "게시글 더 보기",
+      "loginTitle": "로그인이 필요해요",
+      "loginDescription": "로그인 후 내가 쓴 게시글을 확인할 수 있어요.",
+      "empty": "아직 작성한 게시글이 없어요."
+    },
+    "reviews": {
+      "title": "내가 쓴 방문 리뷰",
+      "loading": "방문 리뷰 불러오는 중",
+      "loadingMore": "리뷰 추가 로딩",
+      "empty": "아직 작성한 방문 리뷰가 없어요",
+      "emptyDescription": "다녀온 팝업에 방문 리뷰를 남겨보세요"
+    },
+    "favorites": {
+      "title": "찜한 팝업",
+      "loadFailed": "찜한 팝업을 불러오지 못했어요",
+      "empty": "아직 찜한 팝업이 없어요",
+      "emptyDescription": "관심 있는 팝업을 찜해보세요",
+      "favorited": "찜됨"
+    },
+    "nickname": {
+      "title": "닉네임 변경",
+      "current": "현재 닉네임",
+      "new": "새 닉네임",
+      "hint": "문자·숫자·밑줄(_)로 2~10자 입력해 주세요.",
+      "invalid": "닉네임은 문자·숫자·밑줄(_)로 2~10자 입력해 주세요.",
+      "unchanged": "현재 닉네임과 같아요.",
+      "taken": "이미 사용 중인 닉네임이에요.",
+      "changed": "닉네임이 변경됐어요.",
+      "save": "저장",
+      "loginRequired": "로그인 후 계정 정보를 변경할 수 있어요.",
+      "sessionExpired": "로그인이 만료됐어요. 다시 로그인해 주세요.",
+      "inputInvalid": "입력값과 형식을 확인해 주세요.",
+      "saveFailed": "저장하지 못했어요. 네트워크 연결을 확인하고 다시 시도해 주세요.",
+      "passwordIncorrect": "현재 비밀번호가 일치하지 않아요.",
+      "passwordMismatch": "새 비밀번호와 확인값이 일치하지 않아요.",
+      "passwordSame": "현재 비밀번호와 다른 비밀번호를 입력해 주세요.",
+      "socialForbidden": "소셜 로그인 계정은 비밀번호를 변경할 수 없어요."
+    }
+  },
+  "account": {
+    "settings": {
+      "theme": {
+        "title": "화면 테마",
+        "system": "시스템",
+        "light": "라이트",
+        "dark": "다크"
+      },
+      "account": "계정",
+      "logout": "로그아웃",
+      "logoutFailed": "로그아웃에 실패했습니다. 다시 시도해주세요."
+    },
+    "login": {
+      "required": "이메일과 비밀번호를 입력해 주세요.",
+      "failed": "로그인에 실패했습니다.",
+      "emailRegistered": "이미 이메일로 가입된 계정이 있어요.\n기존 로그인 방법으로 로그인해 주세요.",
+      "googleInvalid": "Google 인증이 유효하지 않아요. 다시 시도해 주세요.",
+      "googlePlay": "Google Play 서비스를 확인해 주세요.",
+      "googleSettings": "Google 로그인 설정을 확인해 주세요.",
+      "googleToken": "Google 인증 정보를 받지 못했어요. 다시 시도해 주세요.",
+      "googleFailed": "Google 로그인에 실패했어요. 다시 시도해 주세요.",
+      "google": "Google로 계속하기",
+      "noAccount": "계정이 없나요?",
+      "invalid": "이메일 또는 비밀번호를 확인해 주세요.",
+      "tokenMissing": "로그인 응답에 토큰이 없습니다."
+    },
+    "network": "네트워크 연결을 확인하고 다시 시도해 주세요.",
+    "email": "이메일",
+    "password": {
+      "label": "비밀번호",
+      "hide": "숨기기",
+      "show": "표시",
+      "title": "비밀번호 변경",
+      "changed": "비밀번호가 변경됐어요.",
+      "cleanupFailed": "앱 인증 정보 정리에 실패했어요. 앱을 다시 열고 로그인해 주세요.",
+      "loginAgain": "비밀번호가 변경됐어요. 다시 로그인해 주세요.",
+      "current": "현재 비밀번호",
+      "new": "새 비밀번호",
+      "hint": "영문과 숫자를 포함한 8~72자. 공백 없이 영문·숫자·기호를 사용할 수 있어요.",
+      "confirmation": "새 비밀번호 확인",
+      "currentRequired": "현재 비밀번호를 입력해 주세요.",
+      "invalid": "새 비밀번호는 영문과 숫자를 포함한 8~72자의 공백 없는 영문·숫자·기호여야 해요."
+    },
+    "signup": {
+      "title": "회원가입",
+      "invalidEmail": "이메일 형식을 확인해 주세요.",
+      "emailTaken": "이미 가입된 이메일이에요.",
+      "sendWait": "잠시 후 다시 인증번호를 요청해 주세요.",
+      "sendUnavailable": "인증번호를 보내지 못했어요. 잠시 후 다시 시도해 주세요.",
+      "sendFailed": "인증번호를 보내지 못했어요. 다시 시도해 주세요.",
+      "invalidCode": "인증번호를 확인해 주세요.",
+      "codeExpired": "인증번호가 만료됐어요. 재전송해 주세요.",
+      "tooManyAttempts": "인증 시도 횟수를 초과했어요. 인증번호를 재전송해 주세요.",
+      "alreadyVerified": "이미 인증된 이메일이에요.",
+      "verifyFailed": "인증번호를 확인하지 못했어요. 다시 시도해 주세요.",
+      "identityTaken": "이메일 또는 닉네임이 이미 사용 중이에요.",
+      "proofExpired": "이메일 인증이 만료됐어요. 회원가입을 다시 시작해 주세요.",
+      "passwordPolicy": "비밀번호 조건을 확인해 주세요.",
+      "requiredConsent": "필수 약관 동의를 확인해 주세요.",
+      "invalidNickname": "닉네임 형식을 확인해 주세요.",
+      "invalidInput": "입력 정보를 확인해 주세요.",
+      "joinUnavailable": "회원가입을 완료하지 못했어요. 잠시 후 다시 시도해 주세요.",
+      "joinFailed": "회원가입을 완료하지 못했어요. 다시 시도해 주세요.",
+      "googleExpired": "Google 가입 시간이 만료됐어요. 다시 로그인해 주세요.",
+      "googleInput": "닉네임과 필수 약관 동의를 확인해 주세요.",
+      "googleFailed": "Google 가입을 완료하지 못했어요. 다시 시도해 주세요.",
+      "verifyAgain": "이메일 인증을 다시 진행해 주세요.",
+      "emailPrompt": "이메일을 입력해 주세요",
+      "receiveCode": "인증번호 받기",
+      "codePlaceholder": "인증번호 6자리",
+      "verified": "인증완료",
+      "verify": "인증하기",
+      "resend": "인증번호 재전송",
+      "emailVerified": "이메일 인증이 완료됐어요.",
+      "passwordPrompt": "비밀번호를 입력해 주세요",
+      "passwordHint": "영문과 숫자를 포함해 8자 이상 입력해 주세요.",
+      "passwordConfirmation": "비밀번호 확인",
+      "passwordMismatch": "비밀번호가 일치하지 않아요.",
+      "nicknamePrompt": "닉네임을 입력해 주세요",
+      "nickname": "닉네임",
+      "nicknameHint": "2~10자로 입력해 주세요.",
+      "nicknameFormat": "문자·숫자·밑줄로 2~10자 입력해 주세요.",
+      "nicknameAvailable": "사용 가능한 닉네임이에요.",
+      "nicknameFailed": "닉네임을 확인하지 못했어요. 다시 시도해 주세요.",
+      "checking": "확인 중...",
+      "consentPrompt": "약관에 동의해 주세요",
+      "allConsent": "전체 동의",
+      "terms": "[필수] 서비스 이용약관",
+      "privacy": "[필수] 개인정보 처리방침",
+      "marketing": "[선택] 마케팅 정보 수신 동의",
+      "joining": "가입 중...",
+      "join": "가입하기"
+    },
+    "detailsSuffix": " 자세히 보기",
+    "requestFailed": "요청을 처리하지 못했어요. 다시 시도해 주세요.",
+    "next": "다음",
+    "withdrawal": {
+      "posts": "질문/자유 게시글과 해당 글에 달린 댓글은 삭제됩니다.",
+      "activity": "관심 팝업과 좋아요 등 개인 활동 정보가 삭제됩니다.",
+      "retained": "방문 리뷰와 일부 댓글은 삭제되지 않고 '탈퇴한 사용자'로 표시되어 유지됩니다.",
+      "irreversible": "삭제된 정보는 복구할 수 없습니다.",
+      "completed": "회원탈퇴가 완료되었습니다",
+      "cleanupFailed": "기기의 로그인 정보를 정리하지 못했습니다. 다시 시도해주세요.",
+      "title": "회원탈퇴",
+      "failed": "회원탈퇴에 실패했습니다. 다시 시도해주세요.",
+      "confirmTitle": "정말 탈퇴하시겠어요?",
+      "confirmMessage": "탈퇴하면 삭제되는 정보는 복구할 수 없습니다.",
+      "confirm": "탈퇴하기",
+      "description": "탈퇴하기 전에 확인해주세요.",
+      "cleanup": "로그인 정보 정리",
+      "pending": "회원탈퇴 처리 중"
+    },
+    "notices": {
+      "loading": "공지사항 불러오는 중",
+      "empty": "등록된 공지사항이 없어요",
+      "loadingMore": "공지사항 추가 로딩",
+      "failed": "공지사항을 불러오지 못했어요.",
+      "missing": "공지사항을 찾을 수 없어요.",
+      "categories": {
+        "GENERAL": "일반",
+        "UPDATE": "업데이트",
+        "EVENT": "이벤트",
+        "GUIDE": "이용 안내"
+      }
+    },
+    "more": "더 보기",
+    "inquiries": {
+      "loadingMore": "문의 추가 로딩",
+      "listFailed": "문의 내역을 불러오지 못했어요.",
+      "more": "문의 더 보기",
+      "sessionLoading": "로그인 상태 확인 중",
+      "sessionFailed": "로그인 상태를 확인하지 못했어요.",
+      "loginRequired": "로그인이 필요합니다",
+      "loginDescription": "문의 내역을 확인하려면 로그인해주세요.",
+      "loading": "문의 내역 불러오는 중",
+      "empty": "아직 문의 내역이 없어요",
+      "emptyDescription": "궁금한 점이 있다면 문의를 남겨주세요.",
+      "writeButton": "문의글",
+      "detail": "문의 상세",
+      "detailLoading": "문의 상세 불러오는 중",
+      "missing": "문의를 찾을 수 없어요",
+      "missingDescription": "문의 내역에서 다시 확인해주세요.",
+      "failed": "문의를 불러오지 못했어요.",
+      "waiting": "답변을 기다리고 있어요.",
+      "answer": "운영자 답변",
+      "submitFailed": "문의를 등록하지 못했어요. 입력한 내용을 확인하고 다시 시도해주세요.",
+      "write": "문의 작성",
+      "sessionRetry": "로그인 상태 확인 다시 시도",
+      "type": "문의 유형",
+      "subject": "제목",
+      "subjectLabel": "문의 제목",
+      "subjectPlaceholder": "제목을 입력해주세요",
+      "content": "내용",
+      "contentLabel": "문의 내용",
+      "contentPlaceholder": "문의 내용을 입력해주세요",
+      "submit": "문의 등록하기",
+      "types": {
+        "GENERAL": "일반 문의",
+        "BUG": "오류 신고",
+        "INFO_CORRECTION": "정보 수정 요청"
+      },
+      "status": {
+        "PENDING": "답변 대기",
+        "RESOLVED": "답변 완료"
+      }
+    },
+    "confirm": "확인",
+    "policies": {
+      "terms": "이용약관",
+      "privacy": "개인정보처리방침",
+      "location": "위치기반서비스 이용약관"
+    }
   }
 }

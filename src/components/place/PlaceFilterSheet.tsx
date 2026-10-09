@@ -1,3 +1,5 @@
+import { getRegionDisplayName, getTagDisplayName } from '../../locales/filterLabels';
+import { useTranslation } from '../../hooks/useTranslation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
@@ -71,12 +73,6 @@ type PlaceFilterSheetProps = {
   onToggleStatus: (status: PopupStatus) => void;
 };
 
-const statusOptions: readonly FilterOption<PopupStatus>[] = [
-  { id: 'ONGOING', name: t(operationStatusFilters[0].labelKey) },
-  { id: 'UPCOMING', name: t(operationStatusFilters[1].labelKey) },
-  { id: 'ENDED', name: t(operationStatusFilters[2].labelKey) },
-];
-
 export default function PlaceFilterSheet({
   visible,
   filters,
@@ -96,6 +92,12 @@ export default function PlaceFilterSheet({
   onToggleTag,
   onToggleStatus,
 }: PlaceFilterSheetProps) {
+  useTranslation();
+  const statusOptions: readonly FilterOption<PopupStatus>[] = [
+    { id: 'ONGOING', name: t(operationStatusFilters[0].labelKey) },
+    { id: 'UPCOMING', name: t(operationStatusFilters[1].labelKey) },
+    { id: 'ENDED', name: t(operationStatusFilters[2].labelKey) },
+  ];
   const { height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const sheetHeight = height * 0.7;
@@ -186,7 +188,7 @@ export default function PlaceFilterSheet({
             showsVerticalScrollIndicator={false}
           >
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>빠른 필터</Text>
+              <Text style={styles.sectionTitle}>{t('place.filters.quick._label')}</Text>
               <FilterChipGroup
                 options={quickFilters.map((option) => ({ id: option.id, name: t(option.labelKey) }))}
                 selected={[...selectedQuickFilters.countries, ...selectedQuickFilters.quickFeatures]}
@@ -197,27 +199,27 @@ export default function PlaceFilterSheet({
               />
             </View>
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>지역</Text>
+              <Text style={styles.sectionTitle}>{t('place.filters.regions._label')}</Text>
               {koreanRegions.length > 0 && (
-                <RegionFilterGroup options={koreanRegions} selected={filters.regionIds} onToggle={onToggleRegion} />
+                <RegionFilterGroup options={koreanRegions.map(option => ({ ...option, name: getRegionDisplayName(option) }))} selected={filters.regionIds} onToggle={onToggleRegion} />
               )}
               {koreanRegions.length > 0 && japaneseRegions.length > 0 && <View style={styles.regionDivider} />}
               {japaneseRegions.length > 0 && (
-                <FilterChipGroup options={japaneseRegions} selected={filters.regionIds} onToggle={onToggleRegion} />
+                <FilterChipGroup options={japaneseRegions.map(option => ({ ...option, name: getRegionDisplayName(option) }))} selected={filters.regionIds} onToggle={onToggleRegion} />
               )}
             </View>
 
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>관심 분야</Text>
+              <Text style={styles.sectionTitle}>{t('place.filters.interests._label')}</Text>
               <FilterChipGroup
-                options={tags}
+                options={tags.map(option => ({ ...option, name: getTagDisplayName(option) }))}
                 selected={filters.tagIds}
                 onToggle={onToggleTag}
               />
             </View>
 
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>운영 상태</Text>
+              <Text style={styles.sectionTitle}>{t('place.filters.operationStatuses._label')}</Text>
               <FilterChipGroup
                 options={statusOptions}
                 selected={filters.status ? [filters.status] : []}
@@ -225,7 +227,7 @@ export default function PlaceFilterSheet({
               />
             </View>
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>기간</Text>
+              <Text style={styles.sectionTitle}>{t('place.detail.basicInfo.period')}</Text>
               <View style={styles.chipGroup}>
                 {visitPeriodOptions.map((option) => {
                   const isCustom = option.id === 'custom';
@@ -249,7 +251,7 @@ export default function PlaceFilterSheet({
             </View>
             {optionsStatus !== 'ready' && (
               <Text style={styles.optionsMessage}>
-                {optionsStatus === 'loading' ? '필터 항목을 불러오는 중이에요.' : '필터 항목을 불러오지 못했어요.'}
+                {optionsStatus === 'loading' ? t('place.filters.loading') : t('place.filters.loadFailed')}
               </Text>
             )}
           </ScrollView>

@@ -1,9 +1,13 @@
-import { useState } from "react";
-import { StyleSheet, Text, View, type ImageSourcePropType } from "react-native";
+import { getPopupRegionDisplayName, getTagDisplayName } from '../../locales/filterLabels';
+import { useMemo, useState } from "react";
+import { useTheme } from '../../theme/useTheme';
+import { Store } from "lucide-react-native";
+import { Pressable, StyleSheet, Text, View, type ImageSourcePropType } from "react-native";
 
 import { useHomePopups } from "../../hooks/useHomePopups";
 import { usePopupFavorites } from "../../hooks/usePopupFavorites";
-import { colors, spacing, typography } from "../../theme/tokens";
+import { useTranslation } from '../../hooks/useTranslation';
+import { colors, radius, spacing, typography } from "../../theme/tokens";
 import FilterChips from "../common/FilterChips";
 import MoreButton from "../common/MoreButton";
 import {
@@ -13,8 +17,8 @@ import {
 import PopupRankingCard from "./PopupRankingCard";
 
 const countries = [
-  { label: "한국", value: "KR" },
-  { label: "일본", value: "JP" },
+  { labelKey: 'place.filters.countries.kr', value: "KR" },
+  { labelKey: 'place.filters.countries.jp', value: "JP" },
 ] as const;
 type Country = (typeof countries)[number]["value"];
 
@@ -29,10 +33,20 @@ function displayDate(date: string): string {
 }
 
 export default function HomeTrendingSection({ onPressPopup }: { onPressPopup: (id: string) => void }) {
+  const { t, resolvedLanguage } = useTranslation();
+  const { themeColors } = useTheme();
+  const styles = useMemo(() => ({ ...baseStyles,
+    title: { ...baseStyles.title, color: themeColors.textPrimary },
+    description: { ...baseStyles.description, color: themeColors.textSecondary },
+    stateText: { ...baseStyles.stateText, color: themeColors.textSecondary },
+    emptyCard: { ...baseStyles.emptyCard, backgroundColor: themeColors.surface },
+    emptyTitle: { ...baseStyles.emptyTitle, color: themeColors.textPrimary },
+    emptyDescription: { ...baseStyles.emptyDescription, color: themeColors.textSecondary },
+  }), [themeColors]);
   const [selectedCountry, setSelectedCountry] = useState<Country>("KR");
   const { status, popups } = useHomePopups("trending", selectedCountry);
   const [isExpanded, setIsExpanded] = useState(false);
-  const { isFavorite, isFavoriteDisabled, toggleFavorite } = usePopupFavorites();
+  const { isFavorite, isFavoriteDisabled, toggleFavorite, favoritesStatus, retryFavorites } = usePopupFavorites();
 
   const visiblePopups = popups.slice(0, isExpanded ? 10 : 5);
 
@@ -44,23 +58,32 @@ export default function HomeTrendingSection({ onPressPopup }: { onPressPopup: (i
   return (
     <View style={styles.section}>
       <Text style={styles.title}>
-        지금 뜨는 팝업
+        {t('home.trending.title')}
       </Text>
-      <Text style={styles.description}>요즘 인기 있는 팝업을 모아봤어요!</Text>
+      <Text style={styles.description}>{t('home.trending.description')}</Text>
       <View style={styles.filters}>
         <FilterChips
-          options={countries}
+          themeColors={themeColors}
+          options={countries.map(({ labelKey, value }) => ({ label: t(labelKey), value }))}
           value={selectedCountry}
           onChange={handleCountryChange}
         />
       </View>
       <View style={styles.rankingList}>
+        {favoritesStatus === 'error' && <Pressable accessibilityRole="button" accessibilityLabel={t('home.favoriteRetry')}
+          onPress={() => { void retryFavorites(); }}>
+          <Text style={styles.stateText}>{t('home.favoriteLoadFailed')}</Text>
+        </Pressable>}
         {status === "loading" && <HomeTrendingSkeleton />}
         {status === "error" && (
-          <Text style={styles.stateText}>팝업을 불러오지 못했어요.</Text>
+          <Text style={styles.stateText}>{t('home.loadFailed')}</Text>
         )}
         {status === "ready" && popups.length === 0 && (
-          <Text style={styles.stateText}>지금 뜨는 팝업이 없어요.</Text>
+          <View style={styles.emptyCard}>
+            <Store size={20} color={themeColors.inactiveIcon} />
+            <Text style={styles.emptyTitle}>{t('home.trending.emptyTitle')}</Text>
+            <Text style={styles.emptyDescription}>{t('home.trending.emptyDescription')}</Text>
+          </View>
         )}
         {visiblePopups.map((popup, index) => {
           const rank = index + 1;
@@ -74,8 +97,8 @@ export default function HomeTrendingSection({ onPressPopup }: { onPressPopup: (i
               title={popup.name}
               period={`${displayDate(popup.startDate)} ~ ${displayDate(popup.endDate)}`}
               tags={[
-                ...(popup.regionName ? [popup.regionName] : []),
-                ...popup.tags.map((tag) => tag.name),
+                ...(popup.regionName ? [getPopupRegionDisplayName(popup, resolvedLanguage)] : []),
+                ...popup.tags.map((tag) => getTagDisplayName(tag, resolvedLanguage)),
               ]}
               isFavorite={isFavorite(popup.publicId)}
               isFavoriteDisabled={isFavoriteDisabled(popup.publicId)}
@@ -95,7 +118,8 @@ export default function HomeTrendingSection({ onPressPopup }: { onPressPopup: (i
       {status === "ready" && popups.length > 5 && (
         <View style={styles.moreButtonContainer}>
           <MoreButton
-            label={isExpanded ? "접기" : "TOP 10 모두 보기"}
+            themeColors={themeColors}
+            label={t(isExpanded ? 'place.filters.collapse' : 'home.trending.showAll')}
             onPress={() => setIsExpanded((current) => !current)}
           />
         </View>
@@ -104,8 +128,9 @@ export default function HomeTrendingSection({ onPressPopup }: { onPressPopup: (i
   );
 }
 
-const styles = StyleSheet.create({
+const baseStyles = StyleSheet.create({
   section: {
+    marginTop: spacing.space32,
     paddingHorizontal: spacing.space16,
   },
   title: {
@@ -130,5 +155,25 @@ const styles = StyleSheet.create({
   stateText: {
     ...typography.body,
     color: colors.secondaryText,
+  },
+  emptyCard: {
+    minHeight: 110,
+    padding: spacing.space16,
+    borderRadius: radius.radius12,
+    backgroundColor: colors.surface,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  emptyTitle: {
+    marginTop: spacing.space8,
+    ...typography.label,
+    color: colors.text,
+    textAlign: "center",
+  },
+  emptyDescription: {
+    marginTop: spacing.space2,
+    ...typography.caption,
+    color: colors.secondaryText,
+    textAlign: "center",
   },
 });

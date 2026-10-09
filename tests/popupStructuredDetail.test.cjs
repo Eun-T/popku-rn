@@ -5,6 +5,7 @@ const { test } = require('node:test');
 const ts = require('typescript');
 
 function load(file, mocks, globals = {}) {
+  mocks = require('./helpers/uiDependencies.cjs').withI18nDependencies(file, mocks);
   const source = readFileSync(path.join(__dirname, '..', file), 'utf8');
   const code = ts.transpileModule(source, { compilerOptions: {
     module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022,
@@ -95,6 +96,7 @@ function screen({ token = null, initialCount = 0, initialFavorited = false, deta
     './favoriteCache': { favoriteCacheGeneration: () => 1, favoriteSessionGeneration: () => 1, saveFavoriteCache: () => {}, updateFavoriteCache: () => {} },
   }, globals);
   const hooks = {
+    useCallback(fn) { cursor++; return fn; },
     useRef(value) { const i = cursor++; return (slots[i] ??= { current: value }); },
     useState(value) {
       const i = cursor++; if (!slots[i]) slots[i] = { value };
@@ -123,7 +125,7 @@ function screen({ token = null, initialCount = 0, initialFavorited = false, deta
   const Detail = load('src/app/places/[id].tsx', {
     'react': hooks, 'react/jsx-runtime': { jsx, jsxs: jsx },
     'expo-clipboard': { setStringAsync: async (address) => { copiedAddresses.push(address); } },
-    'expo-router': { useLocalSearchParams: () => ({ id: currentId }),
+    'expo-router': { useFocusEffect: () => {}, useLocalSearchParams: () => ({ id: currentId }),
       useRouter: () => ({ push: (route) => navigation.push(route), back() {} }) },
     'lucide-react-native': {}, 'react-native': native,
     'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView', useSafeAreaInsets: () => ({ top: 40, bottom: 20, left: 0, right: 0 }) },
@@ -137,6 +139,7 @@ function screen({ token = null, initialCount = 0, initialFavorited = false, deta
     '../../components/place/PlaceMapPreview': { default: 'MapPreview', isMapPreviewAvailable: false },
     '../../components/place/PopupReviews': { default: 'PopupReviews' },
     '../../lib/auth': auth, '../../lib/favorites': favorites, '../../lib/popups': popups,
+    '../../lib/reviews': { subscribeReviews: () => () => {} },
     '../../lib/popupStatus': { popupOperatingStatus: () => null },
     '../../locales': locales, '../../lib/popupDetailContent': content,
     '../../theme/tokens': load('src/theme/tokens.ts', {}),

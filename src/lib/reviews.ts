@@ -14,13 +14,14 @@ export function reviewContentBytes(content: string): number {
   }
   return bytes;
 }
-const listeners = new Set<(publicId: string) => void>();
-export function subscribeReviews(listener: (publicId: string) => void): () => void {
+type ReviewChangeKind = 'created' | 'updated' | 'deleted';
+const listeners = new Set<(publicId: string, kind: ReviewChangeKind) => void>();
+export function subscribeReviews(listener: (publicId: string, kind: ReviewChangeKind) => void): () => void {
   listeners.add(listener); return () => { listeners.delete(listener); };
 }
 export function reviewsCreated(publicId: string): void {
   markCommunityFeedChanged();
-  listeners.forEach(listener => listener(publicId));
+  listeners.forEach(listener => listener(publicId, 'created'));
 }
 const pathFor = (publicId: string) => `popups/${encodeURIComponent(publicId)}`;
 
@@ -46,6 +47,13 @@ export function applyReviewChange(review: ReviewDetail, patch: CommunityPostChan
 export function reviewUpdated(review: ReviewDetail): void {
   publishCommunityPostChange(review.id, { rating: review.rating, content: review.content, updatedAt: review.updatedAt,
     images: review.images.map(image => image.url), imageIds: review.images.map(image => image.id) }, 'REVIEW');
+  const publicId = review.popup?.publicId;
+  if (publicId) listeners.forEach(listener => listener(publicId, 'updated'));
+}
+export function reviewDeleted(review: Pick<ReviewDetail, 'id' | 'popup'>): void {
+  publishCommunityPostChange(review.id, null, 'REVIEW');
+  const publicId = review.popup?.publicId;
+  if (publicId) listeners.forEach(listener => listener(publicId, 'deleted'));
 }
 export async function getReviewDetail(id: number, signal: AbortSignal, edit = false): Promise<ReviewDetail> {
   if (!Number.isSafeInteger(id) || id < 1) throw new CommunityApiError(404);

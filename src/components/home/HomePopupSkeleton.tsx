@@ -2,24 +2,26 @@ import { StyleSheet, View } from 'react-native';
 
 import SkeletonBlock from '../common/SkeletonBlock';
 import { colors, radius, spacing } from '../../theme/tokens';
+import { useTheme } from '../../theme/useTheme';
 
 export function HomeTrendingSkeleton() {
   return <>{Array.from({ length: 5 }, (_, index) => <RankingSkeletonCard key={index} />)}</>;
 }
 
 function RankingSkeletonCard() {
+  const { themeColors } = useTheme();
   return (
-    <View style={styles.rankingCard} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-      <SkeletonBlock width={88} height={108} borderRadius={radius.radius8} />
+    <View style={[styles.rankingCard, { backgroundColor: themeColors.cardBackground, borderBottomColor: themeColors.border }]} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+      <SkeletonBlock backgroundColor={themeColors.skeletonBackground} width={88} height={108} borderRadius={radius.radius8} />
       <View style={styles.rankingContent}>
-        <SkeletonBlock width="85%" height={24} />
-        <SkeletonBlock width="70%" height={18} style={styles.rankingPeriod} />
+        <SkeletonBlock backgroundColor={themeColors.skeletonBackground} width="85%" height={24} />
+        <SkeletonBlock backgroundColor={themeColors.skeletonBackground} width="70%" height={18} style={styles.rankingPeriod} />
         <View style={styles.rankingTags}>
-          <SkeletonBlock width={64} height={26} />
-          <SkeletonBlock width={48} height={26} />
+          <SkeletonBlock backgroundColor={themeColors.skeletonBackground} width={64} height={26} />
+          <SkeletonBlock backgroundColor={themeColors.skeletonBackground} width={48} height={26} />
         </View>
       </View>
-      <SkeletonBlock width={22} height={22} borderRadius={radius.full} style={styles.rankingFavorite} />
+      <SkeletonBlock backgroundColor={themeColors.skeletonBackground} width={22} height={22} borderRadius={radius.full} style={styles.rankingFavorite} />
     </View>
   );
 }
@@ -29,24 +31,26 @@ export function HomeNewPopupSkeleton({ width }: { width: number }) {
 }
 
 function NewPopupSkeletonCard({ width }: { width: number }) {
+  const { themeColors } = useTheme();
   return (
     <View style={{ width }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-      <SkeletonBlock width={width} height={width} borderRadius={radius.radius4} />
-      <SkeletonBlock width={96} height={26} style={styles.newBadge} />
+      <SkeletonBlock backgroundColor={themeColors.skeletonBackground} width={width} height={width} borderRadius={radius.radius4} />
+      <SkeletonBlock backgroundColor={themeColors.skeletonBackground} width={96} height={26} style={styles.newBadge} />
       <View style={styles.newTitle}>
-        <SkeletonBlock width="90%" height={18} />
-        <SkeletonBlock width="60%" height={18} />
+        <SkeletonBlock backgroundColor={themeColors.skeletonBackground} width="90%" height={18} />
+        <SkeletonBlock backgroundColor={themeColors.skeletonBackground} width="60%" height={18} />
       </View>
       <View style={styles.newTags}>
-        <SkeletonBlock width={64} height={26} />
-        <SkeletonBlock width={48} height={26} />
+        <SkeletonBlock backgroundColor={themeColors.skeletonBackground} width={64} height={26} />
+        <SkeletonBlock backgroundColor={themeColors.skeletonBackground} width={48} height={26} />
       </View>
     </View>
   );
 }
 
 export function RankingSkeletonFooter() {
-  return <SkeletonBlock width="100%" height={48} borderRadius={radius.radius12} />;
+  const { themeColors } = useTheme();
+  return <SkeletonBlock backgroundColor={themeColors.skeletonBackground} width="100%" height={48} borderRadius={radius.radius12} />;
 }
 
 const styles = StyleSheet.create({

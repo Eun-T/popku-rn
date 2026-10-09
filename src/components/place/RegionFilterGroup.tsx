@@ -1,3 +1,4 @@
+import { useTranslation } from '../../hooks/useTranslation';
 import { useEffect, useState } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react-native';
 import { Pressable, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
@@ -32,6 +33,7 @@ function getRowCount(widths: readonly number[], availableWidth: number): number 
 }
 
 export default function RegionFilterGroup({ options, selected, onToggle }: RegionFilterGroupProps) {
+  useTranslation();
   const [expanded, setExpanded] = useState(false);
   const [availableWidth, setAvailableWidth] = useState(0);
   const [chipWidths, setChipWidths] = useState<Record<string, number>>({});

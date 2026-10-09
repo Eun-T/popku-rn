@@ -2,6 +2,9 @@ import { Heart } from 'lucide-react-native';
 import { Image, Pressable, StyleSheet, Text, View, type ImageSourcePropType } from 'react-native';
 
 import { colors, radius, spacing, typography } from '../../theme/tokens';
+import { useTranslation } from '../../hooks/useTranslation';
+import { useMemo } from 'react';
+import { useTheme } from '../../theme/useTheme';
 
 type PopupRankingCardProps = {
   rank: number;
@@ -26,9 +29,20 @@ export default function PopupRankingCard({
   onToggleFavorite,
   onPress,
 }: PopupRankingCardProps) {
+  const { t } = useTranslation();
+  const { resolvedTheme, themeColors } = useTheme();
+  const styles = useMemo(() => ({ ...baseStyles,
+    card: { ...baseStyles.card, backgroundColor: themeColors.cardBackground, borderBottomColor: themeColors.border },
+    imageFrame: resolvedTheme === 'dark' ? { ...baseStyles.imageFrame, backgroundColor: themeColors.surface } : baseStyles.imageFrame,
+    rankText: { ...baseStyles.rankText, color: themeColors.onImage },
+    title: { ...baseStyles.title, color: themeColors.textPrimary },
+    period: { ...baseStyles.period, color: themeColors.textSecondary },
+    tag: { ...baseStyles.tag, backgroundColor: themeColors.tagBackground },
+    tagText: { ...baseStyles.tagText, color: themeColors.tagText },
+  }), [themeColors, resolvedTheme]);
   return (
     <View style={styles.card}>
-      <Pressable accessibilityRole="button" accessibilityLabel={`${title} 상세 보기`} onPress={onPress} style={styles.detailButton}>
+      <Pressable accessibilityRole="button" accessibilityLabel={t('place.explore.viewDetails', { title })} onPress={onPress} style={styles.detailButton}>
         <View style={styles.imageFrame}>
           <Image source={image} style={styles.image} resizeMode="cover" />
           <View style={styles.rankBadge}>
@@ -53,7 +67,7 @@ export default function PopupRankingCard({
       </Pressable>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={isFavorite ? `${title} 찜 취소` : `${title} 찜하기`}
+        accessibilityLabel={t(isFavorite ? 'home.card.removeFavorite' : 'home.card.addFavorite', { title })}
         accessibilityState={{ selected: isFavorite, disabled: isFavoriteDisabled }}
         disabled={isFavoriteDisabled}
         onPress={onToggleFavorite}
@@ -61,15 +75,15 @@ export default function PopupRankingCard({
       >
         <Heart
           size={22}
-          color={isFavorite ? colors.primary : colors.text}
-          fill={isFavorite ? colors.primary : 'none'}
+          color={isFavorite ? '#FF5A6E' : themeColors.textPrimary}
+          fill={isFavorite ? '#FF5A6E' : 'none'}
         />
       </Pressable>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+const baseStyles = StyleSheet.create({
   card: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -103,7 +117,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderTopRightRadius: radius.radius8,
-    backgroundColor: colors.primaryDark,
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
   },
   rankText: {
     fontSize: 18,
@@ -121,7 +135,7 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   period: {
-    marginTop: spacing.space8,
+    marginTop: spacing.space4,
     ...typography.caption,
     color: colors.secondaryText,
   },
@@ -134,13 +148,13 @@ const styles = StyleSheet.create({
   tag: {
     maxWidth: '100%',
     borderRadius: radius.radius4,
-    backgroundColor: colors.surface,
+    backgroundColor: '#F3F4F6',
     paddingHorizontal: spacing.space6,
     paddingVertical: spacing.space4,
   },
   tagText: {
     ...typography.caption,
-    color: colors.secondaryText,
+    color: '#4B5563',
   },
   favoriteButton: {
     width: 44,

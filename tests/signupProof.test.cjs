@@ -4,6 +4,8 @@ const { test } = require('node:test');
 const ts = require('typescript');
 
 function productionFunction(file, name, scope) {
+  const {loadPure}=require('./helpers/uiDependencies.cjs');
+  scope={accountUiKey:loadPure('src/locales/accountUi.ts').accountUiKey,...scope};
   const ast = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true,
     file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
   let declaration;
@@ -143,7 +145,7 @@ function joinScope(registerUser) {
   let proof = 'proof.jwt.value';
   const calls = [], signupRequest = [];
   const scope = {
-    canJoin: true, joiningRef: { current: false }, isGoogle: false, signupProof: proof,
+    canJoin: true, joiningRef: { current: false }, isGoogle: false, signupProof: proof, target: null,
     signupDraft: { email: 'user@example.com', password: 'Passw0rdLong', nickname: 'tester',
       termsAccepted: true, privacyAccepted: true, marketingAccepted: false },
     setJoining: () => {}, setJoinError: (value) => calls.push(['joinError', value]),
@@ -153,7 +155,11 @@ function joinScope(registerUser) {
     joinErrorMessage: () => '가입 실패',
     setVerificationStage: (value) => calls.push(['stage', value]),
     setSignupStep: (value) => calls.push(['step', value]),
-    setEmailError: (value) => calls.push(['emailError', value]),
+    setEmailError: (value) => {
+      const {loadPure}=require('./helpers/uiDependencies.cjs');
+      const ui=loadPure('src/locales/accountUi.ts'),locale=loadPure('src/locales/index.ts');
+      calls.push(['emailError',ui.accountUiText((key)=>locale.translate('ko',key),value)]);
+    },
     setCode: (value) => calls.push(['code', value]),
     setPassword: () => {}, setPasswordConfirmation: () => {}, setEmail: () => {},
     setNickname: () => {}, setConfirmedNickname: () => {},

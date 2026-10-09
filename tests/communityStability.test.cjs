@@ -4,6 +4,7 @@ const { test } = require('node:test');
 const ts = require('typescript');
 
 function load(file, mocks = {}) {
+  mocks = require('./helpers/uiDependencies.cjs').withUiDependencies(file, mocks);
   const module = { exports: {} };
   const code = ts.transpileModule(readFileSync(file, 'utf8'), { compilerOptions: {
     module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX,
@@ -209,13 +210,16 @@ function writeScreen(env, editing = false) {
       if (previous && deps.every((v, j) => v === previous.deps[j])) return;
       previous?.cleanup?.(); effects[index] = { deps, cleanup: fn() }; },
   };
-  const navigation = { addListener(_, fn) { beforeRemove = fn; return () => {}; } };
+  const guard = require('./helpers/preventRemove.cjs').removalDriver(react);
+  const navigation = guard.navigation;
   const native = Object.fromEntries(['ActivityIndicator', 'Image', 'KeyboardAvoidingView', 'Pressable', 'ScrollView', 'Text', 'TextInput', 'View'].map(name => [name, name]));
   native.StyleSheet = { create: value => value }; native.Platform = { OS: 'ios' };
+  const alerts = []; native.Alert = { alert: (...args) => alerts.push(args) };
   const jsx = (type, props) => ({ type, props });
   const Screen = load('src/app/community/write.tsx', {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': native,
     'expo-router': { useRouter: () => router, useNavigation: () => navigation, useLocalSearchParams: () => editing ? { editId: '1' } : {} },
+    'expo-router/react-navigation': { usePreventRemove: guard.usePreventRemove },
     'lucide-react-native': { ChevronLeft: 'ChevronLeft', ImagePlus: 'ImagePlus', X: 'X' },
     'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView', useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) },
     '../../lib/community': env.api, '../../lib/communityFeedRefresh': env.sync, '../../lib/auth': env.auth,
@@ -224,14 +228,15 @@ function writeScreen(env, editing = false) {
       const image = { uri: 'file://draft.webp', width: 100, height: 100, mimeType: 'image/webp' };
       observer.onSelected([image]); observer.onConverted(0, image);
     } },
-    '../../locales': { t: key => key }, '../../theme/communityColors': { communityColors: {} },
+    '../../locales': require('./helpers/uiDependencies.cjs').loadPure('src/locales/index.ts'), '../../theme/communityColors': { communityColors: {} },
     '../../theme/tokens': { spacing: {}, radius: {}, typography: {} },
   }).default;
   const render = () => { i = r = e = 0; return Screen(); };
   return { render, router,
-    button(label) { return nodes(render()).find(n => n.props?.accessibilityLabel === label); },
+    button(label) { const translated = require('./helpers/uiDependencies.cjs').loadPure('src/locales/index.ts').translate('ko', label); return nodes(render()).find(n => n.props?.accessibilityLabel === translated); },
     input() { return nodes(render()).find(n => n.type === 'TextInput'); },
-    blocked() { let blocked = false; beforeRemove({ preventDefault() { blocked = true; } }); return blocked; },
+    blocked() { const count = guard.completed.length; guard.request({ type: 'GO_BACK' }); return guard.completed.length === count; },
+    continueWriting() { assert.ok(alerts.length); alerts.at(-1)[2].find(action => action.text === '계속 작성').onPress(); },
   };
 }
 
@@ -260,8 +265,8 @@ test('image create final 401 releases form/back, retains draft, invalidates sess
   screen.button('community.register').props.onPress(); await flush();
   assert.equal(screen.input().props.value, 'keep draft'); assert.equal(screen.input().props.editable, true);
   assert.equal(nodes(screen.render()).filter(n => n.type === 'Image').length, 1);
-  assert.equal(screen.blocked(), false); assert.equal(screen.button('community.writeBack').props.disabled, false);
-  assert.deepEqual(screen.router.routes, ['/profile/login']); assert.equal(await env.auth.getSavedAccessToken(), null);
+  assert.equal(screen.blocked(), true); screen.continueWriting(); assert.equal(screen.button('community.writeBack').props.disabled, false);
+  assert.deepEqual(screen.router.routes, [{ pathname: '/login', params: { intent: 'resume', resumeKey: 'write' } }]); assert.equal(await env.auth.getSavedAccessToken(), null);
   assert.equal(env.sync.communityFeedRevision(), 0);
   rejected = false; await env.auth.saveTokens({ accessToken: 'B', refreshToken: 'refresh-B' });
   screen.button('community.register').props.onPress(); await flush();
@@ -278,8 +283,8 @@ test('unknown commit -> retry 401 permits authentication/exit without deleting o
   screen.button('community.register').props.onPress(); await flush();
   assert.equal(screen.blocked(), true); assert.equal(screen.input().props.editable, false);
   screen.button('community.register').props.onPress(); await flush();
-  assert.equal(screen.blocked(), false); assert.equal(screen.button('community.writeBack').props.disabled, false);
-  assert.equal(screen.input().props.value, 'immutable draft'); assert.deepEqual(screen.router.routes, ['/profile/login']);
+  assert.equal(screen.blocked(), true); screen.continueWriting(); assert.equal(screen.button('community.writeBack').props.disabled, false);
+  assert.equal(screen.input().props.value, 'immutable draft'); assert.deepEqual(screen.router.routes, [{ pathname: '/login', params: { intent: 'resume', resumeKey: 'write' } }]);
   assert.equal(calls.some(c => c.options?.method === 'DELETE'), false);
   await env.auth.saveTokens({ accessToken: 'B', refreshToken: 'refresh-B' });
   screen.button('community.register').props.onPress(); await flush();
@@ -298,7 +303,7 @@ test('late image POST 401 after new login releases draft but cannot clear new cr
   gate.resolve(response({}, 401)); await flush();
   assert.equal(await env.auth.getSavedAccessToken(), 'B'); assert.deepEqual(screen.router.routes, []);
   assert.equal(screen.input().props.value, 'keep draft'); assert.equal(screen.input().props.editable, true);
-  assert.equal(screen.blocked(), false); assert.equal(env.sync.communityFeedRevision(), 0);
+  assert.equal(screen.blocked(), true); screen.continueWriting(); assert.equal(env.sync.communityFeedRevision(), 0);
 });
 
 test('401 draft recovery never waits for a stalled best-effort image cleanup', async t => {
@@ -306,8 +311,8 @@ test('401 draft recovery never waits for a stalled best-effort image cleanup', a
   const screen = writeScreen(env); screen.input().props.onChangeText('keep draft');
   screen.button('community.attachImage').props.onPress(); await flush();
   screen.button('community.register').props.onPress(); await flush();
-  assert.equal(screen.blocked(), false); assert.equal(screen.input().props.editable, true);
-  assert.deepEqual(screen.router.routes, ['/profile/login']);
+  assert.equal(screen.blocked(), true); screen.continueWriting(); assert.equal(screen.input().props.editable, true);
+  assert.deepEqual(screen.router.routes, [{ pathname: '/login', params: { intent: 'resume', resumeKey: 'write' } }]);
   cleanup.resolve(response({}, 401)); await flush();
 });
 
@@ -337,7 +342,7 @@ test('image-free creation 401 preserves editable draft and opens login without i
   const screen = writeScreen(env); screen.input().props.onChangeText('text only');
   screen.button('community.register').props.onPress(); await flush();
   assert.equal(screen.input().props.value, 'text only'); assert.equal(screen.input().props.editable, true);
-  assert.equal(screen.blocked(), false); assert.deepEqual(screen.router.routes, ['/profile/login']);
+  assert.equal(screen.blocked(), true); screen.continueWriting(); assert.deepEqual(screen.router.routes, [{ pathname: '/login', params: { intent: 'resume', resumeKey: 'write' } }]);
   assert.equal(env.sync.communityFeedRevision(), 0);
 });
 
@@ -353,10 +358,10 @@ for (const unknownFirst of [false, true]) {
     screen.input().props.onChangeText('edited'); screen.button('community.attachImage').props.onPress(); await flush();
     screen.button('community.edit.save').props.onPress(); await flush();
     if (unknownFirst) { assert.equal(screen.blocked(), true); screen.button('community.edit.save').props.onPress(); await flush(); }
-    assert.equal(screen.input().props.value, 'edited'); assert.equal(screen.blocked(), false);
+    assert.equal(screen.input().props.value, 'edited'); assert.equal(screen.blocked(), true); screen.continueWriting();
     assert.equal(screen.button('community.writeBack').props.disabled, false);
     assert.equal(screen.input().props.editable, !unknownFirst);
-    assert.deepEqual(screen.router.routes, ['/profile/login']);
+    assert.deepEqual(screen.router.routes, [{ pathname: '/login', params: { intent: 'resume', resumeKey: 'write' } }]);
     await env.auth.saveTokens({ accessToken: 'B', refreshToken: 'refresh-B' });
     screen.button('community.edit.save').props.onPress(); await flush();
     assert.equal(screen.router.backCalls, 1); assert.equal(env.sync.communityFeedRevision(), 0);

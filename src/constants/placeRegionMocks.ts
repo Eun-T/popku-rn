@@ -13,9 +13,6 @@ export type PlaceRegionPage = {
   items: readonly PlaceRegionCardItem[];
 };
 
-const placeholderImage = require("../../assets/images/ranking-placeholder.png");
-const bannerImage = require("../../assets/images/banner_01.jpg");
-
 export const placeRegionSectionTitleKey = "place.explore.regions";
 
 export const placeRegionPages: readonly PlaceRegionPage[] = [
@@ -45,10 +42,10 @@ export const placeRegionPages: readonly PlaceRegionPage[] = [
     id: "JP",
     descriptionKey: "place.explore.japaneseRegionsDescription",
     items: [
-      { id: "tokyo", image: placeholderImage },
-      { id: "osaka", image: bannerImage },
-      { id: "kyoto", image: placeholderImage },
-      { id: "fukuoka", image: bannerImage },
+      { id: "tokyo", image: require("../../assets/images/regions/tokyo.png") },
+      { id: "osaka", image: require("../../assets/images/regions/osaka.png") },
+      { id: "kyoto", image: require("../../assets/images/regions/kyoto.png") },
+      { id: "nagoya", image: require("../../assets/images/regions/nagoya.png") },
     ],
   },
 ];

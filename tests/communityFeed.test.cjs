@@ -6,10 +6,11 @@ const ts = require('typescript');
 
 const updateNow = () => {};
 function load(file, mocks) {
+  mocks = require('./helpers/uiDependencies.cjs').withUiDependencies(file, mocks);
   if (!['src/lib/communityFeedRefresh.ts', 'src/lib/communityTime.ts'].includes(file)) mocks = {
     './communityFeedRefresh': load('src/lib/communityFeedRefresh.ts', {}),
     '../lib/communityLikes': { changeCommunityLike: async () => {} },
-    '../lib/auth': { subscribeAuthSession: () => () => {} },
+    '../lib/auth': { getAuthUser: () => ({ email: 'me' }), subscribeAuthUser: () => () => {}, subscribeAuthSession: () => () => {} },
     '../hooks/useCommunityNow': { useCommunityNow: () => ({ now: Date.now(), updateNow }) },
     '../lib/communityRefresh': { waitForCommunityRefresh: async () => {} },
     '../../lib/communityTime': load('src/lib/communityTime.ts', { '../locales': { t: (key) => key } }),
@@ -30,7 +31,7 @@ function load(file, mocks) {
 function nodes(tree) {
   if (!tree || typeof tree !== 'object') return [];
   if (Array.isArray(tree)) return tree.flatMap(nodes);
-  return [tree, ...nodes(tree.props?.children)];
+  return [tree, ...nodes(tree.props?.children), ...nodes(tree.props?.ListHeaderComponent)];
 }
 
 const jsx = (type, props) => ({ type, props });
@@ -56,6 +57,7 @@ test('client sends category, sort and cursor to the single feed API', async () =
     assert.equal(url.pathname, '/api/community/feed');
     assert.equal(url.searchParams.get('category'), 'QUESTION');
     assert.equal(url.searchParams.get('sort'), 'POPULAR');
+    assert.equal(url.searchParams.get('limit'), '14');
     assert.equal(url.searchParams.get('cursor'), 'next-page');
     assert.equal(requested.options.signal, signal);
   } finally { global.fetch = originalFetch; }
@@ -84,6 +86,7 @@ test('feed preserves detail returns, refreshes successful writes and pulls, and 
   let focusIndex = 0;
   const focusEffects = [];
   const react = {
+    useSyncExternalStore: (_subscribe, snapshot) => snapshot(),
     useEffect(effect, deps) {
       const index = effectIndex++;
       if (!effects[index]) effects[index] = { deps, cleanup: effect() };
@@ -122,7 +125,7 @@ test('feed preserves detail returns, refreshes successful writes and pulls, and 
     'expo-router': { useFocusEffect: react.useFocusEffect, useRouter: () => ({ push(route) {
       if (navigationFails) throw new Error('navigation failed');
       routes.push(route); stack.push(route);
-    } }) },
+    } }), useScrollToTop() {} },
     'lucide-react-native': { Pencil: 'Pencil', Settings: 'Settings' },
     'react-native': native,
     'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView', useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) },
@@ -220,9 +223,12 @@ test('feed preserves detail returns, refreshes successful writes and pulls, and 
   returnToFeed();
   assert.equal(calls.length, 2, 'review detail back preserves the feed and pagination');
   assert.deepEqual(calls[1], ['FREE', 'LATEST', null]);
-  nodes(list.props.ListHeaderComponent).find((node) => node.props?.children?.props?.children === 'community.sort.popular').props.onPress();
+  const popularSort = nodes(tree).find((node) => node.props?.children?.props?.children === 'community.sort.popular');
+  assert.equal(popularSort, undefined, 'POPULAR UI is intentionally unsupported');
+  revision++;
+  blur(); focus();
   render(); await flush();
-  assert.deepEqual(calls[2], ['FREE', 'POPULAR', null]);
+  assert.deepEqual(calls[2], ['FREE', 'LATEST', null], 'supported refresh preserves category and sort');
   tree = render();
   list = nodes(tree).find((node) => node.type === 'FlatList');
   list.props.onEndReached();
@@ -253,11 +259,11 @@ test('feed preserves detail returns, refreshes successful writes and pulls, and 
   await flush();
   tree = render();
   list = nodes(tree).find((node) => node.type === 'FlatList');
-  assert.deepEqual(calls[4], ['FREE', 'POPULAR', null], 'successful write explicitly reloads the current filters');
+  assert.deepEqual(calls[4], ['FREE', 'LATEST', null], 'successful write explicitly reloads the current filters');
   assert.deepEqual(list.props.data, [row]);
   list.props.onEndReached();
   assert.equal(calls.length, 6);
-  assert.deepEqual(calls[5], ['FREE', 'POPULAR', 'after']);
+  assert.deepEqual(calls[5], ['FREE', 'LATEST', 'after']);
   await flush();
   tree = render();
   list = nodes(tree).find((node) => node.type === 'FlatList');
@@ -272,7 +278,7 @@ test('feed preserves detail returns, refreshes successful writes and pulls, and 
   list.props.onRefresh();
   list.props.onEndReached();
   assert.equal(calls.length, 7, 'pull duplicate and concurrent load-more are blocked');
-  assert.deepEqual(calls[6], ['FREE', 'POPULAR', null]);
+  assert.deepEqual(calls[6], ['FREE', 'LATEST', null]);
   tree = render();
   list = nodes(tree).find((node) => node.type === 'FlatList');
   assert.equal(list.props.refreshing, true);
@@ -311,7 +317,7 @@ test('feed preserves detail returns, refreshes successful writes and pulls, and 
   respond = async () => ({ items: [], nextCursor: null });
   render(); await flush();
   assert.equal(calls.length, beforeFilterChange + 1, 'filter changes replace an in-flight pull');
-  assert.deepEqual(calls.at(-1), ['QUESTION', 'POPULAR', null]);
+  assert.deepEqual(calls.at(-1), ['QUESTION', 'LATEST', null]);
   assert.equal(superseded.aborted, true);
   assert.equal(nodes(render()).find((node) => node.type === 'FlatList').props.refreshing, false);
   resolveOldPull({ items: [{ ...row, id: 99 }], nextCursor: 'stale' });
@@ -323,7 +329,10 @@ test('feed preserves detail returns, refreshes successful writes and pulls, and 
 });
 
 test('cards render review popup and rating; posts have no popup, rating or image', () => {
+  const user = { email: 'reader@example.test', nickname: 'reader' };
   const Card = load('src/components/community/CommunityPostItem.tsx', {
+    react: { useSyncExternalStore: (_subscribe, snapshot) => snapshot() },
+    '../../lib/auth': { getAuthUser: () => user, subscribeAuthUser: () => () => {} },
     'react/jsx-runtime': runtime,
     'lucide-react-native': Object.fromEntries(['ChevronRight', 'Heart', 'MapPin', 'MessageCircle', 'MoreHorizontal', 'Star', 'UserRound'].map((name) => [name, name])),
     'react-native': { Image: 'Image', Pressable: 'Pressable', Text: 'Text', View: 'View', StyleSheet: { create: (styles) => styles } },

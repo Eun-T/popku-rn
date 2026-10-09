@@ -1,10 +1,10 @@
+import { useTranslation } from '../../hooks/useTranslation';
 import { useEffect, useRef, useState } from 'react';
 import { Image } from 'expo-image';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { regionFilters } from '../../constants/placeFilters';
 import { placeRegionSectionTitleKey, type PlaceRegionCardItem, type PlaceRegionPage } from '../../constants/placeRegionMocks';
-import { t } from '../../locales';
 import { colors, radius, spacing, typography } from '../../theme/tokens';
 
 type PlaceRegionSectionProps = {
@@ -17,11 +17,10 @@ type PlaceRegionSectionProps = {
 const CARD_GAP = 6;
 const CARD_ASPECT_RATIO = 1.6;
 const PAGE_GAP = 16;
-const DESCRIPTION_HEIGHT = 20;
-const DESCRIPTION_BOTTOM_GAP = 16;
 const regionLabelKeys = new Map(regionFilters.map((region) => [region.id, region.labelKey] as const));
 
 export default function PlaceRegionSection({ pages, width, onPress, isActive = true }: PlaceRegionSectionProps) {
+  const { t, resolvedLanguage } = useTranslation();
   const listRef = useRef<FlatList<PlaceRegionPage>>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const activeIndexRef = useRef(0);
@@ -30,7 +29,7 @@ export default function PlaceRegionSection({ pages, width, onPress, isActive = t
   const pageStride = pageWidth + PAGE_GAP;
   // Preserve the existing card width while changing only the gaps.
   const cardWidth = (pageWidth - 10) / 2;
-  const pageHeight = DESCRIPTION_HEIGHT + DESCRIPTION_BOTTOM_GAP + (cardWidth / CARD_ASPECT_RATIO) * 2 + CARD_GAP;
+  const pageHeight = (cardWidth / CARD_ASPECT_RATIO) * 2 + CARD_GAP;
 
   useEffect(() => {
     if (!isActive) return;
@@ -73,6 +72,7 @@ export default function PlaceRegionSection({ pages, width, onPress, isActive = t
         <FlatList
           ref={listRef}
           data={pages}
+          extraData={resolvedLanguage}
           keyExtractor={(page) => page.id}
           horizontal
           snapToOffsets={[0, pageStride]}
@@ -108,9 +108,6 @@ export default function PlaceRegionSection({ pages, width, onPress, isActive = t
           style={{ width: pageWidth, height: pageHeight }}
           renderItem={({ item: page }) => (
             <View style={{ width: pageWidth, height: pageHeight }}>
-              <Text numberOfLines={1} ellipsizeMode="tail" style={styles.description}>
-                {t(page.descriptionKey)}
-              </Text>
               <View style={styles.grid}>
                 {page.items.map((item) => (
                   <Pressable
@@ -152,12 +149,12 @@ export default function PlaceRegionSection({ pages, width, onPress, isActive = t
 
 const styles = StyleSheet.create({
   section: {
-    marginTop: spacing.space32,
+    marginTop: 36,
   },
   heading: {
     ...typography.titleM,
     color: colors.text,
-    marginBottom: spacing.space4 * 0.5,
+    marginBottom: spacing.space16,
   },
   viewport: {
     width: '100%',
@@ -165,12 +162,6 @@ const styles = StyleSheet.create({
   },
   pageGap: {
     width: PAGE_GAP,
-  },
-  description: {
-    ...typography.label,
-    color: colors.secondaryText,
-    height: DESCRIPTION_HEIGHT,
-    marginBottom: DESCRIPTION_BOTTOM_GAP,
   },
   grid: {
     flexDirection: 'row',
@@ -217,10 +208,10 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: radius.full,
-    backgroundColor: colors.border,
+    backgroundColor: colors.paginationInactive,
   },
   activeDot: {
     width: 18,
-    backgroundColor: colors.text,
+    backgroundColor: colors.paginationActive,
   },
 });

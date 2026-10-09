@@ -1,21 +1,48 @@
-import { useRef, useState } from 'react';
-import { useRouter } from 'expo-router';
+import { useTranslation } from '../../../hooks/useTranslation';
+import { accountUiKey, accountUiText } from '../../../locales/accountUi';
+import { useCallback, useRef, useState } from 'react';
+import { useFocusEffect, useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { ChevronLeft } from 'lucide-react-native';
 import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { clearTokens, getCurrentUser, login, saveTokens, setAuthUser } from '../../../lib/auth';
+import { authSessionGeneration, getAuthUser, login } from '../../../lib/auth';
+import { useLoginAttempt } from '../../../hooks/useLoginAttempt';
+import { finishLoginReturn, parseLoginReturn, signupHref } from '../../../lib/loginReturn';
 import { authenticateWithGoogle, beginGoogleSignup, getGoogleIdToken, GoogleAuthApiError } from '../../../lib/googleAuth';
 import { colors, radius, spacing, typography } from '../../../theme/tokens';
 
 export default function Login() {
+  const { t } = useTranslation();
   const router = useRouter();
+  const navigation = useNavigation();
+  const params = useLocalSearchParams<{
+    intent?: string; publicId?: string; resumeKey?: string; completedGeneration?: string;
+    loginOrigin?: string; profileLoginSuccess?: string;
+  }>();
+  const target = parseLoginReturn(params);
+  const scope = JSON.stringify(target);
+  const authentication = useLoginAttempt(scope);
+  const redirected = useRef(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const googleLoadingRef = useRef(false);
   const [error, setError] = useState('');
+
+  useFocusEffect(useCallback(() => {
+    setLoading(false); setGoogleLoading(false); googleLoadingRef.current = false;
+    if (!target && params.loginOrigin === 'profile' && params.profileLoginSuccess === '1' && redirected.current) {
+      const state = navigation.getState();
+      if (state?.routes[state.index]?.name === 'login' && state.routes[state.index - 1]?.name === 'index') router.back();
+      return;
+    }
+    if (target && params.completedGeneration === String(authSessionGeneration()) && getAuthUser() && !redirected.current) {
+      redirected.current = true;
+      finishLoginReturn(router, navigation, target);
+    }
+  }, [scope, params.completedGeneration, params.loginOrigin, params.profileLoginSuccess, router, navigation]));
 
   async function handleLogin() {
     if (loading || googleLoadingRef.current) {
@@ -24,65 +51,57 @@ export default function Login() {
     }
     if (!email.trim() || !password) {
       if (__DEV__) console.info('[AUTH] login aborted: validation');
-      setError('이메일과 비밀번호를 입력해 주세요.');
+      setError(accountUiKey('이메일과 비밀번호를 입력해 주세요.'));
       return;
     }
+
+    const attempt = authentication.begin();
+    if (!attempt || redirected.current) return;
 
     if (__DEV__) console.info('[AUTH] login validation passed');
     setLoading(true);
     setError('');
-    let tokensSaved = false;
     let step = 'login request';
     try {
       const tokens = await login(email.trim(), password);
-      step = 'tokens save';
-      await saveTokens(tokens);
-      if (__DEV__) console.info('[AUTH] tokens saved');
-      tokensSaved = true;
-      step = '/me request';
-      if (__DEV__) console.info('[AUTH] /me source: login');
-      const currentUser = await getCurrentUser(tokens.accessToken);
-      step = 'auth state update';
-      setAuthUser(currentUser);
-      if (__DEV__) console.info('[AUTH] user state updated');
+      step = 'authentication';
+      if (!await authentication.authenticate(attempt, tokens) || !authentication.complete(attempt)) return;
       step = 'navigation';
-      router.replace('/(tabs)');
+      redirected.current = true;
+      finishLoginReturn(router, navigation, target, params.loginOrigin);
     } catch (cause) {
       if (__DEV__) console.info('[AUTH] login failed at:', step, cause instanceof Error ? cause.message : 'unknown error');
-      if (tokensSaved) {
-        try {
-          await clearTokens();
-        } catch {
-          // Keep the original login error visible if secure storage cleanup fails.
-        }
+      if (await authentication.fail(attempt)) {
+        redirected.current = false;
+        setError(accountUiKey(cause instanceof Error ? cause.message : '로그인에 실패했습니다.'));
       }
-      setError(cause instanceof Error ? cause.message : '로그인에 실패했습니다.');
     } finally {
-      setLoading(false);
+      if (authentication.active(attempt)) setLoading(false);
+      authentication.release(attempt);
     }
   }
 
   async function handleGoogleLogin() {
     if (loading || googleLoadingRef.current) return;
+    const attempt = authentication.begin();
+    if (!attempt || redirected.current) return;
     if (__DEV__) console.info('[GOOGLE] button pressed');
     googleLoadingRef.current = true;
     setGoogleLoading(true);
     setError('');
-    let tokensSaved = false;
     try {
       const idToken = await getGoogleIdToken();
-      if (idToken === null) return;
+      if (idToken === null || !authentication.valid(attempt)) return;
       const result = await authenticateWithGoogle(idToken);
+      if (!authentication.valid(attempt)) return;
       if (result.kind === 'signup') {
         beginGoogleSignup(result.signupToken, result.expiresInSeconds);
-        router.push({ pathname: '/profile/signup', params: { mode: 'google' } });
+        router.push(target ? signupHref(target, 'google') : { pathname: '/profile/signup', params: { mode: 'google' } });
         return;
       }
-      await saveTokens(result.tokens);
-      tokensSaved = true;
-      const currentUser = await getCurrentUser(result.tokens.accessToken);
-      setAuthUser(currentUser);
-      router.replace('/(tabs)');
+      if (!await authentication.authenticate(attempt, result.tokens) || !authentication.complete(attempt)) return;
+      redirected.current = true;
+      finishLoginReturn(router, navigation, target, params.loginOrigin);
     } catch (cause) {
       if (__DEV__) {
         const code = cause instanceof GoogleAuthApiError
@@ -91,29 +110,31 @@ export default function Login() {
             ? cause.code : cause instanceof TypeError ? 'network' : 'unknown';
         console.info('[GOOGLE] signin error:', code);
       }
-      if (tokensSaved) {
-        try { await clearTokens(); } catch { /* Keep the original error visible. */ }
-      }
+      if (!await authentication.fail(attempt)) return;
+      redirected.current = false;
       if (cause instanceof GoogleAuthApiError && cause.status === 409 && cause.code === 'email_already_registered') {
-        setError('이미 이메일로 가입된 계정이 있어요.\n기존 로그인 방법으로 로그인해 주세요.');
+        setError(accountUiKey('이미 이메일로 가입된 계정이 있어요.\n기존 로그인 방법으로 로그인해 주세요.'));
       } else if (cause instanceof GoogleAuthApiError && cause.status === 401) {
-        setError('Google 인증이 유효하지 않아요. 다시 시도해 주세요.');
+        setError(accountUiKey('Google 인증이 유효하지 않아요. 다시 시도해 주세요.'));
       } else if (cause instanceof TypeError) {
-        setError('네트워크 연결을 확인하고 다시 시도해 주세요.');
+        setError(accountUiKey('네트워크 연결을 확인하고 다시 시도해 주세요.'));
       } else if (typeof cause === 'object' && cause !== null && 'code' in cause && cause.code === 'SIGN_IN_CANCELLED') {
         // Account selection was dismissed.
       } else if (typeof cause === 'object' && cause !== null && 'code' in cause && cause.code === 'PLAY_SERVICES_NOT_AVAILABLE') {
-        setError('Google Play 서비스를 확인해 주세요.');
+        setError(accountUiKey('Google Play 서비스를 확인해 주세요.'));
       } else if (typeof cause === 'object' && cause !== null && 'code' in cause && cause.code === 'DEVELOPER_ERROR') {
-        setError('Google 로그인 설정을 확인해 주세요.');
+        setError(accountUiKey('Google 로그인 설정을 확인해 주세요.'));
       } else {
-        setError(cause instanceof Error && (cause.message === 'Google 로그인 설정을 확인해 주세요.'
+        setError(accountUiKey(cause instanceof Error && (cause.message === 'Google 로그인 설정을 확인해 주세요.'
           || cause.message === 'Google 인증 정보를 받지 못했어요. 다시 시도해 주세요.')
-          ? cause.message : 'Google 로그인에 실패했어요. 다시 시도해 주세요.');
+          ? cause.message : 'Google 로그인에 실패했어요. 다시 시도해 주세요.'));
       }
     } finally {
-      googleLoadingRef.current = false;
-      setGoogleLoading(false);
+      if (authentication.active(attempt)) {
+        googleLoadingRef.current = false;
+        setGoogleLoading(false);
+      }
+      authentication.release(attempt);
     }
   }
 
@@ -125,19 +146,19 @@ export default function Login() {
       >
         <View style={styles.header}>
           <Pressable
-            accessibilityLabel="뒤로가기"
+            accessibilityLabel={accountUiText(t, "뒤로가기")}
             onPress={() => router.canGoBack() ? router.back() : router.replace('/profile')}
             style={styles.backButton}
           >
             <ChevronLeft size={24} color={colors.text} />
           </Pressable>
-          <Text style={styles.title}>로그인</Text>
+          <Text style={styles.title}>{accountUiText(t, "로그인")}</Text>
         </View>
 
         <View style={styles.form}>
           <TextInput
             style={styles.input}
-            placeholder="이메일"
+            placeholder={accountUiText(t, "이메일")}
             placeholderTextColor={colors.secondaryText}
             keyboardType="email-address"
             autoCapitalize="none"
@@ -147,7 +168,7 @@ export default function Login() {
           />
           <TextInput
             style={styles.input}
-            placeholder="비밀번호"
+            placeholder={accountUiText(t, "비밀번호")}
             placeholderTextColor={colors.secondaryText}
             secureTextEntry
             autoComplete="password"
@@ -155,23 +176,23 @@ export default function Login() {
             onChangeText={setPassword}
             onSubmitEditing={() => void handleLogin()}
           />
-          {error ? <Text style={styles.error}>{error}</Text> : null}
+          {error ? <Text style={styles.error}>{accountUiText(t, error)}</Text> : null}
           <Pressable style={[styles.submit, (loading || googleLoading) && styles.disabled]} onPress={() => {
             if (__DEV__) console.info('[AUTH] login button pressed');
             void handleLogin();
           }} disabled={loading || googleLoading}>
-            {loading ? <ActivityIndicator color={colors.background} /> : <Text style={styles.submitText}>로그인</Text>}
+            {loading ? <ActivityIndicator color={colors.background} /> : <Text style={styles.submitText}>{accountUiText(t, "로그인")}</Text>}
           </Pressable>
           <Pressable
             style={[styles.googleButton, (loading || googleLoading) && styles.disabled]}
             disabled={loading || googleLoading}
             onPress={() => void handleGoogleLogin()}
           >
-            {googleLoading ? <ActivityIndicator color={colors.text} /> : <Text style={styles.googleButtonText}>Google로 계속하기</Text>}
+            {googleLoading ? <ActivityIndicator color={colors.text} /> : <Text style={styles.googleButtonText}>{accountUiText(t, "Google로 계속하기")}</Text>}
           </Pressable>
         </View>
 
-        <Text style={styles.signUp}>계정이 없나요? <Text style={styles.signUpLink} onPress={() => router.push('/profile/signup')}>회원가입</Text></Text>
+        <Text style={styles.signUp}>{accountUiText(t, "계정이 없나요?") + ' '}<Text style={styles.signUpLink} onPress={() => router.push(target ? signupHref(target) : '/profile/signup')}>{accountUiText(t, "회원가입")}</Text></Text>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );

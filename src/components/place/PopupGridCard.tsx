@@ -1,4 +1,6 @@
+import { getPopupRegionDisplayName, getTagDisplayName } from '../../locales/filterLabels';
 import { Ionicons } from "@expo/vector-icons";
+import { useTranslation } from '../../hooks/useTranslation';
 import { Image } from "expo-image";
 import { Heart } from "lucide-react-native";
 import {
@@ -12,7 +14,6 @@ import {
 import type { PublicPopup } from "../../lib/popups";
 import { usePlaceCoverImage, type RecoverPlaceCover } from "../../hooks/usePlaceCoverImage";
 import { popupOperatingStatus } from "../../lib/popupStatus";
-import { t } from "../../locales";
 import { colors, radius, spacing, typography } from "../../theme/tokens";
 
 type PopupGridCardProps = {
@@ -45,12 +46,13 @@ export default function PopupGridCard({
   onPress,
   onRecoverCover,
 }: PopupGridCardProps) {
+  const { t, resolvedLanguage } = useTranslation();
   const status = popupOperatingStatus(item.startDate, item.endDate);
   const statusText =
-    status === "오픈 예정" ? "오픈예정" : status === "종료" ? "종료됨" : "진행중";
+    t(status === "오픈 예정" ? "place.all.card.upcoming" : status === "종료" ? "place.all.card.ended" : "place.all.card.ongoing");
   const { fontScale } = useWindowDimensions();
   const cover = usePlaceCoverImage(item, onRecoverCover);
-  const region = item.regionName?.trim() ?? "";
+  const region = getPopupRegionDisplayName(item, resolvedLanguage).trim();
   // Legacy multi-category rows need an explicit admin decision; never pick the first tag.
   const category = item.tags.length === 1 ? item.tags[0] : undefined;
 
@@ -170,7 +172,7 @@ export default function PopupGridCard({
         {!!category?.name.trim() && (
           <View style={styles.tag}>
             <Text numberOfLines={1} style={[styles.metadataText, styles.categoryText]}>
-              {category.name.trim()}
+              {getTagDisplayName(category, resolvedLanguage).trim()}
             </Text>
           </View>
         )}

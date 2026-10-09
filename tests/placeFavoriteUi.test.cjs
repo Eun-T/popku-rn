@@ -4,6 +4,7 @@ const { test } = require('node:test');
 const ts = require('typescript');
 
 function load(file, mocks) {
+  mocks = require('./helpers/uiDependencies.cjs').withI18nDependencies(file, mocks);
   const code = ts.transpileModule(readFileSync(file, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
   }).outputText;
@@ -30,7 +31,8 @@ const mocks = {
   '../../lib/popupStatus': {
     popupOperatingStatus: (start, end) => popupOperatingStatus(start, end, new Date(2026, 9, 6, 12)),
   },
-  '../../locales': { t: key => key },
+  '../../locales': { t: key => key.startsWith('place.all.card.')
+    ? require('./helpers/uiDependencies.cjs').loadPure('src/locales/index.ts').t(key) : key },
   '../../../assets/images/ranking-placeholder.png': 'placeholder',
 };
 function nodes(tree) {
@@ -151,7 +153,7 @@ test('grid information has four compact lines with inclusive status dates and an
     assert.equal(periodStyle.minWidth, 0);
     assert.equal(periodStyle.color, '#6B7280');
     assert.equal(periodStyle.fontWeight, '400');
-    assert.equal(periodStyle.fontSize, 14);
+    assert.equal(periodStyle.fontSize, 13);
     assert.equal(periodStyle.lineHeight, 20);
     assert.equal(periodStyle.marginTop, 6);
     assert.equal(title.props.children, popup.name);
@@ -202,14 +204,38 @@ test('legacy multiple categories are preserved and never assigned by array order
   assert.equal(tags.length, 2);
 });
 
-test('place weekly favorite uses 18px heart/shadow without changing body colors, target or toggle', () => {
+test('confirmed R05: grid period is 13px at each card width and keeps one-line date output', () => {
+  const Card = load('src/components/place/PopupGridCard.tsx', mocks).default;
+  for (const width of [110, 170, 280]) {
+    const tree = Card({ item: popup, width, isFavorite: false, isFavoriteDisabled: false, onToggleFavorite() {} });
+    const period = nodes(tree).find(node => node.type === 'Text' && node.props.style?.fontSize === 13);
+    assert.ok(period); assert.equal(period.props.style.lineHeight, 20);
+    assert.equal(period.props.numberOfLines, 1); assert.equal(period.props.ellipsizeMode, 'tail');
+    assert.ok(period.props.children.includes('~'));
+  }
+});
+
+test('confirmed R05: weekly heart is 22px in both states and still toggles without opening the card', () => {
+  const Weekly = load('src/components/place/PlaceWeeklyPopupList.tsx', mocks).default;
+  for (const selected of [false, true]) {
+    let toggled, opened = 0, stopped = 0;
+    const tree = Weekly({ selectedWeek: new Date(), popups: [popup], onPressPopup: () => opened++,
+      isFavorite: () => selected, isFavoriteDisabled: () => false, onToggleFavorite: value => { toggled = value; } });
+    const button = nodes(tree).find(node => node.type === 'Pressable' && node.props.accessibilityState);
+    assert.equal(button.props.children.props.size, 22); assert.equal(button.props.accessibilityState.selected, selected);
+    button.props.onPress({ stopPropagation: () => stopped++ });
+    assert.equal(toggled, popup); assert.equal(stopped, 1); assert.equal(opened, 0);
+  }
+});
+
+test('place weekly favorite uses 22px heart/shadow without changing body colors, target or toggle', () => {
   const Weekly = load('src/components/place/PlaceWeeklyPopupList.tsx', mocks).default;
   for (const selected of [false, true]) {
     let toggled;
     const tree = Weekly({ selectedWeek: new Date(), popups: [popup], onPressPopup() {},
       isFavorite: () => selected, isFavoriteDisabled: () => false, onToggleFavorite: value => { toggled = value; } });
     const button = nodes(tree).find(node => node.type === 'Pressable' && node.props.accessibilityState);
-    assert.equal(button.props.children.props.size, 18);
+    assert.equal(button.props.children.props.size, 22);
     assert.equal(button.props.children.props.color, selected ? '#22C55E' : '#111827');
     assert.equal(button.props.children.props.fill, selected ? '#22C55E' : 'none');
     assert.equal(button.props.style.minWidth, 68);

@@ -1,4 +1,6 @@
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { getPopupRegionDisplayName, getTagDisplayName } from '../../locales/filterLabels';
+import { useTranslation } from '../../hooks/useTranslation';
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import {
   ArrowLeft,
   ArrowUpRight,
@@ -14,6 +16,7 @@ import {
   Ticket,
 } from "lucide-react-native";
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -23,6 +26,7 @@ import {
 import {
   Alert,
   Linking,
+  Platform,
   Pressable,
   ScrollView,
   Share,
@@ -37,6 +41,9 @@ import {
 } from "react-native-safe-area-context";
 
 import Tag from "../../components/common/Tag";
+import DirectionsSheet from '../../components/place/DirectionsSheet';
+import Constants from 'expo-constants';
+import { buildMapLinks, openMapLinks, type MapService } from '../../lib/mapDirections';
 import {
   FLOATING_TAB_BAR_BOTTOM_GAP,
   FLOATING_TAB_BAR_HEIGHT,
@@ -75,7 +82,8 @@ import {
   type PublicPopupDetail,
 } from "../../lib/popups";
 import { popupOperatingStatus } from "../../lib/popupStatus";
-import { getLocale, t, type Locale } from "../../locales";
+import { subscribeReviews } from "../../lib/reviews";
+import { getApiLocale, type Locale } from "../../locales";
 import { colors, radius, spacing, typography } from "../../theme/tokens";
 
 type DetailRowProps = {
@@ -104,6 +112,7 @@ function DetailTabs({
   onSelectInfo,
   onSelectReviews,
 }: DetailTabsProps) {
+  const { t, resolvedLanguage } = useTranslation();
   return (
     <View style={styles.tabs}>
       <Pressable
@@ -118,7 +127,7 @@ function DetailTabs({
             selectedTab === "info" && styles.activeTabText,
           ]}
         >
-          팝업 정보
+          {t("place.detail.infoTab")}
         </Text>
         {selectedTab === "info" && <View style={styles.tabIndicator} />}
       </Pressable>
@@ -134,7 +143,7 @@ function DetailTabs({
             selectedTab === "reviews" && styles.activeTabText,
           ]}
         >
-          방문 리뷰
+          {t("community.reviewFilterLabel")}
         </Text>
         {selectedTab === "reviews" && <View style={styles.tabIndicator} />}
       </Pressable>
@@ -173,9 +182,10 @@ function formatDateTime(value: string): string {
 }
 
 export default function PlaceDetail() {
+  const { t, resolvedLanguage } = useTranslation();
   const { id, tab } = useLocalSearchParams<{ id: string; tab?: string }>();
   const router = useRouter();
-  const languageCode = getLocale();
+  const languageCode = getApiLocale();
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
@@ -187,7 +197,11 @@ export default function PlaceDetail() {
   const [isFavoriteUpdating, setFavoriteUpdating] = useState(false);
   const favoriteBusy = useRef(false);
   const favoriteGeneration = useRef(0);
+  const refreshReviews = useRef<(() => void) | null>(null);
   const [selectedTab, setSelectedTab] = useState<DetailTab>("info");
+  const [directionsVisible, setDirectionsVisible] = useState(false);
+  const directionsTranslation = useRef(t);
+  useEffect(() => { directionsTranslation.current = t; }, [t]);
   const [isTabPinned, setTabPinned] = useState(false);
   const [requestState, setRequestState] = useState<DetailState>({
     id,
@@ -207,56 +221,117 @@ export default function PlaceDetail() {
       setRequestState({ id, languageCode, status: "error", detail: null });
       return;
     }
-    const controller = new AbortController();
+    let active = true;
+    let request: AbortController | null = null;
+    let version = 0;
+    let summaryOnly = false;
+    let dirty = false;
+    let queued = false;
     setRequestState({ id, languageCode, status: "loading", detail: null });
-    getAuthSession()
-      .then(async ({ accessToken: token, generation }) => {
-        if (__DEV__)
-          console.info("[FAVORITE] detail request", {
-            publicId: id,
-            tokenPresent: !!token,
-          });
-        try {
-          return await getPopupDetail(
-            id,
-            controller.signal,
-            token ?? undefined,
-            languageCode,
-          );
-        } catch (error) {
-          if (
-            token &&
-            error instanceof PopupDetailUnauthorizedError &&
-            !controller.signal.aborted
-          ) {
-            if ((await clearTokens(generation)) === false) throw error;
-            return getPopupDetail(
+    function schedule() {
+      if (!active || !dirty || queued || request) return;
+      queued = true;
+      void Promise.resolve().then(() => {
+        queued = false;
+        if (active && dirty && !request) load();
+      });
+    }
+    function load() {
+      const controller = new AbortController();
+      const readVersion = version;
+      request = controller;
+      dirty = false;
+      void getAuthSession()
+        .then(async ({ accessToken: token, generation }) => {
+          if (controller.signal.aborted) throw new Error("Popup detail read aborted");
+          if (__DEV__)
+            console.info("[FAVORITE] detail request", {
+              publicId: id,
+              tokenPresent: !!token,
+            });
+          try {
+            return await getPopupDetail(
               id,
               controller.signal,
-              undefined,
+              token ?? undefined,
               languageCode,
             );
+          } catch (error) {
+            if (
+              token &&
+              error instanceof PopupDetailUnauthorizedError &&
+              !controller.signal.aborted
+            ) {
+              if ((await clearTokens(generation)) === false) throw error;
+              return getPopupDetail(
+                id,
+                controller.signal,
+                undefined,
+                languageCode,
+              );
+            }
+            throw error;
           }
-          throw error;
-        }
-      })
-      .then((detail) => {
-        if (!controller.signal.aborted) {
-          if (__DEV__)
-            console.info("[FAVORITE] detail loaded", {
-              publicId: id,
-              favoriteCount: detail.favoriteCount,
-              isFavorited: detail.isFavorited,
-            });
-          setRequestState({ id, languageCode, status: "ready", detail });
-        }
-      })
-      .catch(() => {
-        if (!controller.signal.aborted)
-          setRequestState({ id, languageCode, status: "error", detail: null });
-      });
-    return () => controller.abort();
+        })
+        .then((detail) => {
+          if (active && !controller.signal.aborted && readVersion === version) {
+            if (summaryOnly) {
+              if (
+                typeof detail.reviewCount !== "number" || !Number.isSafeInteger(detail.reviewCount) || detail.reviewCount < 0 ||
+                typeof detail.averageRating !== "number" || !Number.isFinite(detail.averageRating) ||
+                detail.averageRating < 0 || detail.averageRating > 5
+              ) {
+                throw new Error("Invalid popup review summary");
+              }
+              // The public detail GET is authoritative for aggregates only. A review
+              // refresh must not overwrite a favorite mutation made during this GET.
+              setRequestState(current =>
+                current.id === id && current.languageCode === languageCode && current.detail
+                  ? { ...current, detail: { ...current.detail, reviewCount: detail.reviewCount, averageRating: detail.averageRating } }
+                  : current,
+              );
+              return;
+            }
+            if (__DEV__)
+              console.info("[FAVORITE] detail loaded", {
+                publicId: id,
+                favoriteCount: detail.favoriteCount,
+                isFavorited: detail.isFavorited,
+              });
+            setRequestState({ id, languageCode, status: "ready", detail });
+            summaryOnly = true;
+          }
+        })
+        .catch(() => {
+          if (active && !controller.signal.aborted && readVersion === version) {
+            if (summaryOnly) dirty = true;
+            else setRequestState({ id, languageCode, status: "error", detail: null });
+          }
+        })
+        .finally(() => {
+          if (request !== controller) return;
+          request = null;
+        });
+    }
+    const unsubscribe = subscribeReviews(changed => {
+      if (changed !== id) return;
+      version += 1;
+      dirty = true;
+      request?.abort();
+      request = null;
+      schedule();
+    });
+    refreshReviews.current = schedule;
+    load();
+    return () => {
+      active = false;
+      request?.abort();
+      unsubscribe();
+      refreshReviews.current = null;
+    };
   }, [id, authUser, languageCode]);
+
+  useFocusEffect(useCallback(() => { refreshReviews.current?.(); }, [id, authUser, languageCode]));
 
   const detail =
     requestState.id === id &&
@@ -307,7 +382,7 @@ export default function PlaceDetail() {
         if (invalidated === false) return;
         router.push("/profile/login");
       } else {
-        Alert.alert("찜을 변경하지 못했어요", "잠시 후 다시 시도해 주세요.");
+        Alert.alert(t("place.detail.favoriteFailed"), t("place.detail.tryLater"));
       }
     } finally {
       favoriteBusy.current = false;
@@ -368,7 +443,7 @@ export default function PlaceDetail() {
           <ArrowLeft size={24} color={colors.text} />
         </Pressable>
         <View style={styles.empty}>
-          <Text style={styles.valueText}>팝업 정보를 불러오지 못했습니다.</Text>
+          <Text style={styles.valueText}>{t("place.detail.loadFailed")}</Text>
         </View>
       </SafeAreaView>
     );
@@ -427,10 +502,25 @@ export default function PlaceDetail() {
     setSelectedTab("reviews");
     scrollRef.current?.scrollTo({ y: width, animated: true });
   };
-  const averageRating = (detail.averageRating ?? 0).toFixed(1);
   const reviewCount = detail.reviewCount ?? 0;
+  const averageRating = reviewCount > 0 ? (detail.averageRating ?? 0).toFixed(1) : "—";
   const openDirections = () => {
-    // Connect a map app or route sheet when navigation is implemented.
+    setDirectionsVisible(true);
+  };
+  const selectMap = async (service: MapService) => {
+    const appIdentifier = Platform.OS === 'ios' ? Constants.expoConfig?.ios?.bundleIdentifier
+      : Constants.expoConfig?.android?.package;
+    const links = buildMapLinks(service, detail, Platform.OS, appIdentifier);
+    if (!links) {
+      Alert.alert(directionsTranslation.current('place.detail.directions'),
+        directionsTranslation.current('place.detail.directionMaps.unavailable'));
+      return;
+    }
+    const result = await openMapLinks(links, Linking, Platform.OS);
+    if (result === 'failed') Alert.alert(directionsTranslation.current('place.detail.directions'),
+      directionsTranslation.current('place.detail.directionMaps.failed'));
+    else if (result === 'web' && links.naverWeb) Alert.alert(directionsTranslation.current('place.detail.directions'),
+      directionsTranslation.current('place.detail.directionMaps.naverWeb', { destination: links.destination }));
   };
 
   return (
@@ -463,7 +553,7 @@ export default function PlaceDetail() {
             </Pressable>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="공유하기"
+              accessibilityLabel={t("place.detail.share")}
               onPress={() => void Share.share({ message: detail.name })}
               style={styles.heroButton}
             >
@@ -486,10 +576,10 @@ export default function PlaceDetail() {
           <View style={styles.infoContent}>
             <View>
               <View style={styles.tags}>
-                {status && <Tag label={status} variant={statusVariant} />}
-                {detail.regionName && <Tag label={detail.regionName} />}
+                {status && <Tag label={t(status === "운영 중" ? "place.filters.operationStatuses.open" : status === "오픈 예정" ? "place.filters.operationStatuses.upcoming" : "place.filters.operationStatuses.closed")} variant={statusVariant} />}
+                {detail.regionName && <Tag label={getPopupRegionDisplayName(detail, resolvedLanguage)} />}
                 {detail.tags.map((tag) => (
-                  <Tag key={tag.id} label={tag.name} />
+                  <Tag key={tag.id} label={getTagDisplayName(tag, resolvedLanguage)} />
                 ))}
               </View>
               <Text numberOfLines={1} ellipsizeMode="tail" style={styles.title}>
@@ -498,7 +588,7 @@ export default function PlaceDetail() {
               <View style={styles.stats}>
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={detail.isFavorited ? "찜 해제" : "찜하기"}
+                  accessibilityLabel={t(detail.isFavorited ? "place.all.removeFavorite" : "place.all.addFavorite")}
                   accessibilityState={{
                     selected: detail.isFavorited,
                     disabled: isFavoriteUpdating,
@@ -516,7 +606,7 @@ export default function PlaceDetail() {
                 </Pressable>
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={`평균 별점 ${averageRating}점, 방문 리뷰로 이동`}
+                  accessibilityLabel={reviewCount > 0 ? t("place.detail.ratingReviews", { rating: averageRating }) : t("place.detail.noRatingReviews")}
                   onPress={openReviews}
                   style={styles.stat}
                 >
@@ -525,12 +615,12 @@ export default function PlaceDetail() {
                 </Pressable>
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel="방문 리뷰로 이동"
+                  accessibilityLabel={t("place.detail.openReviews")}
                   onPress={openReviews}
                   style={styles.stat}
                 >
                   <MessageCircle size={18} color="#5B8DEF" fill="#5B8DEF" />
-                  <Text style={styles.statText}>{reviewCount > 0 ? `후기 ${reviewCount}개` : "후기"}</Text>
+                  <Text style={styles.statText}>{reviewCount > 0 ? t("place.detail.reviewCount", { count: reviewCount }) : t("place.detail.reviewLabel")}</Text>
                   <ChevronRight size={16} color={colors.secondaryText} />
                 </Pressable>
               </View>
@@ -631,10 +721,10 @@ export default function PlaceDetail() {
               <View style={styles.mapSection}>
                 <View style={styles.mapDivider} />
                 <View style={styles.mapFrame}>
-                  <Text style={styles.sectionTitle}>위치</Text>
+                  <Text style={styles.sectionTitle}>{t("place.detail.location")}</Text>
                   <Pressable
                     accessibilityRole="button"
-                    accessibilityLabel="지도에서 팝업 보기"
+                    accessibilityLabel={t("place.detail.viewOnMap")}
                     onPress={() =>
                       router.dismissTo({
                         pathname: "/(tabs)/map",
@@ -650,7 +740,7 @@ export default function PlaceDetail() {
                     onPress={openDirections}
                     style={styles.directionsButton}
                   >
-                    <Text style={styles.directionsText}>길찾기</Text>
+                    <Text style={styles.directionsText}>{t("place.detail.directions")}</Text>
                     <ArrowUpRight size={16} color={colors.text} />
                   </Pressable>
                 </View>
@@ -736,13 +826,13 @@ export default function PlaceDetail() {
                   <Pressable
                     disabled
                     accessibilityRole="button"
-                    accessibilityLabel="정보 수정 제보하기"
+                    accessibilityLabel={t("place.detail.reportInformation")}
                     accessibilityState={{ disabled: true }}
                     hitSlop={10}
                     style={styles.reportAction}
                   >
                     <Text numberOfLines={1} style={styles.reportActionText}>
-                      정보 수정 제보 →
+                      {t("place.detail.reportInformationButton")}
                     </Text>
                   </Pressable>
                 </View>
@@ -801,7 +891,7 @@ export default function PlaceDetail() {
       <Pressable
         testID="popup-floating-favorite"
         accessibilityRole="button"
-        accessibilityLabel={detail.isFavorited ? "찜 해제" : "찜하기"}
+        accessibilityLabel={t(detail.isFavorited ? "place.all.removeFavorite" : "place.all.addFavorite")}
         accessibilityState={{
           selected: detail.isFavorited,
           disabled: isFavoriteUpdating,
@@ -825,9 +915,11 @@ export default function PlaceDetail() {
           fill={detail.isFavorited ? colors.background : "none"}
         />
         <Text style={styles.floatingFavoriteText}>
-          {detail.isFavorited ? "찜했어요" : "찜하기"}
+          {t(detail.isFavorited ? "place.detail.favorited" : "place.all.addFavorite")}
         </Text>
       </Pressable>
+      {directionsVisible && <DirectionsSheet onClose={() => setDirectionsVisible(false)}
+        onSelect={service => { void selectMap(service); }} />}
     </SafeAreaView>
   );
 }

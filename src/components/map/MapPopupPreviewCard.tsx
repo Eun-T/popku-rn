@@ -1,3 +1,5 @@
+import { useTranslation } from '../../hooks/useTranslation';
+import { getTagDisplayName } from '../../locales/filterLabels';
 import { useEffect, useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -24,6 +26,7 @@ function monthDay(value: string | null): string | null {
 }
 
 export default function MapPopupPreviewCard({ popup, onPress, bottomInset }: MapPopupPreviewCardProps) {
+  const { t, resolvedLanguage } = useTranslation();
   const [imageSize, setImageSize] = useState<{ uri: string; aspectRatio: number } | null>(null);
   const imageUri = popup.coverImageUrl;
 
@@ -55,7 +58,7 @@ export default function MapPopupPreviewCard({ popup, onPress, bottomInset }: Map
     ? imageSize.aspectRatio : placeholderAspectRatio;
   const status = popupOperatingStatus(popup.startDate, popup.endDate);
   const period = [monthDay(popup.startDate), monthDay(popup.endDate)]
-    .filter(Boolean).join(' ~ ') || '일정 미정';
+    .filter(Boolean).join(' ~ ') || t('place.detail.schedulePending');
   const statusColor = status === '운영 중' ? colors.primary
     : status === '오픈 예정' ? colors.infoDark
       : colors.secondaryText;
@@ -79,14 +82,14 @@ export default function MapPopupPreviewCard({ popup, onPress, bottomInset }: Map
           {status && (
             <>
               <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
-              <Text style={[styles.statusText, { color: statusColor }]}>{status}</Text>
+              <Text style={[styles.statusText, { color: statusColor }]}>{t(status === '운영 중' ? 'place.filters.operationStatuses.open' : status === '오픈 예정' ? 'place.filters.operationStatuses.upcoming' : 'place.filters.operationStatuses.closed')}</Text>
             </>
           )}
           <Text numberOfLines={1} style={styles.period}>{period}</Text>
         </View>
         <View style={styles.tags}>
           {(popup.tags ?? []).slice(0, 2).map((tag) => (
-            <Tag key={tag.id} label={tag.name} />
+            <Tag key={tag.id} label={getTagDisplayName(tag, resolvedLanguage)} />
           ))}
         </View>
       </View>

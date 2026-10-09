@@ -4,6 +4,8 @@ const { test } = require('node:test');
 const ts = require('typescript');
 const jsx = (type, props, key) => ({ type, props, key });
 function load(file, mocks, globals = {}) {
+  mocks = require('./helpers/uiDependencies.cjs').withI18nDependencies(file, mocks);
+  globals = { __DEV__: false, ...globals };
   const code = ts.transpileModule(readFileSync(file, 'utf8'), { compilerOptions: {
     module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: false,
   } }).outputText;
@@ -34,15 +36,15 @@ function harness() {
   return { react, render(Component) { let count=0; do { assert.ok(count++<30); cursor=0; dirty=false; tree=Component(); pending.splice(0).forEach(fn=>fn()); } while(dirty); return tree; },
     unmount() { slots.forEach(slot=>slot?.cleanup?.()); } };
 }
-function screen(Clock=Date) {
+function screen(Clock=Date, entry={}) {
   const h=harness(), pages=[], endings=[], details=[];
   const native={ FlatList:'FlatList', Pressable:'Pressable', Text:'Text', TextInput:'TextInput', View:'View',
     StyleSheet:{ create:s=>s }, useWindowDimensions:()=>({ width:390 }) };
-  const mocks={ react:h.react, 'react/jsx-runtime':{ jsx,jsxs:jsx }, 'expo-router':{ useScrollToTop(){} },
+  const mocks={ react:h.react, 'react/jsx-runtime':{ jsx,jsxs:jsx }, 'expo-router':{ useScrollToTop(){}, useLocalSearchParams:()=>entry },
     'lucide-react-native':{ Bell:'Bell',Search:'Search',X:'X' }, 'react-native':native,
     'react-native-safe-area-context':{ SafeAreaView:'SafeAreaView',useSafeAreaInsets:()=>({ top:0,bottom:0,left:0,right:0 }) },
     '../theme/tokens':theme, '../constants/placeFilters':filters, '../constants/placeRegionMocks':{ placeRegionPages:[] },
-    '../locales':{ t:key=>key }, '../hooks/usePopupNavigation':{ usePopupNavigation:()=>()=>{} },
+    '../locales':require('./helpers/uiDependencies.cjs').loadPure('src/locales/index.ts'), '../hooks/usePopupNavigation':{ usePopupNavigation:()=>()=>{} },
     '../hooks/usePopupFavorites':{ usePopupFavorites:()=>({ isFavorite(){},isFavoriteDisabled(){},toggleFavorite(){} }) },
     '../lib/filterOptions':{ getRegions:async()=>[],getTags:async()=>[] },
     '../lib/popups':{ emptyPopupFilters:()=>({ regionIds:[],tagIds:[],status:undefined }),
@@ -58,7 +60,7 @@ function screen(Clock=Date) {
   let tree; const render=()=>tree=h.render(Component); const find=type=>nodes(tree).find(n=>n.type===type);
   const tab=name=>{ nodes(tree).find(n=>n.type==='Pressable'&&n.props.children?.props.children===name).props.onPress(); render(); };
   const settle=async()=>{ for(let i=0;i<6;i++){ await Promise.resolve(); render(); } };
-  render(); return {pages,endings,details,render,find,tab,settle,unmount:h.unmount};
+  render(); return {pages,endings,details,render,find,tab,settle,setEntry(value){entry=value;render();},unmount:h.unmount};
 }
 const popup = id => ({publicId:String(id),name:`popup ${id}`,startDate:'2026-10-01',endDate:'2026-10-30'});
 
@@ -168,6 +170,7 @@ test('취향 local 이미지는 expo-image 캐시를 사용하고 기존 카드 
   ];
   const mocks={
     'expo-image':{Image:'ExpoImage'},
+    'react-native-svg': { __esModule: true, default: 'Svg', Defs: 'Defs', LinearGradient: 'LinearGradient', Rect: 'Rect', Stop: 'Stop' },
     'react/jsx-runtime':{jsx,jsxs:jsx},
     'react-native':{Pressable:'Pressable',StyleSheet:{create:s=>s},Text:'Text',View:'View'},
     '../../constants/placeFilters':filters,'../../locales':{t:key=>key},'../../theme/tokens':theme,
@@ -307,7 +310,7 @@ test('failed next page keeps existing rows and cursor until explicit retry succe
   s.pages[2].resolve({popups:[popup(2)],nextCursor:null}); await s.settle();
   assert.deepEqual(s.find('FlatList').props.data.map(p=>p.publicId),['1','2']); s.unmount();
 });
-test('pagination and weekly API parameters leave legacy Home calls unchanged',async()=>{
+test('pagination and weekly parameters stay unchanged; Home explicitly requests eight',async()=>{
   const calls=[]; const api=load('src/lib/popups.ts',{'../constants/api':{API_BASE_URL:'https://test'},'../locales':{getLocale:()=> 'ko'}},
     {fetch:async(url)=>{calls.push(url);return {ok:true,json:async()=>({popups:[],nextCursor:null})};}});
   const signal=new AbortController().signal;
@@ -316,14 +319,14 @@ test('pagination and weekly API parameters leave legacy Home calls unchanged',as
   assert.equal(url.searchParams.get('status'),'ENDED'); assert.equal(url.searchParams.get('regionIds'),'1,2'); assert.equal(url.searchParams.get('visitPeriod'),'weekend');
   await api.getWeeklyPopups('KR','2026-10-05','2026-10-11',signal);
   assert.equal(calls[1],'https://test/api/popups?weekStart=2026-10-05&weekEnd=2026-10-11&countryCode=KR');
-  await api.getNewPopups('KR',signal); assert.equal(new URL(calls[2]).searchParams.has('limit'),false);
+  await api.getNewPopups('KR',signal); assert.equal(new URL(calls[2]).searchParams.get('limit'),'8'); assert.equal(new URL(calls[2]).searchParams.get('homeNew'),'true');
 });
 test('weekly section requests current local week and each selected week; obsolete response is ignored',async()=>{
   const h=harness(),requests=[];
   const Animated={Value:class{setValue(){}},View:'AnimatedView',timing:()=>({start:fn=>fn({finished:true})})};
   const Component=load('src/components/place/PlaceWeeklySection.tsx',{
     react:h.react,'react/jsx-runtime':{jsx,jsxs:jsx},'lucide-react-native':{ChevronLeft:'ChevronLeft',ChevronRight:'ChevronRight'},
-    'react-native':{Animated,PanResponder:{create:()=>({panHandlers:{}})},Pressable:'Pressable',StyleSheet:{create:s=>s},Text:'Text',View:'View'},
+    'react-native':{Animated,FlatList:'FlatList',PanResponder:{create:()=>({panHandlers:{}})},Pressable:'Pressable',StyleSheet:{create:s=>s},Text:'Text',View:'View'},
     '../../theme/tokens':theme,'../../lib/popups':{getWeeklyPopups(country,start,end,signal){const d=deferred(); requests.push({country,start,end,signal,...d});return d.promise;}},
     './PlaceWeeklyPopupList':{default:'WeeklyList'},
   }).default;
@@ -333,12 +336,14 @@ test('weekly section requests current local week and each selected week; obsolet
   const date=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
   assert.equal(requests.length,1); assert.equal(requests[0].start,date(monday));
   nodes(tree).find(n=>n.props?.onLayout).props.onLayout({nativeEvent:{layout:{width:300}}}); render();
-  nodes(tree).find(n=>n.props?.accessibilityLabel==='다음 주').props.onPress(); render();
+  nodes(tree).find(n=>n.type==='Pressable' && n.key===1).props.onPress(); render();
   assert.equal(requests.length,2); assert.equal(requests[0].signal.aborted,true);
   monday.setDate(monday.getDate()+7); assert.equal(requests[1].start,date(monday));
   requests[0].resolve([popup('stale')]); requests[1].resolve([popup('fresh')]); await settle();
-  assert.deepEqual(nodes(tree).find(n=>n.type==='WeeklyList').props.popups.map(p=>p.publicId),['fresh']);
-  nodes(tree).find(n=>n.props?.accessibilityLabel==='이전 주').props.onPress(); render(); assert.equal(requests.length,3);
+  nodes(tree).filter(n=>n.props?.onLayout)[2].props.onLayout({nativeEvent:{layout:{width:300}}}); render();
+  const pager = nodes(tree).find(n=>n.type==='FlatList');
+  assert.deepEqual(nodes(pager.props.renderItem({item:pager.props.data[0]})).find(n=>n.type==='WeeklyList').props.popups.map(p=>p.publicId),['fresh']);
+  nodes(tree).find(n=>n.type==='Pressable' && n.key===-1).props.onPress(); render(); assert.equal(requests.length,3);
   assert.equal(requests[2].start,requests[0].start); h.unmount();
 });
 
@@ -349,15 +354,38 @@ function weekly() {
   const Animated={Value:class{setValue(){}},View:'AnimatedView',timing:()=>({start:fn=>fn({finished:true})})};
   const Component=load('src/components/place/PlaceWeeklySection.tsx',{
     react:h.react,'react/jsx-runtime':{jsx,jsxs:jsx},'lucide-react-native':{ChevronLeft:'ChevronLeft',ChevronRight:'ChevronRight'},
-    'react-native':{Animated,PanResponder:{create:()=>({panHandlers:{}})},Pressable:'Pressable',StyleSheet:{create:s=>s},Text:'Text',View:'View'},
+    'react-native':{Animated,FlatList:'FlatList',PanResponder:{create:()=>({panHandlers:{}})},Pressable:'Pressable',StyleSheet:{create:s=>s},Text:'Text',View:'View'},
     '../../theme/tokens':theme,'../../lib/popups':{getWeeklyPopups(country,start,end,signal){const d=deferred();requests.push({country,start,end,signal,...d});return d.promise;}},
     './PlaceWeeklyPopupList':{default:'WeeklyList'},
   },{Date:Clock}).default;
   const props={country:undefined,isActive:true,onPressPopup(){},isFavorite(){},isFavoriteDisabled(){},onToggleFavorite(){}};
   let tree;
-  const render=()=>tree=h.render(()=>Component(props));
-  const find=type=>nodes(tree).find(n=>n.type===type);
-  const label=text=>nodes(tree).find(n=>n.props?.accessibilityLabel===text);
+  const scrollEvents=[];
+  const render=()=>{
+    tree=h.render(()=>Component(props));
+    const carousel=nodes(tree).filter(n=>n.props?.onLayout)[2];
+    if(carousel){carousel.props.onLayout({nativeEvent:{layout:{width:300}}});tree=h.render(()=>Component(props));}
+    const pager=nodes(tree).find(n=>n.type==='FlatList');
+    if(pager){
+      pager.props.ref.current={scrollToOffset(options){scrollEvents.push({key:pager.key,...options});}};
+      for(const event of scrollEvents.splice(0)){
+        if(event.key===pager.key)pager.props.onScroll({nativeEvent:{contentOffset:{x:event.offset}}});
+      }
+      tree=h.render(()=>Component(props));
+    }else scrollEvents.length=0;
+    return tree;
+  };
+  const find=type=>{
+    if(type!=='WeeklyList')return nodes(tree).find(n=>n.type===type);
+    const pager=nodes(tree).find(n=>n.type==='FlatList');
+    if(!pager||pager.props.data.length===0)return undefined;
+    const selected=nodes(tree).find(n=>n.props?.accessibilityLabel?.startsWith('주간 팝업 ')&&n.props.accessibilityState.selected);
+    const index=selected?.key??0;
+    return nodes(pager.props.renderItem({item:pager.props.data[index],index})).find(n=>n.type===type);
+  };
+  const label=text=>text==='다음 주'||text==='이전 주'
+    ? nodes(tree).find(n=>n.type==='Pressable'&&n.key===(text==='다음 주'?1:-1))
+    : nodes(tree).find(n=>n.props?.accessibilityLabel===text);
   const settle=async()=>{for(let i=0;i<6;i++){await Promise.resolve();render();}};
   const move=direction=>{label(direction>0?'다음 주':'이전 주').props.onPress();render();};
   const content=()=>nodes(tree).filter(n=>n.props?.onLayout)[1];
@@ -378,9 +406,9 @@ test('Weekly는 최대 9개를 3개씩 페이지로 표시하고 페이지 이�
 test('Weekly fresh 주는 즉시 재사용하고 빈 결과도 캐시하며 주 변경은 첫 페이지로 복귀한다',async()=>{
   const s=weekly();s.requests[0].resolve(Array.from({length:9},(_,i)=>popup(i+1)));await s.settle();
   s.label('주간 팝업 2페이지').props.onPress();s.render();s.move(1);
-  s.requests[1].resolve([]);await s.settle();assert.deepEqual(s.find('WeeklyList').props.popups,[]);
+  s.requests[1].resolve([]);await s.settle();assert.deepEqual(s.find('FlatList').props.data,[]);
   s.move(-1);assert.equal(s.requests.length,2);assert.deepEqual(s.find('WeeklyList').props.popups.map(p=>p.publicId),['1','2','3']);
-  s.move(1);assert.equal(s.requests.length,2);assert.deepEqual(s.find('WeeklyList').props.popups,[]);s.unmount();
+  s.move(1);assert.equal(s.requests.length,2);assert.deepEqual(s.find('FlatList').props.data,[]);s.unmount();
 });
 
 test('Weekly는 4분 경계에서 재조회하고 요청 지연을 freshness에 더하지 않으며 국가별 캐시를 분리한다',async()=>{
@@ -402,7 +430,7 @@ test('탭을 숨겼다 돌아와도 선택 주는 유지하고 stale 캐시만 �
 });
 
 test('Weekly loading과 실패는 직전 3개 페이지 높이를 유지하고 짧은 응답 후에는 실제 높이를 허용한다',async()=>{
-  const s=weekly();assert.equal(s.content().props.style.minHeight,372);
+  const s=weekly();assert.equal(s.content().props.style.minHeight,276);
   s.requests[0].resolve(Array.from({length:9},(_,i)=>popup(i)));await s.settle();
   s.content().props.onLayout({nativeEvent:{layout:{height:408}}});s.move(1);
   assert.equal(s.content().props.style.minHeight,408);assert.equal(s.find('WeeklyList'),undefined);
@@ -419,4 +447,19 @@ test('빠른 주 이동과 캐시 복귀 뒤 도착한 이전 응답은 현재 �
   next.resolve([popup('stale')]);later.resolve([popup('later')]);await s.settle();assert.equal(s.find('WeeklyList').props.popups[0].publicId,'later');
   s.move(-1);const retry=s.requests[3];s.move(-1);assert.equal(retry.signal.aborted,true);assert.equal(s.requests.length,4);
   retry.resolve([popup('stale-again')]);await s.settle();assert.equal(s.find('WeeklyList').props.popups[0].publicId,'current');s.unmount();
+});
+
+test('Home more consumes country and opening range into existing All filters; pagination and chip removal retain semantics',async()=>{
+  const s=screen(Date,{tab:'all',countryCode:'JP',openingFrom:'2026-10-05',openingTo:'2026-10-11',homeNewEntry:'entry-1'});
+  await s.settle();
+  const request=s.pages.at(-1);assert.equal(request.country,'JP');
+  assert.equal(request.detail.openingFrom,'2026-10-05');assert.equal(request.detail.openingTo,'2026-10-11');
+  request.resolve({popups:[popup(1)],nextCursor:'next'});await s.settle();
+  assert.equal(s.find('FlatList').props.data.length,1);
+  s.find('FlatList').props.onEndReached();assert.equal(s.pages.at(-1).cursor,'next');
+  assert.deepEqual(s.pages.at(-1).detail,request.detail);
+  s.find('AppliedFilterBar').props.onRemove('openingWeek','openingWeek');await s.settle();
+  assert.equal(s.pages.at(-1).detail.openingFrom,undefined);assert.equal(s.pages.at(-1).country,'JP');
+  s.setEntry({tab:'all',countryCode:'KR',openingFrom:'2026-10-12',openingTo:'2026-10-18',homeNewEntry:'entry-2'});
+  await s.settle();assert.equal(s.pages.at(-1).country,'KR');assert.equal(s.pages.at(-1).detail.openingFrom,'2026-10-12');s.unmount();
 });

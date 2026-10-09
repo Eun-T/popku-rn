@@ -4,6 +4,7 @@ const { test } = require('node:test');
 const ts = require('typescript');
 
 function load(file, mocks = {}) {
+  mocks = require('./helpers/uiDependencies.cjs').withUiDependencies(file, mocks);
   mocks = { '../../components/community/CommunityPostMenu': { __esModule: true, default: 'CommunityPostMenu' }, ...mocks };
   const module = { exports: {} };
   const code = ts.transpileModule(readFileSync(file, 'utf8'), { compilerOptions: {
@@ -16,8 +17,7 @@ function load(file, mocks = {}) {
   return module.exports;
 }
 const flush = () => new Promise(resolve => setImmediate(resolve));
-const nodes = tree => !tree || typeof tree !== 'object' ? [] : Array.isArray(tree)
-  ? tree.flatMap(nodes) : [tree, ...nodes(tree.props?.children)];
+const { nodes } = require('./helpers/uiTree.cjs');
 const row = { type: 'POST', id: 1, category: 'QUESTION', author: { id: 2, nickname: 'author', avatarUrl: null },
   content: 'question', createdAt: '2026-10-04T10:00:00+09:00', updatedAt: '2026-10-04T10:00:00+09:00',
   regionName: null, popup: null, rating: null, images: [], liked: false, likeCount: 12, commentCount: 0, viewCount: 1 };
@@ -182,14 +182,16 @@ const jsx = (type, props, key) => ({ type, props, key });
 function screenMocks(env, state, depth, routes) {
   const native = Object.fromEntries(['View', 'Text', 'Image', 'FlatList', 'Pressable', 'ScrollView', 'ActivityIndicator'].map(name => [name, name]));
   native.StyleSheet = { create: value => value }; native.Alert = { alert: (...args) => routes.push(args) };
-  return { react: state.react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': native,
+  return { react: { ...state.react, useSyncExternalStore: (_subscribe, snapshot) => snapshot() },
+    'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': native,
     'expo-router': { useRouter: () => ({ push: route => routes.push(route), canGoBack: () => true, back() {} }),
-      useLocalSearchParams: () => ({ id: '1' }), useFocusEffect: fn => state.useFocusEffect(fn),
+      useLocalSearchParams: () => ({ id: '1' }), useFocusEffect: fn => state.useFocusEffect(fn), useScrollToTop() {},
       useNavigation: () => ({ getState: () => ({ index: 1, routes: [{ name: '(tabs)' }, { name: 'reviews/[id]' }] }) }) },
     'lucide-react-native': Object.fromEntries(['Heart', 'MessageCircle', 'ChevronLeft', 'MoreHorizontal', 'Pencil', 'Settings', 'ChevronRight', 'MapPin', 'Star', 'UserRound'].map(name => [name, name])),
     'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView', useSafeAreaInsets: () => ({ left: 0, right: 0, top: 0, bottom: 0 }) },
     [`${depth}/lib/community`]: env.api, [`${depth}/lib/communityFeedRefresh`]: env.refresh,
-    [`${depth}/lib/communityLikes`]: env.likes, [`${depth}/lib/auth`]: env.auth,
+    [`${depth}/lib/communityLikes`]: env.likes,
+    [`${depth}/lib/auth`]: { ...env.auth, getAuthUser: () => null, subscribeAuthUser: () => () => {} },
     [`${depth}/lib/reviews`]: env.reviews,
     [`${depth}/hooks/useCommunityNow`]: { useCommunityNow: () => ({ now: Date.now(), updateNow: noop }) },
     [`${depth}/lib/communityRefresh`]: { waitForCommunityRefresh: async () => {} },
@@ -246,7 +248,9 @@ test('real REVIEW feed/detail/PopupReviews handlers sync optimistic, reconciled 
   const detailMocks = state => ({ ...screenMocks(env, state, '../..', routes),
     '../../components/community/CommunityAuthor': { __esModule: true, default: 'Author' },
     '../../components/community/CommunityImageCarousel': { __esModule: true, default: 'Carousel' } });
-  const detail = load('src/app/reviews/[id].tsx', detailMocks(detailState)).default;
+  const detail = load('src/app/reviews/[id].tsx', { ...detailMocks(detailState),
+    '../../locales': require('./helpers/uiDependencies.cjs').loadPure('src/locales/index.ts'),
+  }).default;
   const post = load('src/app/community/[id].tsx', detailMocks(postState)).default;
   const popup = load('src/components/place/PopupReviews.tsx', { ...screenMocks(env, popupState, '../..', routes),
     '../community/CommunityPostItem': { __esModule: true, default: 'Card' } }).default;
@@ -260,7 +264,9 @@ test('real REVIEW feed/detail/PopupReviews handlers sync optimistic, reconciled 
     assert.equal(detailLike().props.accessibilityState.selected, liked);
     assert.ok(nodes(detailLike()).some(node => node.props?.children === count));
     assert.equal(list().props.data[1].liked, false); assert.equal(list().props.data[1].likeCount, 12);
-    assert.equal(nodes(postState.render(post)).find(node => node.type === 'Heart').props.fill, 'none');
+    const postHeart = nodes(postState.render(post)).find(node => node.type === 'Heart');
+    assert.equal(postHeart, undefined, 'POST detail likes are intentionally unsupported');
+    assert.equal(nodes(postState.render(post)).find(node => node.type === 'CommunityComments').props.commentCount, row.commentCount, 'REVIEW likes cannot change same-id POST comments');
   };
   try {
     global.fetch = async (url, options) => {
@@ -312,8 +318,8 @@ test('REVIEW detail, popup list and feed stale GETs share version protection wit
   } finally { global.fetch = original; }
 });
 
-test('real feed/detail heart handlers synchronize both ways without feed refetch, revision or list remount', async () => {
-  const env = setup(); const original = global.fetch; const routes = [];
+test('POST feed/detail omit unsupported likes while preserving comments, data and return without remount/refetch', async () => {
+  const env = setup(), original = global.fetch, routes = [];
   const feedState = hookState(), detailState = hookState();
   const feed = load('src/screens/CommunityScreen.tsx', { ...screenMocks(env, feedState, '..', routes),
     '../components/community/CommunityPostItem': { default: 'CommunityPostItem' },
@@ -321,47 +327,44 @@ test('real feed/detail heart handlers synchronize both ways without feed refetch
   const detail = load('src/app/community/[id].tsx', { ...screenMocks(env, detailState, '../..', routes),
     '../../components/community/CommunityAuthor': { default: 'CommunityAuthor' },
     '../../components/community/CommunityImageCarousel': { default: 'CommunityImageCarousel' } }).default;
-  let feedCalls = 0, resolve;
+  const Card = load('src/components/community/CommunityPostItem.tsx', screenMocks(env, feedState, '../..', routes)).default;
+  const requests = [];
   try {
-    global.fetch = async (url, options) => {
-      if (options.method === 'POST') return new Promise(done => { resolve = done; });
-      if (url.includes('/feed?')) { feedCalls++; return { ok: true, json: async () => ({ items: [row, { ...row, id: 2 }], nextCursor: 'cursor' }) }; }
-      return { ok: true, json: async () => row };
-    };
+    global.fetch = async (url, options) => { requests.push({ url, method: options.method });
+      return { ok: true, json: async () => url.includes('/feed?') ? { items: [row, { ...row, id: 2 }], nextCursor: 'cursor' } : row }; };
     const list = () => nodes(feedState.render(feed)).find(node => node.type === 'FlatList');
-    list(); await flush(); detailState.render(detail); await flush();
-    const before = list(); const unrelated = before.props.data[1]; const revision = env.refresh.communityFeedRevision();
-    nodes(detailState.render(detail)).find(node => node.props?.accessibilityLabel === '좋아요').props.onPress(); await flush();
-    assert.equal(list().props.data[0].liked, true); assert.equal(list().props.data[0].likeCount, 13);
-    let heart = nodes(detailState.render(detail)).find(node => node.type === 'Heart'); assert.equal(heart.props.fill, '#303A49');
-    resolve({ ok: true, json: async () => ({ liked: true, likeCount: 13 }) }); await flush();
+    list(); detailState.render(detail); await flush();
+    const before = list(), unrelated = before.props.data[1], revision = env.refresh.communityFeedRevision();
+    const tree = detailState.render(detail);
+    assert.equal(nodes(tree).some(node => node.type === 'Heart'), false);
+    assert.equal(nodes(tree).find(node => node.type === 'CommunityComments').props.commentCount, row.commentCount);
+    const card = Card(list().props.renderItem({ item: list().props.data[0] }).props);
+    assert.equal(nodes(card).some(node => node.type === 'Heart'), false);
+    assert.ok(nodes(card).some(node => node.props?.children === row.content));
     feedState.focus(); await flush();
-    assert.equal(feedCalls, 1); assert.equal(list().key, undefined); assert.equal(list().props.data[1], unrelated);
-    list().props.renderItem({ item: list().props.data[0] }).props.onPressLike(); await flush();
-    heart = nodes(detailState.render(detail)).find(node => node.type === 'Heart'); assert.equal(heart.props.fill, 'none');
-    assert.equal(list().props.data[0].likeCount, 12);
-    resolve({ ok: false, status: 500, text: async () => 'failure' }); await flush();
-    assert.equal(list().props.data[0].liked, true); assert.equal(list().props.data[0].likeCount, 13);
-    assert.equal(nodes(detailState.render(detail)).find(node => node.type === 'Heart').props.fill, '#303A49');
-    assert.equal(feedCalls, 1); assert.equal(env.refresh.communityFeedRevision(), revision);
-    env.setToken(null); list().props.renderItem({ item: list().props.data[0] }).props.onPressLike(); await flush();
-    assert.equal(routes.at(-1), '/profile/login');
+    assert.equal(requests.filter(request => request.url.includes('/feed?')).length, 1);
+    assert.equal(requests.some(request => request.method === 'POST'), false, 'removed UI cannot start like requests');
+    assert.equal(list().props.data, before.props.data); assert.equal(list().props.data[1], unrelated);
+    assert.equal(list().key, undefined); assert.equal(env.refresh.communityFeedRevision(), revision);
+    assert.equal(list().props.data[0].likeCount, row.likeCount, 'API data retained even though count UI is removed');
   } finally { feedState.cleanup(); detailState.cleanup(); global.fetch = original; }
 });
-
-test('post and REVIEW card heart stop navigation and render filled/unfilled', () => {
-  const env = setup(); const state = hookState(); const mocks = screenMocks(env, state, '../..', []);
+test('POST cards omit likes; REVIEW hearts stop navigation and render filled/unfilled', () => {
+  const env = setup(), state = hookState(), mocks = screenMocks(env, state, '../..', []);
+  mocks['../../locales'] = require('./helpers/uiDependencies.cjs').loadPure('src/locales/index.ts');
   const Card = load('src/components/community/CommunityPostItem.tsx', mocks).default;
   let tapped = 0, stopped = 0, navigated = 0;
   for (const liked of [false, true]) {
-    const tree = Card({ post: { ...row, liked }, onPressLike: () => tapped++, onPressPost: () => navigated++ });
-    const button = nodes(tree).find(node => node.props?.accessibilityLabel === (liked ? '좋아요 취소' : '좋아요'));
+    const post = Card({ post: { ...row, liked }, onPressLike: () => tapped++, onPressPost: () => navigated++ });
+    assert.equal(nodes(post).some(node => node.type === 'Heart'), false, 'POST likes intentionally unsupported');
+    assert.ok(nodes(post).some(node => node.props?.children === row.content));
+    post.props.onPress();
+    const review = Card({ post: { ...reviewRow, liked }, onPressReview: () => navigated++, onPressLike: () => tapped++ });
+    const button = nodes(review).find(node => node.props?.accessibilityLabel === (liked ? '좋아요 취소' : '좋아요'));
+    assert.ok(button, 'REVIEW likes remain supported');
     button.props.onPress({ stopPropagation() { stopped++; } });
     assert.equal(button.props.accessibilityState.selected, liked);
-    assert.equal(nodes(tree).find(node => node.type === 'Heart').props.fill, liked ? '#303A49' : 'none');
+    assert.equal(nodes(review).find(node => node.type === 'Heart').props.fill, liked ? '#303A49' : 'none');
   }
-  assert.equal(tapped, 2); assert.equal(stopped, 2); assert.equal(navigated, 0);
-  const review = Card({ post: { ...row, type: 'REVIEW', category: 'REVIEW' }, onPressReview: () => navigated++, onPressLike: () => tapped++ });
-  nodes(review).find(node => node.props?.accessibilityLabel === '좋아요').props.onPress({ stopPropagation() { stopped++; } });
-  assert.equal(tapped, 3); assert.equal(stopped, 3); assert.equal(navigated, 0);
+  assert.equal(tapped, 2); assert.equal(stopped, 2); assert.equal(navigated, 2, 'only POST body presses navigate');
 });

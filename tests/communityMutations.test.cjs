@@ -3,6 +3,7 @@ const { readFileSync } = require('node:fs');
 const { test } = require('node:test');
 const ts = require('typescript');
 function load(file, mocks = {}) {
+  mocks = require('./helpers/uiDependencies.cjs').withUiDependencies(file, mocks);
   mocks = { '../../components/community/CommunityPostMenu': { __esModule: true, default: 'CommunityPostMenu' }, ...mocks };
   const module = { exports: {} };
   const code = ts.transpileModule(readFileSync(file, 'utf8'), { compilerOptions: {
@@ -28,6 +29,7 @@ function hooks() {
   let s = 0, r = 0, e = 0, c = 0, f = 0;
   const equal = (a, b) => a?.length === b.length && b.every((value, i) => value === a[i]);
   const react = {
+    useSyncExternalStore: (_subscribe, snapshot) => snapshot(),
     useState(initial) { const i = s++; if (!(i in states)) states[i] = initial;
       return [states[i], value => { states[i] = typeof value === 'function' ? value(states[i]) : value; }]; },
     useRef(initial) { return refs[r++] ??= { current: initial }; },
@@ -59,7 +61,7 @@ function setup({ owner = true } = {}) {
     getCommunityFeed: (category, sort, cursor) => { calls.push(['feed', category, sort, cursor]); return feedResponse(cursor); },
     createCommunityPost: async () => { throw new Error('edit must not create'); },
   };
-  const auth = { subscribeAuthSession: () => () => {}, clearTokens: async () => { cleared++; } };
+  const auth = { getAuthUser: () => ({ email: 'me' }), subscribeAuthUser: () => () => {}, subscribeAuthSession: () => () => {}, clearTokens: async () => { cleared++; } };
   const jsx = (type, props, key) => ({ type, props, key });
   const native = Object.fromEntries(['ActivityIndicator','FlatList','Pressable','ScrollView','Text','View','Image','TextInput','KeyboardAvoidingView'].map(name => [name,name]));
   native.StyleSheet = { create: value => value }; native.Platform = { OS: 'ios' };
@@ -70,10 +72,12 @@ function setup({ owner = true } = {}) {
   };
   function screen(file, params, prefix) {
     const state = hooks();
+    const guard = require('./helpers/preventRemove.cjs').removalDriver(state.react);
     const router = { push(route) { routes.push(route); }, back() { back++; }, canGoBack: () => true, replace(route) { routes.push(route); } };
     const common = { ...base, react: state.react,
-      'expo-router': { useRouter: () => router, useLocalSearchParams: () => params, useFocusEffect: fn => state.useFocusEffect(fn),
-        useNavigation: () => ({ addListener: (_, fn) => { beforeRemove = fn; return () => {}; } }) },
+      'expo-router': { useRouter: () => router, useLocalSearchParams: () => params, useFocusEffect: fn => state.useFocusEffect(fn), useScrollToTop() {},
+        useNavigation: () => guard.navigation },
+      'expo-router/react-navigation': { usePreventRemove: guard.usePreventRemove },
       [`${prefix}/lib/community`]: api, [`${prefix}/lib/communityFeedRefresh`]: sync,
       [`${prefix}/lib/auth`]: auth, [`${prefix}/lib/communityDiagnostics`]: diagnostics,
       [`${prefix}/lib/communityLikes`]: { changeCommunityLike: async () => {} },
@@ -93,6 +97,7 @@ function setup({ owner = true } = {}) {
       },
     };
     const Component = load(file, common).default;
+    beforeRemove = () => { const count = guard.completed.length; guard.request({ type: 'GO_BACK' }); return guard.completed.length === count; };
     return { state, render: () => state.render(Component), list: () => nodes(state.render(Component)).find(node => node.type === 'FlatList') };
   }
   return { sync, alerts, calls, routes, ApiError, get back() { return back; }, get cleared() { return cleared; },
@@ -101,7 +106,7 @@ function setup({ owner = true } = {}) {
     edit: () => screen('src/app/community/write.tsx', { editId:'1' }, '../..'),
     update(fn) { update = fn; }, remove(fn) { remove = fn; }, editRead(fn) { editRead = fn; },
     feedResponse(fn) { feedResponse = fn; },
-    tryLeave() { let prevented = false; beforeRemove?.({ preventDefault() { prevented = true; } }); return prevented; },
+    tryLeave() { return beforeRemove?.() ?? false; },
   };
 }
 const stableNow = () => {};
@@ -194,7 +199,7 @@ test('failed edit preserves form/images/detail/feed and permits retry; expired a
   assert.ok(nodes(detail.render()).some(n => n.props?.children === 'original'));
   env.update(async () => { throw new env.ApiError(401); });
   button(edit.render(),'community.edit.save').props.onPress(); await flush();
-  assert.equal(env.cleared,1); assert.equal(env.routes.at(-1),'/profile/login');
+  assert.equal(env.cleared,1); assert.deepEqual(env.routes.at(-1),{pathname:'/login',params:{intent:'resume',resumeKey:'write'}});
   [feed,detail,edit].forEach(s => s.state.cleanup());
 });
 

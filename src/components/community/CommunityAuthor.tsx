@@ -4,14 +4,16 @@ import { Image, StyleSheet, Text, View } from 'react-native';
 
 import type { CommunityFeedItem } from '../../lib/community';
 import { formatCommunityTime } from '../../lib/communityTime';
+import { useTranslation } from '../../hooks/useTranslation';
 import { communityColors } from '../../theme/communityColors';
 import { radius, spacing, typography } from '../../theme/tokens';
 
 type Props = { author: CommunityFeedItem['author']; createdAt: string; now?: number; showTime?: boolean };
 
 export default function CommunityAuthor({ author, createdAt, now = Date.now(), showTime = true }: Props) {
+  const { t } = useTranslation();
   const [failedAvatar, setFailedAvatar] = useState<string | null>(null);
-  const time = formatCommunityTime(createdAt, now);
+  const time = formatCommunityTime(createdAt, now, t);
   return (
     <View style={styles.row}>
       {author.avatarUrl && author.avatarUrl !== failedAvatar

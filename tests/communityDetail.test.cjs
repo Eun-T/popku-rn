@@ -4,6 +4,7 @@ const { test } = require('node:test');
 const ts = require('typescript');
 
 function load(file, mocks = {}) {
+  mocks = require('./helpers/uiDependencies.cjs').withUiDependencies(file, mocks);
   mocks = { '../../components/community/CommunityPostMenu': { __esModule: true, default: 'CommunityPostMenu' }, ...mocks };
   if (!['src/lib/communityFeedRefresh.ts', 'src/lib/communityTime.ts'].includes(file)) mocks = {
     './communityFeedRefresh': load('src/lib/communityFeedRefresh.ts'),
@@ -97,7 +98,7 @@ test('detail client is public, preserves QUESTION/FREE data and propagates missi
   } finally { global.fetch = original; }
 });
 
-test('detail screen displays the full body and like action; handles loading, 404, retry and abort', async () => {
+test('detail screen displays the full body without unsupported POST likes; handles loading, 404, retry and abort', async () => {
   const state = hooks();
   let response = post;
   let failure;
@@ -122,11 +123,12 @@ test('detail screen displays the full body and like action; handles loading, 404
   const body = nodes(tree).find((node) => node.type === 'Text' && node.props.children === post.content);
   assert.ok(body);
   assert.equal(body.props.numberOfLines, undefined);
-  assert.deepEqual(nodes(tree).find((node) => node.type === 'CommunityAuthor').props.author, post.author);
-  assert.deepEqual(nodes(tree).find((node) => node.type === 'CommunityImageCarousel').props.images, []);
-  assert.ok(nodes(tree).some((node) => node.type === 'Heart'));
+  assert.ok(nodes(tree).some((node) => node.type === 'Text' && node.props.children === post.author.nickname));
+  assert.equal(nodes(tree).find((node) => node.type === 'CommunityImageCarousel'), undefined, 'zero images omit the image region');
+  assert.equal(nodes(tree).some((node) => node.type === 'Heart'), false, 'POST likes are intentionally unsupported');
+  assert.ok(nodes(tree).some(node => node.type === 'CommunityComments'), 'POST comments remain supported');
   assert.ok(nodes(tree).some((node) => node.type === 'MessageCircle'));
-  assert.equal(nodes(tree).filter((node) => node.type === 'Pressable').length, 2, 'back and post like are actionable');
+  assert.equal(nodes(tree).filter((node) => node.type === 'Pressable').length, 1, 'back remains actionable; POST like action is unsupported');
   nodes(tree).find((node) => node.type === 'Pressable').props.onPress();
   assert.equal(back, 1);
   for (const images of [['one'], ['one', 'two', 'three']]) {

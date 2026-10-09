@@ -11,6 +11,7 @@
       "icon": "./assets/expo.icon",
       "bundleIdentifier": "com.popku.app",
       "infoPlist": {
+        "LSApplicationQueriesSchemes": ["nmap", "comgooglemaps"],
         "NSLocationWhenInUseUsageDescription": "현재 위치 주변의 팝업을 찾기 위해 위치 정보가 필요합니다."
       }
     },
@@ -61,7 +62,9 @@
             "usesCleartextTraffic": true
           }
         }
-      ]
+      ],
+      "expo-localization",
+      "./plugins/withMapAppQueries"
     ],
     "experiments": {
       "typedRoutes": true,

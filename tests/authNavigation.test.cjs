@@ -9,7 +9,7 @@ function handler(file, name, scope) {
   let declaration;
   function visit(n) { if (ts.isFunctionDeclaration(n) && n.name?.text === name) declaration = n; ts.forEachChild(n, visit); }
   visit(ast); assert.ok(declaration);
-  const js = ts.transpileModule(`${declaration.getText(ast)}\nreturn ${name};`, {
+  const js = ts.transpileModule(`${declaration.getText(ast).replace(/^export\s+/, '')}\nreturn ${name};`, {
     compilerOptions: { target: ts.ScriptTarget.ES2022 },
   }).outputText;
   return new Function(...Object.keys(scope), js)(...Object.values(scope));
@@ -38,7 +38,14 @@ for (const [label, file, name] of [
     setJoining: noop, setJoinError: (error) => assert.equal(error, ''),
     setPassword: noop, setPasswordConfirmation: noop, setCode: noop, setEmail: noop, setNickname: noop, setConfirmedNickname: noop,
     Keyboard: { dismiss: noop }, clearGoogleSignup: () => calls.push('signup cleared'),
+    target: null, params: {}, navigation: {}, redirected: { current: false },
   };
+  scope.authentication = {
+    begin: () => ({}), active: () => true, valid: () => true, complete: () => true, release: noop,
+    fail: async () => assert.fail('unexpected authentication failure'),
+    authenticate: async (_attempt, value) => { await scope.saveTokens(value); scope.setAuthUser(await scope.getCurrentUser(value.accessToken)); return true; },
+  };
+  scope.finishLoginReturn = handler('src/lib/loginReturn.ts', 'finishLoginReturn', {});
   await handler(`src/app/(tabs)/profile/${file}.tsx`, name, scope)();
   assert.deepEqual(calls, ['save', 'user', ...(file === 'signup' ? ['signup cleared'] : []), ['replace', '/(tabs)']]);
   assert.match(readFileSync('.expo/types/router.d.ts', 'utf8'), /pathname: `\$\{'\/\(tabs\)'\}` \| `\/`/);

@@ -1,5 +1,16 @@
 # POPKU API
 
+## 홈 메인 배너
+
+- 홈 최상단은 `GET /api/main-banners?languageCode=ko|ja`의 `{ popups: [...] }`를 조회한다. 언어는 기존 `getLocale()`을 사용하며 별도 언어 상태를 만들지 않는다. 현재 locale 모듈의 기본 언어는 ko다.
+- `placeId`, `publicId`, `name`, `countryCode`, `regionId`, `regionName`, `startDate`, `endDate`, `coverImageUrl`, `coverImageCacheKey`를 기존 응답 그대로 받는다. 날짜·지역·이미지는 null일 수 있다. 국가별 필터·분리·재정렬 없이 서버 순서를 유지한다.
+- 높이 380dp / 전체 너비 영역에서 가로 ScrollView의 pagingEnabled로 한 번에 한 배너를 수동 스와이프한다. 각 페이지의 배경·포스터·정보가 함께 이동한다. 하단 중앙에 활성 24×4dp pill / 비활성 4×4dp dot을 8dp 간격으로 표시하고 1개도 pill을 표시한다. 자동 재생은 없다. 터치는 기존 usePopupNavigation에 publicId를 전달한다.
+- HomeBanner는 backgroundColors를 시각적으로 사용하지 않는다. 응답 타입·API·백엔드 색상 데이터는 유지한다. 대신 동일한 coverImageUrl과 coverImageCacheKey를 expo-image 배경에 재사용하고 contentFit=cover, blurRadius=50, memory-disk 캐시를 적용한다. 배경을 사방 32dp 확장해 blur 가장자리의 빈 공간을 방지하고 배경 위에 검정 28% overlay를 적용한다. 이미지 누락/로드 실패 시 중립 어두운 배경을 유지한다.
+- SVG 하단 gradient는 포스터 위·텍스트 아래 레이어에 배치한다. 배너 높이 58%에서 투명, 70%에서 검정 15%, 82%에서 40%, 최하단에서 80%로 표시한다. foreground 포스터는 top Safe Area 아래 6dp에서 중앙 위쪽 정렬하며 최대 너비는 화면의 70%다. 가용 높이와 원본 비율에 맞춰 contain으로 표시하고 12dp 모서리와 약한 그림자를 유지한다.
+- 정보는 좌우 Safe Area + 16dp 여백과 하단 32dp 여백을 적용한다. 팝업명(최대 2줄, 20/700/28), 기간(14/400/20), MapPin + regionName(14/400/20)을 모두 #FFFFFF로 좌측 정렬한다. 날짜는 기존 displayDate를 재사용해 시작일 YY.MM.DD, 같은 연도의 종료일 MM.DD, 다른 연도의 종료일 YY.MM.DD로 표시한다. 누락된 날짜/지역은 빈 값으로 처리하고 지역이 없으면 아이콘도 숨긴다. MapPin은 기존 Lucide outline 아이콘 16dp다.
+- 대표 이미지는 응답의 coverImageUrl을 사용한다. 기존 expo-image 패턴처럼 source.cacheKey에 coverImageCacheKey를 전달하고 cachePolicy는 memory-disk다. 이미지 URL을 생성하거나 상세 API를 별도로 호출하지 않는다.
+- 메인 배너 hook은 다른 홈 섹션과 독립된 locale별 캐시와 loading/ready/error 상태를 사용한다. 기존 대표 이미지 freshness 상수(4분)로 목록을 갱신하고 갱신 실패 시 받은 배너를 유지한다. 최초 로딩은 기존 높이의 중립 영역, 0개/최초 오류는 배너만 숨긴다. 대표 이미지가 없거나 이미지 로드가 실패하면 Image를 렌더링하지 않는다. 임시 팝업·로컬 배너 이미지는 표시하지 않는다.
+
 ## Place 전체 기간 필터
 
 - `GET /api/popups`에 선택적 `visitPeriod=all|today|week|weekend`를 추가한다. 생략/`all`은 기존 query와 동일하며 `custom` 등 다른 값은 400이다. 기존 `openingFrom/openingTo`의 오픈일 조건과 국가·지역·카테고리·상태 조건은 그대로 유지한다.
@@ -194,3 +205,24 @@ Pull-to-refresh는 서버의 최신 item 전체 값으로 목록을 교체한다
 - 기존 tags / place_tags 및 tag ID를 재사용한다. 등록 POST / 수정 PUT의 tagIds 배열은 정확히 한 개의 유효한 ID가 필수이며, 0개·복수·null은 서버와 관리자 공용 폼에서 거부한다. 공개 응답 tags 배열과 필터 tagIds 계약은 유지한다.
 - 카테고리는 캐릭터/IP, 게임/디지털, 연예/크리에이터, 패션, 뷰티, F&B, 아트/전시, 문구/소품, 라이프, 패밀리/펫, 기타다. 이름 변경 SQL은 기존 ID와 관계를 보존한다.
 - 관리자 등록·수정은 popku-web 공용 radio 폼이다. 기존 복수 카테고리와 복수 AI 제안은 자동으로 첫 항목을 고르지 않고 관리자 선택을 요구한다. Place 복수 카테고리 필터와 Map 기존 단일 필터 UX는 유지한다.
+
+## 내가 쓴 방문 리뷰
+
+- `GET /api/users/me/reviews?cursor={reviewId}`: Bearer 인증 필수. JWT 사용자 ID로 DB에서 팝업 방문 리뷰만 필터링한다. 클라이언트 userId는 사용하지 않는다.
+- 기존 REVIEW item과 `{ items, nextCursor }`를 재사용한다. 팝업 `publicId/title`, 별점·내용·작성일, signed GET 이미지 URL을 포함한다. ID 내림차순, 페이지당 20개이며 마지막 페이지는 `nextCursor: null`이다. 잘못된 커서는 400, 인증 실패는 401이다.
+- RN `/profile/reviews`에서 목록·빈 화면·오류·초기/추가 로딩을 구분하고 커서 추가 조회를 지원한다. 기존 방문 리뷰 카드와 팝업 상세 이동 훅(`/places/[id]`)을 재사용한다.
+
+## 내가 쓴 게시글
+
+- `GET /api/users/me/posts?cursor={postId}`: Bearer 인증 필수. JWT `PopkuPrincipal.id`로 DB에서 본인이 작성한 QUESTION/FREE 게시글만 조회한다. 임의의 userId는 사용하지 않으며 방문 리뷰와 다른 카테고리는 제외한다. 기존 실제 삭제 정책을 그대로 적용하며 탈퇴한 사용자의 게시글은 제외한다.
+- 응답은 기존 커뮤니티 POST item을 포함한 `{ items, nextCursor }`다. 작성자·본문·작성일·signed 이미지 URL·댓글/좋아요/조회 수·liked를 반환하며 popup/rating/regionName은 null이다. 이미지와 좋아요는 페이지 단위로 일괄 조회한다.
+- ID DESC, 페이지당 20개, 다음 페이지는 `id < cursor` 조건으로 조회하며 마지막 페이지는 `nextCursor: null`이다. nextCursor는 게시글 ID 문자열이다. 잘못된 커서는 400, 비로그인 또는 유효하지 않은 JWT는 401이다.
+- RN `/profile/posts`는 방문 리뷰 화면의 Header/SafeArea와 스타일 및 기존 CommunityPostItem을 재사용하며 `/community/[id]`로 이동한다. 비로그인은 API 호출 없이 로그인 안내를 표시하고 자동으로 이동하지 않는다. 초기/추가 로딩·빈 목록·오류/재시도와 요청 취소·항목 중복 방지를 지원한다.
+
+## 계정 설정: 닉네임·비밀번호 변경
+
+- 기존 `PATCH /api/users/me/nickname`을 재사용한다. Bearer 인증, `{ nickname }` → `200 { id, email, nickname, profileImageKey, provider, role, createdAt, updatedAt }`. 회원가입과 같은 정규화·2~10자 문자/숫자/밑줄 규칙을 적용한다. 사용자 행을 잠그고, 현재 닉네임과 같으면 UPDATE하지 않는다. 다른 사용자와의 중복 및 DB UNIQUE 충돌은 409, 잘못된 형식은 400이다. 기존 `/api/users/check-nickname` 중복 확인도 재사용한다.
+- 새 `PATCH /api/users/me/password`: Bearer 인증, `{ currentPassword, newPassword, confirmPassword }` → `204 No Content`. JWT 본인 LOCAL 계정만 허용한다. 현재 비밀번호 불일치·확인값 불일치·기존 비밀번호 재사용·정책 위반은 400, 소셜 전용 계정은 403, 인증 실패는 401이다. 비밀번호는 회원가입과 같은 공백 없는 ASCII 8~72자 및 영문/숫자 포함 규칙과 기존 PasswordEncoder를 사용한다. 오류 응답은 `{ error: 고정된 오류 사유 }`이고 비밀번호 값은 응답·로그에 포함하지 않는다.
+- 비밀번호 변경과 모든 본인 Refresh Token 폐기는 같은 transaction에서 처리한다. 기존 발급/회전/탈퇴와 같은 사용자 행 우선 잠금을 사용한다. RN은 성공 시 요청 당시 generation의 인증 정보만 삭제하고 재로그인을 안내한다. 기존 JWT 즉시 폐기 기능은 없으므로 이미 발급된 Access Token은 만료까지 최대 30분 유효할 수 있다. 기존 로그인/로그아웃/탈퇴 정책은 유지한다.
+- RN 설정에서 `/profile/nickname`, `/profile/password`로 진입한다. 비밀번호 메뉴는 `provider === LOCAL`일 때만 표시하며 소셜 계정의 직접 진입도 안내만 표시한다. 회원가입 검증 함수는 `accountPolicy.ts`로 옮겨 공유하며 기존 가입 동작을 유지한다. 변경 화면은 기존 설정 Header/SafeArea와 디자인 토큰을 사용하고 키보드 회피·스크롤·중복 저장 방지·요청 취소를 지원한다. 비밀번호 draft는 화면 이탈·세션 변경·성공 시 지운다.
+- 닉네임 저장 응답을 generation 확인 후 기존 setAuthUser에 반영하여 마이페이지와 현재 닉네임을 갱신한다. 게시글·댓글·방문 리뷰의 작성자는 기존 users JOIN을 사용하므로 재조회 시 새 닉네임을 반환한다. 해당 API 구조는 변경하지 않는다.

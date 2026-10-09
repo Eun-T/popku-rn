@@ -1,6 +1,7 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { colors, radius, spacing, typography } from "../../theme/tokens";
+import type { ThemeColors } from '../../theme/themeColors';
 
 type FilterOption<T extends string> = {
   label: string;
@@ -11,12 +12,14 @@ type FilterChipsProps<T extends string> = {
   options: readonly FilterOption<T>[];
   value: T;
   onChange: (value: T) => void;
+  themeColors?: ThemeColors;
 };
 
 export default function FilterChips<T extends string>({
   options,
   value,
   onChange,
+  themeColors,
 }: FilterChipsProps<T>) {
   return (
     <View style={styles.filters}>
@@ -29,12 +32,16 @@ export default function FilterChips<T extends string>({
             accessibilityRole="button"
             accessibilityState={{ selected: isSelected }}
             onPress={() => onChange(option.value)}
-            style={[styles.filter, isSelected && styles.selectedFilter]}
+            style={[styles.filter, isSelected && styles.selectedFilter, themeColors && {
+              backgroundColor: isSelected ? themeColors.filterSelectedBg : themeColors.filterUnselectedBg,
+              borderColor: isSelected ? themeColors.filterSelectedBg : themeColors.border,
+            }]}
           >
             <Text
               style={[
                 styles.filterText,
                 isSelected && styles.selectedFilterText,
+                themeColors && { color: isSelected ? themeColors.filterSelectedText : themeColors.filterUnselectedText },
               ]}
             >
               {option.label}

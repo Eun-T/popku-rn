@@ -1,3 +1,5 @@
+import { getRegionDisplayName, getTagDisplayName } from '../../locales/filterLabels';
+import { useTranslation } from '../../hooks/useTranslation';
 import { ChevronDown, RotateCcw, X } from 'lucide-react-native';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
@@ -12,7 +14,7 @@ import type { AppliedPopupFilters, PopupRegionOption, PopupTagOption } from '../
 import { t } from '../../locales';
 import { colors, radius, spacing, typography } from '../../theme/tokens';
 
-type FilterGroup = 'countries' | 'quickFeatures' | 'regionIds' | 'tagIds' | 'status' | 'period';
+type FilterGroup = 'countries' | 'quickFeatures' | 'regionIds' | 'tagIds' | 'status' | 'period' | 'openingWeek';
 
 type AppliedFilter = {
   group: FilterGroup;
@@ -32,16 +34,19 @@ type AppliedFilterBarProps = {
 };
 
 export default function AppliedFilterBar({ filters, detailFilters, period, regions, tags, onRemove, onReset, onOpenDetails }: AppliedFilterBarProps) {
+  useTranslation();
   const chips: AppliedFilter[] = [
+    ...(detailFilters.openingFrom && detailFilters.openingTo
+      ? [{ group: 'openingWeek' as const, id: 'openingWeek', label: t('place.all.openingWeek') }] : []),
     ...quickFilters
       .filter((option) => option.group === 'countries'
         ? filters.countries.includes(option.id)
         : filters.quickFeatures.includes(option.id))
       .map(({ group, id, labelKey }) => ({ group, id, label: t(labelKey) })),
     ...detailFilters.regionIds
-      .map((id) => ({ group: 'regionIds' as const, id, label: regions.find((option) => option.id === id)?.name ?? String(id) })),
+      .map((id) => ({ group: 'regionIds' as const, id, label: getRegionDisplayName(regions.find((option) => option.id === id) ?? { id, name: String(id) }) })),
     ...detailFilters.tagIds
-      .map((id) => ({ group: 'tagIds' as const, id, label: tags.find((option) => option.id === id)?.name ?? String(id) })),
+      .map((id) => ({ group: 'tagIds' as const, id, label: getTagDisplayName(tags.find((option) => option.id === id) ?? { id, name: String(id) }) })),
     ...operationStatusFilters
       .filter((option) => ({ open: 'ONGOING', upcoming: 'UPCOMING', closed: 'ENDED' })[option.id] === detailFilters.status)
       .map(({ id, labelKey }) => ({ group: 'status' as const, id, label: t(labelKey) })),

@@ -4,14 +4,15 @@ const { test } = require('node:test');
 const ts = require('typescript');
 
 function load(file, mocks = {}) {
+  mocks = require('./helpers/uiDependencies.cjs').withUiDependencies(file, mocks);
   const module = { exports: {} };
   const code = ts.transpileModule(readFileSync(file, 'utf8'), { compilerOptions: {
     module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022,
   } }).outputText;
-  new Function('require', 'module', 'exports', code)(name => {
+  new Function('require', 'module', 'exports', 'requestAnimationFrame', code)(name => {
     if (!(name in mocks)) throw new Error(`Missing mock ${name} in ${file}`);
     return mocks[name];
-  }, module, module.exports);
+  }, module, module.exports, callback => callback());
   return module.exports;
 }
 const flush = () => new Promise(resolve => setImmediate(resolve));
@@ -29,6 +30,7 @@ function hooks() {
   const states = [], refs = [], callbacks = [], effects = [];
   let stateIndex = 0, refIndex = 0, callbackIndex = 0, effectIndex = 0, focus;
   const react = {
+    useSyncExternalStore: (_subscribe, snapshot) => snapshot(),
     useState(initial) { const index = stateIndex++; if (!(index in states)) states[index] = initial;
       return [states[index], value => { states[index] = typeof value === 'function' ? value(states[index]) : value; }]; },
     useRef(initial) { return refs[refIndex++] ??= { current: initial }; },
@@ -44,36 +46,74 @@ function hooks() {
     cleanup() { effects.forEach(effect => effect.cleanup?.()); } };
 }
 
-function setup() {
+function setup(loadCard = true) {
   const state = hooks(), listeners = new Set(), calls = [];
+  const tabListeners = new Set();
+  let focused = true;
+  const navigation = {
+    getState: () => ({ type: 'tab', routes: [{ key: 'community' }] }),
+    getParent: () => undefined,
+    isFocused: () => focused,
+    addListener(event, listener) {
+      assert.equal(event, 'tabPress');
+      tabListeners.add(listener);
+      return () => tabListeners.delete(listener);
+    },
+  };
+  const { useScrollToTop } = load('node_modules/expo-router/build/react-navigation/native/useScrollToTop.js', {
+    react: { ...state.react, use: () => navigation },
+    '../core': { NavigationContext: {}, useRoute: () => ({ key: 'community' }) },
+  });
   const appState = { currentState: 'active', addEventListener(_, fn) { listeners.add(fn); return { remove: () => listeners.delete(fn) }; } };
   const hook = load('src/hooks/useCommunityNow.ts', { react: state.react, 'react-native': { AppState: appState } });
   const native = Object.fromEntries(['ActivityIndicator', 'FlatList', 'Pressable', 'ScrollView', 'Text', 'View', 'Image'].map(name => [name, name]));
   native.StyleSheet = { create: value => value };
   let response = async () => ({ items: [post], nextCursor: 'old-cursor' });
   const jsx = (type, props, key) => ({ type, props, key });
-  const common = { 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': native,
+  const common = { react: { ...state.react, useSyncExternalStore: (_subscribe, snapshot) => snapshot() },
+    '../../lib/auth': { getAuthUser: () => null, subscribeAuthUser: () => () => {} },
+    'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': native,
     'lucide-react-native': Object.fromEntries(['Pencil', 'Settings', 'ChevronRight', 'Heart', 'MapPin', 'MessageCircle', 'Star', 'UserRound'].map(name => [name, name])),
-    '../../locales': { t: (key, params) => key === 'community.views' ? `조회 ${params.count}` : key }, '../../theme/communityColors': { communityColors: {} },
+    '../../locales': require('./helpers/uiDependencies.cjs').loadPure('src/locales/index.ts'), '../../theme/communityColors': { communityColors: {} },
     '../../theme/tokens': { radius: {}, spacing: {}, typography: {} }, '../../lib/communityTime': time };
-  const Card = load('src/components/community/CommunityPostItem.tsx', common).default;
+  const Card = loadCard ? load('src/components/community/CommunityPostItem.tsx', common).default : undefined;
   const Screen = load('src/screens/CommunityScreen.tsx', { ...common, react: state.react,
-    'expo-router': { useFocusEffect: fn => state.useFocusEffect(fn), useRouter: () => ({ push() {} }) },
+    'expo-router': { useFocusEffect: fn => state.useFocusEffect(fn), useRouter: () => ({ push() {} }), useScrollToTop },
     'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView', useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }) },
     '../components/community/CommunityPostItem': { default: 'CommunityPostItem' },
     '../components/navigation/FloatingTabBar': { FLOATING_TAB_BAR_BOTTOM_GAP: 0, FLOATING_TAB_BAR_HEIGHT: 0 },
     '../lib/community': { getCommunityFeed(category, sort, cursor, signal) { calls.push({ category, sort, cursor, signal }); return response(cursor); } },
     '../lib/communityFeedRefresh': { communityFeedRevision: () => 0, subscribeCommunityLikes: () => () => {}, subscribeCommunityCommentCounts: () => () => {}, subscribeCommunityPostChanges: () => () => {} },
-    '../lib/communityLikes': { changeCommunityLike: async () => {} }, '../lib/auth': { subscribeAuthSession: () => () => {} },
+    '../lib/communityLikes': { changeCommunityLike: async () => {} }, '../lib/auth': { getAuthUser: () => null, subscribeAuthUser: () => () => {}, subscribeAuthSession: () => () => {} },
     '../hooks/useCommunityNow': hook, '../lib/communityRefresh': wait,
     '../locales': { t: key => key }, '../theme/communityColors': { communityColors: {} },
-    '../theme/tokens': { radius: {}, spacing: {}, typography: {} },
+    '../theme/tokens': load('src/theme/tokens.ts'),
   }).default;
-  return { calls, state, Card, Screen, listeners,
+  return { calls, state, Card, Screen, listeners, tabListeners,
+    tabPress(isFocused) { focused = isFocused; tabListeners.forEach(fn => fn({ defaultPrevented: false })); },
     list: () => nodes(state.render(Screen)).find(node => node.type === 'FlatList'),
     respond(fn) { response = fn; },
     lifecycle(value) { appState.currentState = value; listeners.forEach(fn => fn(value)); } };
 }
+
+test('community reselect scrolls its existing list with animation without refetching and cleans up listener', async () => {
+  const env = setup(false);
+  try {
+    env.list(); await flush();
+    const list = env.list(), rows = list.props.data, calls = env.calls.length, scrolls = [];
+    list.props.ref.current = { scrollToOffset: options => scrolls.push(options) };
+    env.tabPress(false);
+    assert.deepEqual(scrolls, [], 'first entry from another tab preserves scroll');
+    env.tabPress(true);
+    assert.deepEqual(scrolls, [{ offset: 0, animated: true }]);
+    assert.equal(env.list().props.data, rows);
+    assert.equal(env.calls.length, calls);
+    assert.equal(env.tabListeners.size, 1);
+  } finally {
+    env.state.cleanup();
+    assert.equal(env.tabListeners.size, 0);
+  }
+});
 
 test('relative formatter calculates 0, 1, 2 minutes without changing createdAt and handles boundaries', () => {
   for (const minutes of [0, 1, 2]) assert.equal(time.formatCommunityTime(createdAt, initialTime + minutes * 60000), `${minutes}분 전`);
@@ -92,7 +132,7 @@ test('one screen clock updates all cards each minute, refreshes immediately and 
     const cardTime = () => {
       const list = env.list(); const element = list.props.renderItem({ item: list.props.data[0] });
       assert.equal(element.props.now, list.props.extraData);
-      return nodes(env.Card(element.props)).find(node => node.type === 'Text' && Array.isArray(node.props.children)).props.children[0];
+      return nodes(env.Card(element.props)).find(node => node.type === 'Text' && typeof node.props.children === 'string' && /^\d+(분|시간|일) 전$/.test(node.props.children)).props.children;
     };
     assert.equal(cardTime(), '0분 전');
     t.mock.timers.tick(60000); assert.equal(cardTime(), '1분 전');
@@ -127,8 +167,11 @@ test('refresh replaces same-ID server values and cursor; overlapping pagination 
     assert.deepEqual(env.list().props.data[0], fresh);
     const rendered = env.Card(env.list().props.renderItem({ item: env.list().props.data[0] }).props);
     const text = nodes(rendered).filter(node => node.type === 'Text').map(node => node.props.children);
-    assert.ok(text.includes('조회 30')); assert.ok(text.includes(10)); assert.ok(text.includes(20)); assert.ok(text.includes('new'));
-    assert.equal(nodes(rendered).find(node => node.props?.accessibilityLabel === '좋아요 취소').props.accessibilityState.selected, true);
+    assert.ok(text.includes('new'), 'fresh body must render');
+    assert.equal(text.some(value => typeof value === 'string' && value.startsWith('조회 ')), false, 'POST views UI is intentionally unsupported');
+    assert.equal(nodes(rendered).some(node => node.type === 'Heart'), false, 'POST likes UI is intentionally unsupported');
+    assert.equal(nodes(rendered).find(node => node.type === 'Image').props.source.uri, 'new.webp', 'fresh cover must render');
+    assert.equal(env.list().props.data[0].commentCount, 20, 'supported comment data is still refreshed');
     assert.deepEqual(env.calls.at(-1).category, 'ALL'); assert.equal(env.calls.at(-1).sort, 'LATEST'); assert.equal(env.calls.at(-1).cursor, null);
     assert.equal(env.list().props.refreshing, true);
     t.mock.timers.tick(1000); await flush();

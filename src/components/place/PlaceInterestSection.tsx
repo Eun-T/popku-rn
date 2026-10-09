@@ -1,4 +1,6 @@
+import { useTranslation } from '../../hooks/useTranslation';
 import { Image } from "expo-image";
+import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
 import {
   Pressable,
   StyleSheet,
@@ -8,7 +10,6 @@ import {
 } from "react-native";
 
 import { interestFilters, type InterestId } from "../../constants/placeFilters";
-import { t } from "../../locales";
 import { colors, radius, spacing, typography } from "../../theme/tokens";
 
 type InterestCard = {
@@ -42,6 +43,7 @@ const interestCards: readonly InterestCard[] = [
 export default function PlaceInterestSection({
   onPressCategory,
 }: PlaceInterestSectionProps) {
+  const { t } = useTranslation();
   return (
     <View style={styles.section}>
       <Text style={styles.heading}>{t("place.explore.interests")}</Text>
@@ -54,7 +56,7 @@ export default function PlaceInterestSection({
             (interest) => interest.id === card.id,
           );
           const label =
-            card.id === "game" ? "게임/디지털" : t(filter?.labelKey ?? card.id);
+            t(filter?.labelKey ?? card.id);
 
           return (
             <Pressable
@@ -70,7 +72,18 @@ export default function PlaceInterestSection({
                 cachePolicy="memory-disk"
                 style={styles.image}
               />
-              <View pointerEvents="none" style={styles.overlay} />
+              <View pointerEvents="none" style={styles.overlay}>
+                <Svg width="100%" height="100%">
+                  <Defs>
+                    <LinearGradient id="categoryShade" x1="0" y1="0.5" x2="1" y2="0.5">
+                      <Stop offset="0" stopColor="#000000" stopOpacity="0.25" />
+                      <Stop offset="0.5" stopColor="#000000" stopOpacity="0.35" />
+                      <Stop offset="1" stopColor="#000000" stopOpacity="0.60" />
+                    </LinearGradient>
+                  </Defs>
+                  <Rect width="100%" height="100%" fill="url(#categoryShade)" />
+                </Svg>
+              </View>
               <View style={styles.labelGroup}>
                 <Text numberOfLines={1} style={styles.label}>
                   {label}
@@ -113,7 +126,6 @@ const styles = StyleSheet.create({
   },
   overlay: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: "rgba(0, 0, 0, 0.3)",
   },
   labelGroup: {
     flexDirection: "row",

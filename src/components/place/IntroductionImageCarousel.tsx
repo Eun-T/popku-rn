@@ -1,3 +1,4 @@
+import { useTranslation } from '../../hooks/useTranslation';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, FlatList, Image, StyleSheet, Text, View } from 'react-native';
 
@@ -12,6 +13,7 @@ type ImageDimensions = { width: number; height: number };
 
 export default function IntroductionImageCarousel({ images, width }: IntroductionImageCarouselProps) {
   const [activeIndex, setActiveIndex] = useState(0);
+  const { t, resolvedLanguage } = useTranslation();
   const [dimensions, setDimensions] = useState<(ImageDimensions | null | undefined)[]>([]);
 
   useEffect(() => {
@@ -44,6 +46,7 @@ export default function IntroductionImageCarousel({ images, width }: Introductio
     <View style={[styles.viewport, { width, height: displayHeight }]}>
       <FlatList
         data={images}
+        extraData={resolvedLanguage}
         horizontal
         pagingEnabled
         snapToInterval={width}
@@ -79,7 +82,7 @@ export default function IntroductionImageCarousel({ images, width }: Introductio
                 />
               ) : (
                 <View style={[styles.placeholder, { width, height: imageHeight }]}>
-                  {size === null ? <Text style={styles.errorText}>이미지를 불러올 수 없습니다</Text> : <ActivityIndicator />}
+                  {size === null ? <Text style={styles.errorText}>{t('place.detail.imageFailed')}</Text> : <ActivityIndicator />}
                 </View>
               )}
             </View>

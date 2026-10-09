@@ -5,6 +5,7 @@ const ts = require('typescript');
 const flush = () => new Promise(resolve => setImmediate(resolve));
 const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
 function load(file, mocks, globals = {}) {
+  mocks = require('./helpers/uiDependencies.cjs').withUiDependencies(file, mocks);
   const module = { exports: {} };
   const js = ts.transpileModule(readFileSync(file, 'utf8'), { compilerOptions: {
     module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX,
@@ -67,6 +68,7 @@ test('auth: profile network failure preserves user, token and logged-in UI; cold
     native.StyleSheet = { create: s => s };
     const Profile = load('src/app/(tabs)/profile/index.tsx', {
       react: d.react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': native,
+      'expo-blur': { BlurTargetView: 'BlurTargetView', BlurView: 'BlurView' },
       'expo-router': { useFocusEffect: d.useFocusEffect, useRouter: () => ({}) },
       'lucide-react-native': {}, 'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView' },
       '../../../lib/auth': env.auth, '../../../theme/tokens': { colors: {}, radius: {}, spacing: {}, typography: {} },
@@ -75,7 +77,7 @@ test('auth: profile network failure preserves user, token and logged-in UI; cold
     assert.equal(env.storage.get('accessToken'), 'A');
     assert.deepEqual(env.auth.getAuthUser(), hydrated ? user : null);
     assert.ok(!nodes(tree).some(n => n.props?.children === '로그인'));
-    assert.ok(nodes(tree).some(n => n.props?.children === (hydrated ? '로그아웃' : '사용자 정보를 불러오지 못했습니다.')));
+    assert.ok(nodes(tree).some(n => n.props?.children === (hydrated ? user.nickname : '사용자 정보를 불러오지 못했습니다.')));
     d.dispose();
   }
 });
@@ -169,6 +171,7 @@ test('map: list empty UI distinguishes loading, error/retry and successful empty
     'react/jsx-runtime': { jsx, jsxs: jsx },
     'react-native': { FlatList: 'FlatList', Image: 'Image', Pressable: 'Pressable', Text: 'Text', View: 'View', StyleSheet: { create: s => s } },
     '../common/Tag': {}, '../../lib/popupStatus': {}, '../../theme/tokens': { colors: {}, radius: {} },
+    '../home/HomeNewPopupSection': { formatPopupPeriod: () => { throw new Error('Empty list must not format a popup'); } },
     '../../../assets/images/ranking-placeholder.png': 'placeholder',
   }).default;
   for (const status of ['loading', 'error', 'ready']) {

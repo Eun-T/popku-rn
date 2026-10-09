@@ -5,6 +5,7 @@ const { test } = require('node:test');
 const ts = require('typescript');
 
 function load(file, mocks, globals = {}) {
+  mocks = require('./helpers/uiDependencies.cjs').withI18nDependencies(file, mocks);
   const source = readFileSync(path.join(__dirname, '..', file), 'utf8');
   const code = ts.transpileModule(source, { compilerOptions: {
     module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022,
@@ -78,6 +79,7 @@ function screen({ token = 'saved-token', initialCount = 0, initialFavorited = fa
     './favoriteCache': { favoriteCacheGeneration: () => 1, favoriteSessionGeneration: () => 1, saveFavoriteCache: () => {}, updateFavoriteCache: () => {} },
   }, globals);
   const hooks = {
+    useCallback(fn) { cursor++; return fn; },
     useRef(value) { const i = cursor++; return (slots[i] ??= { current: value }); },
     useState(value) {
       const i = cursor++; if (!slots[i]) slots[i] = { value };
@@ -106,7 +108,7 @@ function screen({ token = 'saved-token', initialCount = 0, initialFavorited = fa
   const Detail = load('src/app/places/[id].tsx', {
     'react': hooks, 'react/jsx-runtime': { jsx, jsxs: jsx },
     'expo-clipboard': { setStringAsync: async () => {} },
-    'expo-router': { useLocalSearchParams: () => ({ id: 'popup-public-id' }),
+    'expo-router': { useFocusEffect: () => {}, useLocalSearchParams: () => ({ id: 'popup-public-id' }),
       useRouter: () => ({ push: (route) => navigation.push(route), back() { navigation.push('back'); } }) },
     'lucide-react-native': { ChevronLeft: 'ChevronLeft', Share2: 'Share2', Heart: 'Heart' }, 'react-native': native,
     'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView', useSafeAreaInsets: () => insets },
@@ -120,8 +122,9 @@ function screen({ token = 'saved-token', initialCount = 0, initialFavorited = fa
     '../../components/place/PlaceMapPreview': { default: 'MapPreview', isMapPreviewAvailable: false },
     '../../components/place/PopupReviews': { default: 'PopupReviews' },
     '../../lib/auth': auth, '../../lib/favorites': favorites, '../../lib/popups': popups,
+    '../../lib/reviews': { subscribeReviews: () => () => {} },
     '../../lib/popupStatus': { popupOperatingStatus: () => null },
-    '../../locales': { t: (key) => key, getLocale: () => 'ko' },
+    '../../locales': require('./helpers/uiDependencies.cjs').loadPure('src/locales/index.ts'),
     '../../lib/popupDetailContent': load('src/lib/popupDetailContent.ts', {}),
     '../../theme/tokens': load('src/theme/tokens.ts', {}),
     '../../../assets/images/ranking-placeholder.png': 1,
@@ -213,13 +216,15 @@ test('favorite digits use tabular advances without reserved width or extra group
 
 test('stats use server rating/count with one decimal, hide zero review count and preserve review navigation', async () => {
   for (const [averageRating, reviewCount, expectedRating, expectedReviews] of [
-    [undefined, undefined, '0.0', '후기'], [null, null, '0.0', '후기'],
-    [0, 0, '0.0', '후기'], [4, 1, '4.0', '후기 1개'], [14 / 3, 12, '4.7', '후기 12개'],
+    [undefined, undefined, '—', '후기'], [null, null, '—', '후기'],
+    [0, 0, '—', '후기'], [4, 1, '4.0', '후기 1개'], [14 / 3, 12, '4.7', '후기 12개'],
   ]) {
     const s = screen({ detail: { averageRating, reviewCount } }); await s.settle();
     const stats = s.nodes().find(node => node.props?.children?.includes?.(s.bodyHeart()));
     const [favorite, rating, reviews] = stats.props.children;
     assert.equal(rating.props.children[1].props.children, expectedRating);
+    assert.equal(rating.props.accessibilityLabel, reviewCount > 0
+      ? `평균 별점 ${expectedRating}점, 방문 리뷰로 이동` : '별점 없음, 방문 리뷰로 이동');
     assert.equal(reviews.props.children[1].props.children, expectedReviews);
     assert.equal(reviews.props.children[2].props.size, 16, 'review chevron is retained');
     assert.equal(favorite.props.children[1].props.style[1].minWidth, undefined);
@@ -291,8 +296,9 @@ test('floating favorite uses the actual community write button geometry, typogra
     }
     visit(ast);
     assert.ok(expression, `Community style ${name} exists`);
-    return new Function('spacing', 'radius', 'typography', 'communityColors', `return (${expression});`)(
-      tokens.spacing, tokens.radius, tokens.typography, { charcoal: '#364152', white: '#FFFFFF' });
+    return new Function('spacing', 'radius', 'typography', 'communityColors', 'colors', `return (${expression});`)(
+      tokens.spacing, tokens.radius, tokens.typography,
+      require('./helpers/uiDependencies.cjs').loadPure('src/theme/communityColors.ts').communityColors, tokens.colors);
   }
   const s = screen(); await s.settle();
   const { backgroundColor: favoriteColor, ...favoriteStyle } = s.heart().props.style[0];

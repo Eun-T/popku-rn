@@ -29,8 +29,10 @@ type LoginResponse = {
 };
 
 export type CurrentUser = {
+  id?: number;
   nickname: string;
   email: string;
+  provider?: string;
 };
 
 let authUser: CurrentUser | null = null;
@@ -60,6 +62,8 @@ export function getAuthUser(): CurrentUser | null {
   return authUser;
 }
 
+export function authSessionGeneration(): number { return authGeneration; }
+
 export function subscribeAuthUser(listener: () => void): () => void {
   authUserListeners.add(listener);
   return () => { authUserListeners.delete(listener); };
@@ -68,7 +72,7 @@ export function subscribeAuthUser(listener: () => void): () => void {
 export function setAuthUser(user: CurrentUser | null): void {
   const identityChanged = authUser?.email !== user?.email;
   const sessionChanged = identityChanged || publishedGeneration !== authGeneration;
-  const dataChanged = identityChanged || authUser?.nickname !== user?.nickname;
+  const dataChanged = identityChanged || authUser?.nickname !== user?.nickname || authUser?.provider !== user?.provider;
   if (identityChanged) { clearFavoriteCache(); clearCommunityLikes(); }
   publishedGeneration = authGeneration;
   if (!dataChanged && !sessionChanged) return;
@@ -136,6 +140,22 @@ export async function getCurrentUser(accessToken: string): Promise<CurrentUser> 
   return response.json();
 }
 
+/** Only 204 confirms withdrawal. The caller clears this session after success. */
+export async function withdrawAccount(): Promise<number> {
+  const { accessToken, generation } = await getAuthSession();
+  if (!accessToken) throw new CurrentUserError(401);
+  const response = await fetch(`${API_BASE_URL}/api/users/me`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (response.status !== 204) {
+    await logHttpFailure('withdrawal error response', response);
+    throw new Error('회원탈퇴에 실패했습니다. 다시 시도해주세요.');
+  }
+  // No JSON body, logout request, or local invalidation on a failed DELETE.
+  return generation;
+}
+
 export async function saveTokens(tokens: LoginResponse): Promise<void> {
   authGeneration += 1;
   clearFavoriteCache();
@@ -159,8 +179,11 @@ export async function getSavedAccessToken(): Promise<string | null> {
 }
 
 export async function logout(): Promise<void> {
+  const generation = authGeneration;
   try {
     const refreshToken = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
+    // A delayed read must not send a newer session's refresh token to logout.
+    if (generation !== authGeneration) return;
     if (refreshToken) {
       if (__DEV__) console.info('[AUTH] logout request', { refreshTokenPresent: true, deviceIdPresent: !!DEVICE_ID });
       const response = await fetch(`${API_BASE_URL}/api/auth/logout`, {
@@ -181,7 +204,7 @@ export async function logout(): Promise<void> {
     throw cause;
   } finally {
     try {
-      await clearTokens();
+      await clearTokens(generation);
     } finally {
       if (__DEV__) {
         const [accessToken, refreshToken] = await Promise.allSettled([

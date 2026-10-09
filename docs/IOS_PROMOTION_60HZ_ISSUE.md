@@ -361,3 +361,32 @@ if (@available(iOS 15.0, *)) {
 - 현재는 기능 개발을 계속하고, 향후 Expo/RN/iOS 등 native stack 업데이트 후 재검증한다.
 
 현재 증거만으로 native hint patch가 Place → Detail을 120Hz로 복구할지에 대한 판단: **UNKNOWN**.
+
+
+오 그럼 얘기가 꽤 달라진다. 우리가 처음에 생각했던 “Place에서 상세로 가면 앱 전체가 60Hz 상태가 된다”는 해석은 틀렸을 가능성이 높아.
+네 체감이 정확히 이거라면:
+Place 화면
+   ↓
+상세 진입 전환       ← 60fps처럼 보임 ❌
+   ↓
+상세 페이지 도착
+   ↓
+스크롤               ← 120Hz처럼 부드러움 ✅
+
+즉 ProMotion 자체가 죽은 게 아니라 navigation transition만 60fps로 동작하는 문제일 가능성이 커졌어.
+그리고 이게 중요한 이유가 있어. 우리가 Instruments에서 본 16.67ms도 전환 구간을 보고 있었다면 딱 설명돼. 전환이 끝난 뒤 스크롤 중 Built-In Display를 따로 측정하면 8.33ms로 올라갈 가능성이 있어. 반면 Map→상세는 전환 자체부터 8.33ms였던 거고.
+그러면 원인 범위가 확 줄어듦
+이제 우선순위는 이런 느낌이야:
+❌ Place API 호출
+❌ 이미지 로딩
+❌ 상세 페이지 자체
+❌ 전체 앱이 60Hz로 고정
+❌ ProMotion 설정 자체
+
+          ↓
+
+🔥 Root JS Stack의 transition animation
+🔥 RN Animated / CADisplayLink
+🔥 Map이 살아 있을 때 transition cadence가 달라지는 이유
+
+특히 예전에 확인했던 게 Root가 expo-router JS Stack이고 그 transition이 RN Animated native driver를 사용하며, 그 native animation 쪽 CADisplayLink에는 명시적인 120Hz preferred range가 없었다는 거였잖아. 이게 지금 관찰과 훨씬 잘 맞아.

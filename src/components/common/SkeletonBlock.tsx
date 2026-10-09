@@ -10,9 +10,10 @@ type SkeletonBlockProps = {
   height: DimensionValue;
   borderRadius?: number;
   style?: StyleProp<ViewStyle>;
+  backgroundColor?: string;
 };
 
-export default function SkeletonBlock({ width, height, borderRadius = 4, style }: SkeletonBlockProps) {
+export default function SkeletonBlock({ width, height, borderRadius = 4, style, backgroundColor }: SkeletonBlockProps) {
   useEffect(() => {
     mountedBlocks += 1;
     if (mountedBlocks === 1) {
@@ -36,7 +37,7 @@ export default function SkeletonBlock({ width, height, borderRadius = 4, style }
     <Animated.View
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
-      style={[styles.block, { width, height, borderRadius, opacity }, style]}
+      style={[styles.block, { width, height, borderRadius, opacity }, backgroundColor && { backgroundColor }, style]}
     />
   );
 }

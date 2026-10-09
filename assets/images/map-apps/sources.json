@@ -1,0 +1,26 @@
+[
+  {
+    "name": "google-maps",
+    "appId": 585027354,
+    "developer": "Google",
+    "appStore": "https://apps.apple.com/kr/app/google-maps/id585027354?uo=4",
+    "artwork": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/25/e8/45/25e845b4-1b18-27da-1b78-42170245a48a/maps_2025-0-0-1x_U007epad-0-0-0-1-0-0-sRGB-0-0-85-220.png/512x512bb.png",
+    "file": "google-maps.png"
+  },
+  {
+    "name": "naver-map",
+    "appId": 311867728,
+    "developer": "NAVER Corp.",
+    "appStore": "https://apps.apple.com/kr/app/%EB%84%A4%EC%9D%B4%EB%B2%84%EC%A7%80%EB%8F%84-%EC%9E%A5%EC%86%8C%EC%9D%98-%EB%B0%9C%EA%B2%AC%EA%B3%BC-%EC%98%88%EC%95%BD-%EB%82%B4%EB%B9%84%EA%B2%8C%EC%9D%B4%EC%85%98/id311867728?uo=4",
+    "artwork": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/4b/b5/49/4bb54975-708d-2385-af98-e819d50ee79c/AppIcon-0-0-1x_U007epad-0-1-0-sRGB-85-220.png/512x512bb.png",
+    "file": "naver-map.png"
+  },
+  {
+    "name": "apple-maps",
+    "appId": 915056765,
+    "developer": "Apple",
+    "appStore": "https://apps.apple.com/kr/app/apple-%EC%A7%80%EB%8F%84/id915056765?uo=4",
+    "artwork": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/ca/4d/f5/ca4df539-d60c-6a55-1423-49723876b1b0/mapsCalistoga-0-0-1x_U007epad-0-1-0-85-220.png/512x512bb.png",
+    "file": "apple-maps.png"
+  }
+]

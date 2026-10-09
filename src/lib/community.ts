@@ -181,7 +181,7 @@ export async function getCommunityFeed(
   cursor: string | null,
   signal: AbortSignal,
 ): Promise<CommunityFeedPage> {
-  const query = new URLSearchParams({ category, sort, limit: '20' });
+  const query = new URLSearchParams({ category, sort, limit: '14' });
   if (cursor) query.set('cursor', cursor);
   const { version, finish } = beginCommunityRead(signal);
   try {
