@@ -3,6 +3,17 @@ const { isReleaseEnvironment, resolveApiBaseUrl } = require('./src/constants/api
 
 // Preserve app.json; use the same flag for native launch appearance.
 module.exports = ({ config }) => {
+  const variant = process.env.APP_VARIANT?.trim() || 'production';
+  if (!['production', 'development'].includes(variant)) {
+    throw new Error('APP_VARIANT must be production or development.');
+  }
+  const isDev = variant === 'development';
+  // NODE_ENV=production is also used when building development clients.
+  if (isDev && (['production', 'preview'].includes(process.env.EAS_BUILD_PROFILE)
+    || ['production', 'preview'].includes(process.env.EXPO_PUBLIC_APP_ENV)
+    || process.env.CONFIGURATION === 'Release')) {
+    throw new Error('The development app variant cannot be used for production, preview or Release builds.');
+  }
   // Validate before native build work; do not expose the supplied URL in errors.
   if (isReleaseEnvironment(process.env)) resolveApiBaseUrl(process.env.EXPO_PUBLIC_API_URL, false);
   const iosClientId = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID?.trim();
@@ -10,6 +21,15 @@ module.exports = ({ config }) => {
     ...config,
     userInterfaceStyle: DARK_MODE_ENABLED ? 'automatic' : 'light',
   };
+  if (isDev) {
+    result.name = '팝카이브 DEV';
+    result.scheme = 'popkurn-dev';
+    result.ios = {
+      ...config.ios,
+      bundleIdentifier: 'com.popku.app.dev',
+      infoPlist: { ...config.ios?.infoPlist, CFBundleDisplayName: '팝카이브 DEV' },
+    };
+  }
   // No placeholder scheme while the user has not supplied an iOS OAuth ID.
   if (!iosClientId) return result;
   if (!/^\d+-[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$/.test(iosClientId)) {
@@ -17,11 +37,11 @@ module.exports = ({ config }) => {
   }
   // Reverse dot-separated components; preserve the complete numeric/string prefix.
   const scheme = iosClientId.split('.').reverse().join('.');
-  const existingSchemes = config.ios?.scheme;
+  const existingSchemes = result.ios?.scheme;
   const schemes = Array.isArray(existingSchemes) ? existingSchemes
     : existingSchemes ? [existingSchemes] : [];
   result.ios = {
-    ...config.ios,
+    ...result.ios,
     scheme: schemes.includes(scheme) ? schemes : [...schemes, scheme],
   };
   const googleSignInPlugin = 'react-native-nitro-google-signin';
