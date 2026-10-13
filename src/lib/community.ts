@@ -1,5 +1,7 @@
+import { assertModerationRead, captureModerationRead } from './moderationState';
 import { API_BASE_URL } from '../constants/api';
-import { clearTokens, getAuthSession } from './auth';
+import { authenticatedFetch, authSessionGeneration, getAuthSession } from './auth';
+import { throwIfRequestAborted, UPLOAD_TIMEOUT_MS, withRequestTimeout } from './requestTimeout';
 import { logCommunityError, readCommunityErrorBody } from './communityDiagnostics';
 import { beginCommunityRead, mergeCommunityLike, mergeCommunityCommentCount, mergeCommunityPostChange, type CommunityLikeState } from './communityFeedRefresh';
 
@@ -13,19 +15,28 @@ export class CommunityApiError extends Error {
     public readonly authGeneration?: number) { super(`Community request failed (${status})`); }
 }
 
-export async function communityRequest(path: string, method: 'GET' | 'POST' | 'PATCH' | 'DELETE', body?: unknown, signal?: AbortSignal): Promise<Response> {
+export async function communityRequest(path: string, method: 'GET' | 'POST' | 'PATCH' | 'DELETE', body?: unknown, signal?: AbortSignal,
+  onHttpError?: (error: CommunityApiError) => void, beforeSend?: (generation: number) => void): Promise<Response> {
   const stage = path.startsWith('posts/') ? 'POST_CHANGE' : path === 'posts' ? 'POST_CREATE' : method === 'DELETE' ? 'CLEANUP' : 'PRESIGN';
   const apiPath = `/api/community/${path}`;
   try {
     const { accessToken: token, generation } = await getAuthSession();
+    throwIfRequestAborted(signal);
     if (!token) throw new CommunityApiError(401, undefined, generation);
-    const response = await fetch(`${API_BASE_URL}${apiPath}`, {
+    beforeSend?.(generation);
+    const response = await authenticatedFetch(`${API_BASE_URL}${apiPath}`, {
       method,
       ...(signal ? { signal } : {}),
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    });
-    if (!response.ok) throw new CommunityApiError(response.status, await readCommunityErrorBody(response), generation);
+    }, { accessToken: token, generation });
+    throwIfRequestAborted(signal);
+    if (!response.ok) {
+      onHttpError?.(new CommunityApiError(response.status, undefined, generation));
+      const responseBody = await readCommunityErrorBody(response);
+      throwIfRequestAborted(signal);
+      throw new CommunityApiError(response.status, responseBody, generation);
+    }
     return response;
   } catch (error) {
     logCommunityError(stage, { method, path: apiPath,
@@ -72,11 +83,13 @@ export type CommunityPostDetail = {
 
 export async function getCommunityPost(id: number, signal: AbortSignal): Promise<CommunityPostDetail> {
   if (!Number.isSafeInteger(id) || id < 1) throw new CommunityApiError(404);
+  const read = captureModerationRead();
   const { version, finish } = beginCommunityRead(signal);
   try {
     const response = await publicCommunityRequest(`posts/${id}`, signal);
     if (!response.ok) throw new CommunityApiError(response.status, await readCommunityErrorBody(response));
     const post = parseCommunityPost(await response.json(), id);
+    assertModerationRead(read);
     if (signal.aborted) throw new Error('Community read aborted');
     const merged = mergeCommunityPostChange(mergeCommunityCommentCount(mergeCommunityLike(post, version), version), version);
     if (!merged) throw new CommunityApiError(404);
@@ -109,9 +122,13 @@ export async function getCommunityPostForEdit(id: number, signal: AbortSignal): 
   return post;
 }
 
-export async function updateCommunityPost(id: number, content: string, retainedImageIds: number[], uploadToken?: string): Promise<CommunityPostDetail> {
-  const response = await communityRequest(`posts/${id}`, 'PATCH', { content, retainedImageIds, ...(uploadToken ? { uploadToken } : {}) });
-  return parseCommunityPost(await response.json(), id);
+export async function updateCommunityPost(id: number, content: string, retainedImageIds: number[], uploadToken?: string, beforeSend?: (generation: number) => void): Promise<CommunityPostDetail> {
+  return withRequestTimeout('commit', UPLOAD_TIMEOUT_MS.commit, async (signal, onHttpError) => {
+    const response = await communityRequest(`posts/${id}`, 'PATCH', { content, retainedImageIds, ...(uploadToken ? { uploadToken } : {}) }, signal, onHttpError, beforeSend);
+    const body = await response.json();
+    throwIfRequestAborted(signal);
+    return parseCommunityPost(body, id);
+  });
 }
 
 export async function deleteCommunityPost(id: number): Promise<void> {
@@ -120,30 +137,21 @@ export async function deleteCommunityPost(id: number): Promise<void> {
 
 export async function publicCommunityRequest(path: string, signal: AbortSignal): Promise<Response> {
   const { accessToken: token, generation } = await getAuthSession();
-  const response = await fetch(`${API_BASE_URL}/api/community/${path}`, {
+  return authenticatedFetch(`${API_BASE_URL}/api/community/${path}`, {
     signal, ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
-  });
-  if (token && response.status === 401 && !signal.aborted) {
-    await clearTokens(generation);
-    // Another login may have won while the expired request was in flight.
-    const current = await getAuthSession();
-    return fetch(`${API_BASE_URL}/api/community/${path}`, {
-      signal, ...(current.accessToken ? { headers: { Authorization: `Bearer ${current.accessToken}` } } : {}),
-    });
-  }
-  return response;
+  }, { accessToken: token, generation }, true);
 }
 
-export async function toggleCommunityPostLike(id: number, token: string): Promise<CommunityLikeState> {
-  return toggleItemLike('posts', id, token);
+export async function toggleCommunityPostLike(id: number, token: string, generation?: number): Promise<CommunityLikeState> {
+  return toggleItemLike('posts', id, token, generation);
 }
 export async function toggleCommunityReviewLike(id: number, token: string, generation?: number): Promise<CommunityLikeState> {
   return toggleItemLike('reviews', id, token, generation);
 }
 async function toggleItemLike(domain: 'posts' | 'reviews', id: number, token: string, generation?: number): Promise<CommunityLikeState> {
-  const response = await fetch(`${API_BASE_URL}/api/community/${domain}/${id}/like`, {
+  const response = await authenticatedFetch(`${API_BASE_URL}/api/community/${domain}/${id}/like`, {
     method: 'POST', headers: { Authorization: `Bearer ${token}` },
-  });
+  }, { accessToken: token, generation: generation ?? authSessionGeneration() });
   if (!response.ok) throw new CommunityApiError(response.status, await readCommunityErrorBody(response), generation);
   const body: unknown = await response.json();
   if (!body || typeof body !== 'object' || !('liked' in body) || typeof body.liked !== 'boolean'
@@ -157,22 +165,26 @@ export async function createCommunityPost(
   category: CommunityPostCategory,
   content: string,
   uploadToken?: string,
+  beforeSend?: (generation: number) => void,
 ): Promise<CreatedCommunityPost> {
-  const response = await communityRequest('posts', 'POST', { category, content, ...(uploadToken ? { uploadToken } : {}) });
+  return withRequestTimeout('commit', UPLOAD_TIMEOUT_MS.commit, async (signal, onHttpError) => {
+    const response = await communityRequest('posts', 'POST', { category, content, ...(uploadToken ? { uploadToken } : {}) }, signal, onHttpError, beforeSend);
 
-  let responseBody: string | undefined;
-  try {
-    responseBody = await response.text();
-    const body: unknown = JSON.parse(responseBody);
-    if (!body || typeof body !== 'object' || !('id' in body)
-      || typeof body.id !== 'number' || !Number.isSafeInteger(body.id) || body.id < 1) {
-      throw new Error('Invalid community post response');
+    let responseBody: string | undefined;
+    try {
+      responseBody = await response.text();
+      throwIfRequestAborted(signal);
+      const body: unknown = JSON.parse(responseBody);
+      if (!body || typeof body !== 'object' || !('id' in body)
+        || typeof body.id !== 'number' || !Number.isSafeInteger(body.id) || body.id < 1) {
+        throw new Error('Invalid community post response');
+      }
+      return { id: body.id };
+    } catch (error) {
+      logCommunityError('POST_CREATE', { method: 'POST', path: '/api/community/posts', status: response.status, responseBody }, error);
+      throw error;
     }
-    return { id: body.id };
-  } catch (error) {
-    logCommunityError('POST_CREATE', { method: 'POST', path: '/api/community/posts', status: response.status, responseBody }, error);
-    throw error;
-  }
+  });
 }
 
 export async function getCommunityFeed(
@@ -183,6 +195,7 @@ export async function getCommunityFeed(
 ): Promise<CommunityFeedPage> {
   const query = new URLSearchParams({ category, sort, limit: '14' });
   if (cursor) query.set('cursor', cursor);
+  const read = captureModerationRead();
   const { version, finish } = beginCommunityRead(signal);
   try {
     const response = await publicCommunityRequest(`feed?${query.toString()}`, signal);
@@ -192,6 +205,7 @@ export async function getCommunityFeed(
       || !('nextCursor' in body) || (body.nextCursor !== null && typeof body.nextCursor !== 'string')) {
       throw new Error('Invalid community feed response');
     }
+    assertModerationRead(read);
     if (signal.aborted) throw new Error('Community read aborted');
     const page = body as CommunityFeedPage;
     return { ...page, items: page.items.flatMap((item) => {

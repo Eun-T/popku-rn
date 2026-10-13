@@ -3,7 +3,7 @@ const {readFileSync} = require('node:fs');
 const {test} = require('node:test');
 const ts = require('typescript');
 function load(file,mocks,globals={}) {
-  mocks = require('./helpers/uiDependencies.cjs').withUiDependencies(file, mocks);
+  mocks = require('./helpers/uiDependencies.cjs').withUiDependencies(file, mocks, globals.fetch);
   const code=ts.transpileModule(readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText;
   const module={exports:{}};
   new Function('require','module','exports',...Object.keys(globals),code)(name=>{assert.ok(name in mocks,name);return mocks[name];},module,module.exports,...Object.values(globals));
@@ -25,6 +25,7 @@ function harness() {
     useRef(initial){return slots[cursor++]??={current:initial};},
     useCallback(fn,deps){const i=cursor++;if(changed(slots[i],deps))slots[i]={value:fn,deps};return slots[i].value;},
     useEffect(fn,deps){const i=cursor++,old=slots[i];if(changed(old,deps)){slots[i]={deps,cleanup:old?.cleanup};pending.push(()=>{slots[i].cleanup?.();slots[i].cleanup=fn();});}},
+    useSyncExternalStore(subscribe,snapshot){react.useEffect(()=>subscribe(()=>{dirty=true;}),[subscribe]);return snapshot();},
   };
   return {react,render(Component){let tree,count=0;do{assert.ok(count++<25);cursor=0;dirty=false;tree=Component();pending.splice(0).forEach(fn=>fn());}while(dirty);return tree;},unmount(){slots.forEach(s=>s?.cleanup?.());}};
 }
@@ -39,7 +40,7 @@ function screen(loggedIn=true,canGoBack=true) {
     'react-native':{ActivityIndicator:'ActivityIndicator',FlatList:'FlatList',Pressable:'Pressable',Text:'Text',View:'View',StyleSheet:{create:s=>s}},
     'react-native-safe-area-context':{SafeAreaView:'SafeAreaView'},'../../components/community/CommunityPostItem':{__esModule:true,default:'Card'},
     '../../hooks/useCommunityNow':{useCommunityNow:()=>({now:123})},
-    '../../lib/auth':{clearTokens:async generation=>{assert.equal(generation,7);user=null;authListener();return true;},getAuthUser:()=>user,subscribeAuthSession:fn=>{authListener=fn;return()=>{};}},
+    '../../lib/auth':{clearTokens:async generation=>{assert.equal(generation,7);user=null;authListener();return true;},getAuthUser:()=>user,getAuthStatus:()=>user?'authenticated':'anonymous',subscribeAuthStatus:()=>()=>{},subscribeAuthSession:fn=>{authListener=fn;return()=>{};}},
     '../../lib/community':{CommunityApiError:ApiError},
     '../../lib/communityFeedRefresh':{subscribeCommunityPostChanges:fn=>{changeListener=fn;return()=>{};},subscribeCommunityCommentCounts:fn=>{countListener=fn;return()=>{};}},
     '../../lib/myPosts':{appendMyPosts:my.appendMyPosts,getMyPosts:(cursor,signal)=>new Promise((resolve,reject)=>pages.push({cursor,signal,resolve,reject}))},
@@ -104,7 +105,7 @@ test('existing post edits, deletes and comment events update only matching POST 
 test('in-flight responses preserve newer edits, deletion and comment counts',async()=>{
   const refresh=load('src/lib/communityFeedRefresh.ts',{});let resolve;
   const a=api('jwt',null,200,refresh,async()=>({ok:true,json:()=>new Promise(r=>resolve=r)}));
-  const pending=a.getMyPosts(null,new AbortController().signal);await Promise.resolve();await Promise.resolve();
+  const pending=a.getMyPosts(null,new AbortController().signal);await new Promise(resolve => setImmediate(resolve));
   refresh.publishCommunityPostChange(2,{content:'new',images:[],updatedAt:'now'},'POST');refresh.publishCommunityPostChange(1,null,'POST');
   refresh.publishCommunityCommentCount(2,3,'POST');resolve({items:[post(2),post(1)],nextCursor:null});
   const page=await pending;assert.equal(page.items.length,1);assert.equal(page.items[0].content,'new');assert.equal(page.items[0].commentCount,3);

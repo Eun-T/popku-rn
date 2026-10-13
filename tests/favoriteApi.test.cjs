@@ -5,6 +5,7 @@ const { test } = require('node:test');
 const ts = require('typescript');
 
 function load(file, mocks, globals = {}) {
+  mocks = require('./helpers/uiDependencies.cjs').withI18nDependencies(file, mocks, globals.fetch);
   const source = readFileSync(path.join(__dirname, '..', file), 'utf8');
   const code = ts.transpileModule(source, { compilerOptions: {
     module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022,

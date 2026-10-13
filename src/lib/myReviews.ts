@@ -1,8 +1,8 @@
 import { API_BASE_URL } from '../constants/api';
-import { getAuthSession } from './auth';
+import { authenticatedFetch, getAuthSession } from './auth';
 import { CommunityApiError, type CommunityFeedItem } from './community';
 import { readCommunityErrorBody } from './communityDiagnostics';
-import { beginCommunityRead, mergeCommunityPostChange } from './communityFeedRefresh';
+import { beginCommunityRead, mergeCommunityCommentCount, mergeCommunityLike, mergeCommunityPostChange } from './communityFeedRefresh';
 
 export type MyReview = CommunityFeedItem & {
   type: 'REVIEW'; category: 'REVIEW'; rating: number;
@@ -16,9 +16,9 @@ export async function getMyReviews(cursor: string | null, signal: AbortSignal): 
     const { accessToken, generation } = await getAuthSession();
     if (!accessToken) throw new CommunityApiError(401, undefined, generation);
     const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
-    const response = await fetch(`${API_BASE_URL}/api/users/me/reviews${query}`, {
+    const response = await authenticatedFetch(`${API_BASE_URL}/api/users/me/reviews${query}`, {
       signal, headers: { Authorization: `Bearer ${accessToken}` },
-    });
+    }, { accessToken, generation });
     if (!response.ok) throw new CommunityApiError(response.status, await readCommunityErrorBody(response), generation);
     const body = await response.json() as Partial<MyReviewPage> | null;
     if (signal.aborted) throw new Error('Review read aborted');
@@ -39,7 +39,7 @@ export async function getMyReviews(cursor: string | null, signal: AbortSignal): 
     const page = body as MyReviewPage;
     return { ...page, items: page.items.flatMap(item => {
       const merged = mergeCommunityPostChange(item, version);
-      return merged ? [merged] : [];
+      return merged ? [mergeCommunityCommentCount(mergeCommunityLike(merged, version), version)] : [];
     }) };
   } finally { finish(); }
 }

@@ -79,11 +79,15 @@ import {
 import {
   getPopupDetail,
   PopupDetailUnauthorizedError,
+  type PublicPopup,
   type PublicPopupDetail,
 } from "../../lib/popups";
+import { mergeExploreCovers, recoverExploreCover } from '../../lib/exploreCoverRecovery';
+import { mergeRecoveredCover } from '../../lib/placeCoverRecovery';
+import type { RecoverHomeCover } from '../../hooks/useHomeCoverImage';
 import { popupOperatingStatus } from "../../lib/popupStatus";
 import { subscribeReviews } from "../../lib/reviews";
-import { getApiLocale, type Locale } from "../../locales";
+import type { Locale } from "../../locales";
 import { colors, radius, spacing, typography } from "../../theme/tokens";
 
 type DetailRowProps = {
@@ -94,11 +98,12 @@ type DetailRowProps = {
   compact?: boolean;
 };
 type DetailTab = "info" | "reviews";
+type DetailWithCover = PublicPopupDetail & Pick<PublicPopup, 'coverImageFetchedAt'> & { contentImageFetchedAt?: number };
 type DetailState = {
   id: string | undefined;
   languageCode: Locale;
   status: "loading" | "ready" | "error";
-  detail: PublicPopupDetail | null;
+  detail: DetailWithCover | null;
 };
 
 type DetailTabsProps = {
@@ -176,6 +181,11 @@ function formatDate(value: string): string {
   return `${year}.${month}.${day}`;
 }
 
+// Recovery reads only cover identity; nullable detail dates are not filter inputs.
+function heroPopup(detail: DetailWithCover): PublicPopup {
+  return { ...detail, startDate: detail.startDate ?? '', endDate: detail.endDate ?? '' };
+}
+
 function formatDateTime(value: string): string {
   const [date, time] = value.split("T");
   return `${formatDate(date)} ${time?.slice(0, 5) ?? ""}`.trim();
@@ -185,7 +195,7 @@ export default function PlaceDetail() {
   const { t, resolvedLanguage } = useTranslation();
   const { id, tab } = useLocalSearchParams<{ id: string; tab?: string }>();
   const router = useRouter();
-  const languageCode = getApiLocale();
+  const languageCode = resolvedLanguage;
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
@@ -209,6 +219,31 @@ export default function PlaceDetail() {
     status: "loading",
     detail: null,
   });
+  const coverScope = JSON.stringify([id, languageCode, requestState.detail?.countryCode]);
+  const latestCoverScope = useRef(coverScope);
+  latestCoverScope.current = coverScope;
+  const coverMounted = useRef(false);
+  useEffect(() => {
+    coverMounted.current = true;
+    return () => { coverMounted.current = false; };
+  }, []);
+  const recoverHeroCover: RecoverHomeCover = async (original, manual) => {
+    const generation = favoriteGeneration.current;
+    if (!coverMounted.current || latestCoverScope.current !== coverScope
+      || (original.countryCode !== 'KR' && original.countryCode !== 'JP')) return null;
+    const result = await recoverExploreCover(original, original.countryCode, languageCode, manual);
+    if (!coverMounted.current || latestCoverScope.current !== coverScope
+      || favoriteGeneration.current !== generation || !result) return null;
+    setRequestState(current => {
+      if (current.id !== id || current.languageCode !== languageCode || !current.detail) return current;
+      const popup = heroPopup(current.detail);
+      const [cover] = mergeRecoveredCover([popup], original, result.detail, result.fetchedAt);
+      return cover === popup ? current : { ...current, detail: { ...current.detail,
+        coverImageUrl: cover.coverImageUrl, coverImageCacheKey: cover.coverImageCacheKey,
+        coverImageFetchedAt: cover.coverImageFetchedAt } };
+    });
+    return result;
+  };
 
   useEffect(() => {
     setSelectedTab(tab === "reviews" ? "reviews" : "info");
@@ -238,6 +273,7 @@ export default function PlaceDetail() {
     }
     function load() {
       const controller = new AbortController();
+      const fetchedAt = Date.now();
       const readVersion = version;
       request = controller;
       dirty = false;
@@ -255,11 +291,13 @@ export default function PlaceDetail() {
               controller.signal,
               token ?? undefined,
               languageCode,
+              generation,
             );
           } catch (error) {
             if (
               token &&
               error instanceof PopupDetailUnauthorizedError &&
+              !error.requestRetried &&
               !controller.signal.aborted
             ) {
               if ((await clearTokens(generation)) === false) throw error;
@@ -298,7 +336,11 @@ export default function PlaceDetail() {
                 favoriteCount: detail.favoriteCount,
                 isFavorited: detail.isFavorited,
               });
-            setRequestState({ id, languageCode, status: "ready", detail });
+            const [cover] = mergeExploreCovers([heroPopup(detail)], detail.countryCode, languageCode, fetchedAt);
+            setRequestState({ id, languageCode, status: "ready", detail: { ...detail,
+              contentImageFetchedAt: fetchedAt,
+              coverImageUrl: cover.coverImageUrl, coverImageCacheKey: cover.coverImageCacheKey,
+              coverImageFetchedAt: cover.coverImageFetchedAt } });
             summaryOnly = true;
           }
         })
@@ -503,7 +545,7 @@ export default function PlaceDetail() {
     scrollRef.current?.scrollTo({ y: width, animated: true });
   };
   const reviewCount = detail.reviewCount ?? 0;
-  const averageRating = reviewCount > 0 ? (detail.averageRating ?? 0).toFixed(1) : "—";
+  const averageRating = reviewCount > 0 ? (detail.averageRating ?? 0).toFixed(1) : "0.0";
   const openDirections = () => {
     setDirectionsVisible(true);
   };
@@ -535,8 +577,11 @@ export default function PlaceDetail() {
       >
         <View style={[styles.hero, { width, height: width }]}>
           <PopupHeroImage
-            key={detail.coverImageUrl ?? "placeholder"}
+            key={detail.publicId}
             uri={detail.coverImageUrl}
+            popup={heroPopup(detail)}
+            coverScope={coverScope}
+            onRecoverCover={recoverHeroCover}
             accessibilityLabel={detail.name}
             topInset={insets.top}
           />
@@ -576,7 +621,7 @@ export default function PlaceDetail() {
           <View style={styles.infoContent}>
             <View>
               <View style={styles.tags}>
-                {status && <Tag label={t(status === "운영 중" ? "place.filters.operationStatuses.open" : status === "오픈 예정" ? "place.filters.operationStatuses.upcoming" : "place.filters.operationStatuses.closed")} variant={statusVariant} />}
+                {status && <Tag label={t(status === "운영 중" ? "place.all.card.ongoing" : status === "오픈 예정" ? "place.filters.operationStatuses.upcoming" : "place.filters.operationStatuses.closed")} variant={statusVariant} />}
                 {detail.regionName && <Tag label={getPopupRegionDisplayName(detail, resolvedLanguage)} />}
                 {detail.tags.map((tag) => (
                   <Tag key={tag.id} label={getTagDisplayName(tag, resolvedLanguage)} />
@@ -819,6 +864,9 @@ export default function PlaceDetail() {
                       <IntroductionImageCarousel
                         key={detail.publicId}
                         images={detail.contentImageUrls}
+                        popupId={detail.publicId}
+                        countryCode={detail.countryCode}
+                        fetchedAt={detail.contentImageFetchedAt}
                         width={width - spacing.space16 * 2}
                       />
                     </View>

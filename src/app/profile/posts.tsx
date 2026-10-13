@@ -1,12 +1,12 @@
 import { communityColors } from '../../theme/communityColors';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { ChevronLeft, MessageSquare } from 'lucide-react-native';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import CommunityPostItem from '../../components/community/CommunityPostItem';
 import { useCommunityNow } from '../../hooks/useCommunityNow';
-import { clearTokens, getAuthUser, subscribeAuthSession } from '../../lib/auth';
+import { clearTokens, getAuthStatus, getAuthUser, refreshAuthUser, subscribeAuthSession, subscribeAuthStatus } from '../../lib/auth';
 import { CommunityApiError } from '../../lib/community';
 import { subscribeCommunityPostChanges, subscribeCommunityCommentCounts } from '../../lib/communityFeedRefresh';
 import { appendMyPosts, getMyPosts, type MyPost } from '../../lib/myPosts';
@@ -18,6 +18,7 @@ export default function MyPosts() {
   const { t } = useTranslation();
   const router = useRouter();
   const { now } = useCommunityNow();
+  const authStatus = useSyncExternalStore(subscribeAuthStatus, getAuthStatus, getAuthStatus);
   const [items, setItems] = useState<MyPost[]>([]);
   const [status, setStatus] = useState<'login' | 'loading' | 'ready' | 'error'>(getAuthUser() ? 'loading' : 'login');
   const [loadingMore, setLoadingMore] = useState(false);
@@ -108,7 +109,13 @@ export default function MyPosts() {
           opening.current = true;
           router.push({ pathname: '/community/[id]', params: { id: String(item.id) } });
         }} /></View>}
-      ListEmptyComponent={status === 'loading' ? <ActivityIndicator accessibilityLabel={t('profile.posts.loading')} style={styles.empty} color={colors.primary} />
+      ListEmptyComponent={status === 'loading' || (status === 'login' && authStatus === 'restoring') ? <ActivityIndicator accessibilityLabel={t('profile.posts.loading')} style={styles.empty} color={colors.primary} />
+        : status === 'login' && authStatus === 'error' ? <View style={styles.empty}>
+          <Text style={styles.emptyTitle}>{t('profile.userLoadFailed')}</Text>
+          <Pressable accessibilityRole="button" onPress={() => { void refreshAuthUser().catch(() => {}); }}>
+            <Text style={styles.emptyDescription}>{t('profile.retry')}</Text>
+          </Pressable>
+        </View>
         : status === 'login' ? <View style={styles.empty}>
           <Text style={styles.emptyTitle}>{t('profile.posts.loginTitle')}</Text>
           <Text style={styles.emptyDescription}>{t('profile.posts.loginDescription')}</Text>

@@ -1,3 +1,6 @@
+import ModerationActions from '../../components/community/ModerationActions';
+import { useModerationRevision } from '../../hooks/useModerationRevision';
+import { isLocallyBlocked } from '../../lib/moderationState';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import {
@@ -45,6 +48,7 @@ import { colors, radius, spacing, typography } from "../../theme/tokens";
 
 export default function CommunityPostDetailScreen() {
   const { t } = useTranslation();
+  const moderation = useModerationRevision();
   const translation = useRef(t);
   useEffect(() => { translation.current = t; }, [t]);
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -225,7 +229,7 @@ export default function CommunityPostDetailScreen() {
         if (!request.signal.aborted) setLoading(false);
       });
     return () => request.abort();
-  }, [id, retry]);
+  }, [id, retry, moderation]);
 
   return (
     <SafeAreaView edges={["top", "bottom"]} style={styles.container}>
@@ -259,9 +263,7 @@ export default function CommunityPostDetailScreen() {
             )}
           </Pressable>
         ) : (
-          <View style={styles.headerAction}>
-            <MoreHorizontal size={24} color={communityColors.text} />
-          </View>
+          <View style={styles.headerAction}>{post && !isLocallyBlocked(post.author.id) && <ModerationActions targetType="POST" targetId={post.id} authorId={post.author.id} iconSize={24} />}</View>
         )}
       </View>
       {loading ? (
@@ -286,7 +288,7 @@ export default function CommunityPostDetailScreen() {
             </Pressable>
           ) : null}
         </View>
-      ) : post ? (
+      ) : post && !isLocallyBlocked(post.author.id) ? (
         <CommunityComments
           key={post.id}
           postId={post.id}

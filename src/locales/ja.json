@@ -19,6 +19,8 @@
     "favoriteLoadFailed": "お気に入りを読み込めませんでした。再試行",
     "more": "もっと見る",
     "card": {
+      "retry": "再試行",
+      "retryImage": "{title}の画像を再読み込み",
       "addFavorite": "{title}をお気に入りに追加",
       "removeFavorite": "{title}のお気に入りを解除"
     }
@@ -124,6 +126,12 @@
         "popular": ""
       },
       "period": {
+        "any": "全て",
+        "sevenDays": "1週間",
+        "start": "開始日",
+        "end": "終了日",
+        "invalidDate": "有効な開始日と終了日を両方入力してください。",
+        "invalidRange": "開始日は終了日より後にできません。",
         "all": "全期間",
         "today": "今日",
         "week": "今週",
@@ -306,6 +314,7 @@
     "imageError": {
       "permission": "写真へのアクセスが必要です。設定で写真へのアクセスを許可してください。",
       "limit": "画像は最大5枚まで添付できます。",
+      "size": "変換後の画像は1バイト以上、5MiB（5,242,880バイト）以下にしてください。別の写真を選んでください。",
       "conversion": "画像を準備できませんでした。別の写真を選ぶか、もう一度お試しください。"
     },
     "views": "閲覧 {count}",
@@ -423,6 +432,14 @@
     "service": "サービス",
     "notices": "お知らせ",
     "inquiries": "お問い合わせ",
+    "emailInquiry": "メール相談",
+    "emailSupport": {
+      "openFailed": "メールアプリを開けませんでした。メールアドレスをコピーするか、以下のアドレスに直接お問い合わせください。\n{email}",
+      "copy": "メールアドレスをコピー",
+      "cancel": "キャンセル",
+      "copied": "メールアドレスをコピーしました。",
+      "copyFailed": "メールアドレスをコピーできませんでした。以下のアドレスに直接お問い合わせください。"
+    },
     "policies": "規約・ポリシー",
     "retry": "再試行",
     "posts": {
@@ -489,8 +506,15 @@
       "googleSettings": "Googleログインの設定を確認してください。",
       "googleToken": "Googleの認証情報を取得できませんでした。もう一度お試しください。",
       "googleFailed": "Googleでログインできませんでした。もう一度お試しください。",
-      "google": "Googleで続行",
+      "appleFailed": "Appleでログインできませんでした。もう一度お試しください。",
+      "appleUnavailable": "この端末ではAppleでのログインを利用できません。",
+      "appleToken": "Appleの認証情報を取得できませんでした。もう一度お試しください。",
+      "appleInvalid": "Appleの認証が無効か、有効期限が切れました。もう一度ログインしてください。",
+      "appleEmailRequired": "Appleで確認済みのメールアドレスを取得できませんでした。メールの共有を確認して、もう一度お試しください。",
+      "google": "Googleで続ける",
+      "apple": "Appleで続ける",
       "noAccount": "アカウントをお持ちでないですか？",
+      "or": "または",
       "invalid": "メールアドレスまたはパスワードを確認してください。",
       "tokenMissing": "ログインの応答にトークンがありません。"
     },
@@ -532,6 +556,8 @@
       "joinUnavailable": "新規登録できませんでした。しばらくしてからもう一度お試しください。",
       "joinFailed": "新規登録できませんでした。もう一度お試しください。",
       "googleExpired": "Googleでの登録の有効期限が切れました。もう一度ログインしてください。",
+      "appleExpired": "Appleでの登録の有効期限が切れました。もう一度ログインしてください。",
+      "appleFailed": "Appleでの新規登録を完了できませんでした。もう一度お試しください。",
       "googleInput": "ニックネームと必須の規約への同意を確認してください。",
       "googleFailed": "Googleでの新規登録を完了できませんでした。もう一度お試しください。",
       "verifyAgain": "メール認証をやり直してください。",
@@ -555,6 +581,7 @@
       "checking": "確認中…",
       "consentPrompt": "規約に同意してください",
       "allConsent": "すべてに同意",
+      "ageConfirmation": "[必須] 14歳以上です",
       "terms": "[必須] サービス利用規約",
       "privacy": "[必須] プライバシーポリシー",
       "marketing": "[任意] マーケティング情報の受信に同意",
@@ -640,5 +667,36 @@
       "privacy": "プライバシーポリシー",
       "location": "位置情報サービス利用規約"
     }
+  },
+  "moderation": {
+    "report": "通報する",
+    "block": "ユーザーをブロック",
+    "menu": "通報・ブロックメニュー",
+    "reasons": {
+      "SPAM": "スパム・広告",
+      "ABUSE": "暴言・誹謗中傷・嫌がらせ",
+      "SEXUAL": "性的・不適切なコンテンツ",
+      "PRIVACY": "個人情報の公開",
+      "OTHER": "その他"
+    },
+    "detail": "詳細（任意・200文字まで）",
+    "submit": "通報を送信",
+    "reportSuccess": "通報を受け付けました。",
+    "reportDuplicate": "すでに通報したコンテンツです。",
+    "blockConfirm": "このユーザーをブロックしますか？投稿とレビューは非表示になり、コメントは伏せられます。",
+    "blockSuccess": "ユーザーをブロックしました。",
+    "blockDuplicate": "すでにブロックしたユーザーです。",
+    "blockedComment": "ブロックしたユーザーのコメントです。",
+    "manageBlocks": "ブロックしたユーザーの管理",
+    "unblock": "ブロック解除",
+    "unblockUser": "{nickname}のブロックを解除",
+    "unblockConfirm": "{nickname}さんのブロックを解除しますか？",
+    "unblockSuccess": "ブロックを解除しました。",
+    "emptyBlocks": "ブロックしたユーザーはいません。",
+    "failed": "処理できませんでした。しばらくしてから再度お試しください。",
+    "targetMissing": "削除された、または利用できないコンテンツです。",
+    "loadFailed": "ブロック一覧を取得できませんでした。",
+    "loadMore": "もっと見る",
+    "loginRequired": "ログインしてご利用ください。"
   }
 }

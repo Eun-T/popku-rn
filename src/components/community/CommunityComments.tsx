@@ -1,3 +1,5 @@
+import { useModerationRevision } from '../../hooks/useModerationRevision';
+import { isLocallyBlocked } from '../../lib/moderationState';
 import { MoreHorizontal, X } from "lucide-react-native";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
@@ -39,6 +41,7 @@ import { useTranslation } from '../../hooks/useTranslation';
 import { communityColors } from "../../theme/communityColors";
 import { colors, spacing, typography } from "../../theme/tokens";
 import CommunityAuthor from "./CommunityAuthor";
+import ModerationActions from './ModerationActions';
 import CommunityPostMenu from "./CommunityPostMenu";
 
 type Props = (
@@ -56,6 +59,7 @@ type Props = (
 
 export default function CommunityComments(props: Props) {
   const { t } = useTranslation();
+  const moderation = useModerationRevision();
   const translation = useRef(t);
   useEffect(() => { translation.current = t; }, [t]);
   const {
@@ -128,6 +132,8 @@ export default function CommunityComments(props: Props) {
       .then((page) => {
         if (current !== generation.current || request.signal.aborted) return;
         setItems(page.items);
+        setTarget(previous => previous && page.items.some(item => item.isBlocked
+          && (item.id === previous.commentId || item.author.id === previous.replyToUserId)) ? null : previous);
         publishCommunityCommentCount(postId, page.commentCount, targetType);
       })
       .catch(() => {
@@ -142,10 +148,17 @@ export default function CommunityComments(props: Props) {
       request.abort();
       generation.current += 1;
     };
-  }, [postId, targetType, retry]);
+  }, [postId, targetType, retry, moderation]);
+
+  useEffect(() => {
+    setTarget(previous => previous && isLocallyBlocked(previous.replyToUserId) ? null : previous);
+    setMenuComment(null); menuBusy.current = false; replySelection.current += 1;
+    // A pre-refresh mutation retains its ref lock, but must not latch the new UI.
+    setSending(false); setDeleting(false);
+  }, [moderation]);
 
   const selectReply = async (item: CommunityComment) => {
-    if (mutationDisabled || mutationDisabled || busy.current) return;
+    if (item.isBlocked || isLocallyBlocked(item.author.id) || mutationDisabled || busy.current) return;
     const current = generation.current;
     const selection = ++replySelection.current;
     try {
@@ -189,9 +202,9 @@ export default function CommunityComments(props: Props) {
     const session = communityLikeSession();
     let authGeneration: number | undefined;
     try {
-      const auth = targetType === "REVIEW" ? await getAuthSession() : undefined;
-      authGeneration = auth?.generation;
-      const token = auth ? auth.accessToken : await getSavedAccessToken();
+      const auth = await getAuthSession();
+      authGeneration = auth.generation;
+      const token = auth.accessToken;
       if (!token) {
         onLogin();
         return;
@@ -217,12 +230,7 @@ export default function CommunityComments(props: Props) {
       if (current !== generation.current || session !== communityLikeSession())
         return;
       if (error instanceof CommunityApiError && error.status === 401) {
-        if (targetType === "REVIEW") {
-          if (await clearTokens(authGeneration).catch(() => false)) onLogin();
-        } else {
-          await clearTokens().catch(() => {});
-          onLogin();
-        }
+        if (await clearTokens(authGeneration).catch(() => false)) onLogin();
       } else
         setWriteError("community.comments.createFailed");
     } finally {
@@ -240,9 +248,9 @@ export default function CommunityComments(props: Props) {
     const session = communityLikeSession();
     let authGeneration: number | undefined;
     try {
-      const auth = targetType === "REVIEW" ? await getAuthSession() : undefined;
-      authGeneration = auth?.generation;
-      const token = auth ? auth.accessToken : await getSavedAccessToken();
+      const auth = await getAuthSession();
+      authGeneration = auth.generation;
+      const token = auth.accessToken;
       if (!token) {
         onLogin();
         return;
@@ -283,12 +291,7 @@ export default function CommunityComments(props: Props) {
       if (current !== generation.current || session !== communityLikeSession())
         return;
       if (error instanceof CommunityApiError && error.status === 401) {
-        if (targetType === "REVIEW") {
-          if (await clearTokens(authGeneration).catch(() => false)) onLogin();
-        } else {
-          await clearTokens().catch(() => {});
-          onLogin();
-        }
+        if (await clearTokens(authGeneration).catch(() => false)) onLogin();
       } else
         Alert.alert(translation.current("community.comments.deleteFailed"), translation.current("place.detail.tryLater"));
     } finally {
@@ -372,6 +375,7 @@ export default function CommunityComments(props: Props) {
                   item.parentCommentId !== null && styles.reply,
                 ]}
               >
+                {item.isBlocked || isLocallyBlocked(item.author.id) ? <Text style={styles.meta}>{t("moderation.blockedComment")}</Text> : <>
                 {compactDisplay ? (
                   <Text style={styles.compactNickname} numberOfLines={1}>
                     {item.author.nickname}
@@ -387,7 +391,7 @@ export default function CommunityComments(props: Props) {
                 <Text
                   style={[styles.body, compactDisplay && styles.withoutAvatar]}
                 >
-                  {item.replyToUser && (
+                  {item.replyToUser && !isLocallyBlocked(item.replyToUser.id) && (
                     <Text
                       style={[
                         styles.mention,
@@ -432,6 +436,8 @@ export default function CommunityComments(props: Props) {
                       {t(compactDisplay ? "community.comments.writeReply" : "community.comments.reply")}
                     </Text>
                   </Pressable>
+                  {canWrite && !item.isOwner && <ModerationActions targetType="COMMENT" targetId={item.id} authorId={item.author.id}
+                    disabled={mutationDisabled || sending || deleting} iconSize={18} style={styles.more} />}
                   {canWrite && item.isOwner && (
                     <Pressable
                       accessibilityRole="button"
@@ -457,6 +463,7 @@ export default function CommunityComments(props: Props) {
                     </Pressable>
                   )}
                 </View>
+                </>}
               </View>
             ))
           )}

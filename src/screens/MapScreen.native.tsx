@@ -1,16 +1,20 @@
-import { useTranslation } from '../hooks/useTranslation';
-import { getTagDisplayName } from '../locales/filterLabels';
-import { useMapPopups } from '../hooks/useMapPopups';
-import { usePopupNavigation } from '../hooks/usePopupNavigation';
 import { MaterialIcons } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import { uuid } from "expo-modules-core";
-import { useLocalSearchParams, useRouter } from "expo-router";
-import { ArrowLeft, LocateFixed, Search, X } from "lucide-react-native";
-import { useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { ArrowLeft, LocateFixed, Search, Star, X } from "lucide-react-native";
 import {
-  Animated,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentProps,
+  type ComponentRef,
+} from "react";
+import {
   Alert,
+  Animated,
   Dimensions,
   Easing,
   Keyboard,
@@ -20,8 +24,8 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  View,
   useWindowDimensions,
+  View,
 } from "react-native";
 import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
 import Reanimated, {
@@ -34,16 +38,51 @@ import Reanimated, {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Circle, Path } from "react-native-svg";
 import Supercluster from "supercluster";
+import { useMapPopups } from "../hooks/useMapPopups";
+import { usePopupNavigation } from "../hooks/usePopupNavigation";
+import { useTranslation } from "../hooks/useTranslation";
+import { getTagDisplayName } from "../locales/filterLabels";
 
-import { searchPopups, type PopupMapMarker, type PopupSearchResult } from "../lib/popups";
-import { autocompletePlaces, resolvePlace, type PlaceAttribution, type PlaceSuggestion } from "../lib/placeSearch";
-import { isPlaceCameraComplete, placeCameraRegion, type SearchRegion } from "../lib/mapPlaceCamera";
-import { expandedMarkerPopups, hasValidCoordinates, type MapBounds } from "../lib/mapMarkerBounds";
-import { getApiLocale } from "../locales";
 import MapPopupListSheet from "../components/map/MapPopupListSheet";
 import MapPopupPreviewCard from "../components/map/MapPopupPreviewCard";
-import MapSearchOverlay, { GooglePlaceAttribution, type PlaceSearchState, type PopupSearchState } from "../components/map/MapSearchOverlay";
+import MapSearchOverlay, {
+  GooglePlaceAttribution,
+  type PlaceSearchState,
+  type PopupSearchState,
+} from "../components/map/MapSearchOverlay";
+import {
+  expandedMarkerPopups,
+  hasValidCoordinates,
+  type MapBounds,
+} from "../lib/mapMarkerBounds";
+import {
+  isPlaceCameraComplete,
+  placeCameraRegion,
+  type SearchRegion,
+} from "../lib/mapPlaceCamera";
+import {
+  autocompletePlaces,
+  GOOGLE_PLACES_SEARCH_ENABLED,
+  resolvePlace,
+  type PlaceAttribution,
+  type PlaceSuggestion,
+} from "../lib/placeSearch";
+import {
+  searchPopups,
+  type PopupMapMarker,
+  type PopupSearchResult,
+} from "../lib/popups";
+import { getApiLocale, type Locale } from "../locales";
 import { colors, typography } from "../theme/tokens";
+
+// Temporary A/B test: set to false to restore the existing custom popup markers.
+const USE_BASIC_MARKERS_FOR_PERF_TEST = false;
+// Temporary A/B test: true disables each shadow; false restores its original values.
+const DISABLE_MARKER_VIEW_SHADOWS_FOR_PERF_TEST = true;
+const DISABLE_MARKER_TEXT_SHADOWS_FOR_PERF_TEST = true;
+// Independent of clustering: retain the previous visibility between thresholds.
+const MARKER_LABEL_SHOW_LATITUDE_DELTA = 0.015;
+const MARKER_LABEL_HIDE_LATITUDE_DELTA = 0.018;
 
 const initialRegion = {
   latitude: 37.5445,
@@ -52,7 +91,7 @@ const initialRegion = {
   longitudeDelta: 0.025,
 };
 
-const CLUSTERING_LATITUDE_DELTA = 0.20;
+const CLUSTERING_LATITUDE_DELTA = 0.2;
 const CLUSTER_EXTENT = 512;
 // Keep the anchor at y=40 so the title stays fixed in both marker states.
 const MARKER_ANCHOR_Y = 40;
@@ -60,15 +99,23 @@ const MARKER_ANCHOR_Y = 40;
 type PopupClusterProperties = { popupId: string };
 type MapMarkerItem =
   | { type: "popup"; popup: PopupMapMarker }
-  | { type: "cluster"; id: number; count: number; latitude: number; longitude: number };
+  | {
+      type: "cluster";
+      id: number;
+      count: number;
+      latitude: number;
+      longitude: number;
+    };
 
-type PendingSearchAction = {
-  kind: "popup";
-  id: string;
-  latitude: number;
-  longitude: number;
-  moveComplete: boolean;
-} | { kind: "place"; region: SearchRegion; moveComplete: boolean };
+type PendingSearchAction =
+  | {
+      kind: "popup";
+      id: string;
+      latitude: number;
+      longitude: number;
+      moveComplete: boolean;
+    }
+  | { kind: "place"; region: SearchRegion; moveComplete: boolean };
 
 function boundsForRegion(region: typeof initialRegion): MapBounds {
   return {
@@ -103,12 +150,20 @@ type MarkerTag = Exclude<(typeof tagFilters)[number], "전체">;
 
 // Display only: preserve existing filter state and marker category strings.
 const tagFilterIds: Record<MarkerTag, number> = {
-  "캐릭터/IP": 1, "게임/디지털": 2, "연예/크리에이터": 3,
-  "패션": 4, "뷰티": 5, "F&B": 6, "아트/전시": 7,
-  "문구/소품": 8, "라이프": 9, "패밀리/펫": 10, "기타": 11,
+  "캐릭터/IP": 1,
+  "게임/디지털": 2,
+  "연예/크리에이터": 3,
+  패션: 4,
+  뷰티: 5,
+  "F&B": 6,
+  "아트/전시": 7,
+  "문구/소품": 8,
+  라이프: 9,
+  "패밀리/펫": 10,
+  기타: 11,
 };
 
-type MarkerIconName = ComponentProps<typeof MaterialIcons>["name"];
+type MarkerIconName = ComponentProps<typeof MaterialIcons>["name"] | "lucide-star";
 
 const markerStyles: Record<
   MarkerTag,
@@ -116,7 +171,7 @@ const markerStyles: Record<
 > = {
   "캐릭터/IP": { backgroundColor: "#8B5CF6", iconName: "auto-awesome" },
   "게임/디지털": { backgroundColor: "#2563EB", iconName: "sports-esports" },
-  "연예/크리에이터": { backgroundColor: "#DB2777", iconName: "mic" },
+  "연예/크리에이터": { backgroundColor: "#DB2777", iconName: "lucide-star" },
   패션: { backgroundColor: "#374151", iconName: "checkroom" },
   뷰티: { backgroundColor: "#FB7185", iconName: "spa" },
   "F&B": { backgroundColor: "#F97316", iconName: "restaurant" },
@@ -166,14 +221,18 @@ export default function MapScreen() {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const mapRef = useRef<MapView>(null);
+  const markerRefs = useRef(new Map<string, ComponentRef<typeof Marker>>());
   const mapReady = useRef(false);
   const searchInputRef = useRef<TextInput>(null);
   const searchRequestVersion = useRef(0);
+  const cameraRequestVersion = useRef(0);
+  const cameraScreenActive = useRef(false);
   const pendingSearchAction = useRef<PendingSearchAction | null>(null);
   const handledPopupId = useRef<string | null>(null);
   const pendingDetailPopupId = useRef<string | null>(null);
   const searchSessionToken = useRef<string | null>(null);
   const placeResolveController = useRef<AbortController | null>(null);
+  const placeResolveId = useRef<string | null>(null);
   const mapMoving = useRef(false);
   const locatingRef = useRef(false);
   const regionChangeVersion = useRef(0);
@@ -181,89 +240,165 @@ export default function MapScreen() {
   const [showsUserLocation, setShowsUserLocation] = useState(false);
   const [selectedTag, setSelectedTag] =
     useState<(typeof tagFilters)[number]>("전체");
-  const { popups, status: mapStatus, refresh: refreshMap } = useMapPopups();
-  const [mapBounds, setMapBounds] = useState<MapBounds>(() => boundsForRegion(initialRegion));
+  const {
+    popups,
+    status: mapStatus,
+    refresh: refreshMap,
+  } = useMapPopups(resolvedLanguage);
+  const [mapBounds, setMapBounds] = useState<MapBounds>(() =>
+    boundsForRegion(initialRegion),
+  );
   const [mapRegion, setMapRegion] = useState(initialRegion);
+  const [showMarkerLabels, setShowMarkerLabels] = useState(
+    initialRegion.latitudeDelta <= MARKER_LABEL_SHOW_LATITUDE_DELTA,
+  );
   const [mapWidth, setMapWidth] = useState(Dimensions.get("window").width);
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchMode, setIsSearchMode] = useState(false);
-  const [searchState, setSearchState] = useState<PopupSearchState>({ status: "idle", results: [] });
-  const [placeSearchState, setPlaceSearchState] = useState<PlaceSearchState>({ status: "idle", results: [] });
+  const [popupSearch, setPopupSearch] = useState<{
+    languageCode: Locale;
+    query: string;
+    state: PopupSearchState;
+  }>({
+    languageCode: resolvedLanguage,
+    query: "",
+    state: { status: "idle", results: [] },
+  });
+  const searchState: PopupSearchState =
+    popupSearch.languageCode === resolvedLanguage &&
+    popupSearch.query === searchQuery.trim()
+      ? popupSearch.state
+      : {
+          status:
+            isSearchMode && Array.from(searchQuery.trim()).length >= 2
+              ? "loading"
+              : "idle",
+          results: [],
+        };
+  const [placeSearchState, setPlaceSearchState] = useState<PlaceSearchState>({
+    status: "idle",
+    results: [],
+  });
   const [resolvingPlaceId, setResolvingPlaceId] = useState<string | null>(null);
   const [resolveError, setResolveError] = useState<string | null>(null);
-  const [placeAttributions, setPlaceAttributions] = useState<PlaceAttribution[]>([]);
+  const [placeAttributions, setPlaceAttributions] = useState<
+    PlaceAttribution[]
+  >([]);
   const [keyboardTop, setKeyboardTop] = useState<number | null>(null);
   const [searchMoveVersion, setSearchMoveVersion] = useState(0);
-  const [selectedPopup, setSelectedPopup] = useState<PopupMapMarker | null>(null);
-  const selectedPopupId = selectedPopup?.id;
-  const pendingPopupId = pendingSearchAction.current?.kind === "popup"
-    ? pendingSearchAction.current.id : undefined;
+  const [selectedPopupId, setSelectedPopupId] = useState<string | null>(null);
+  const setSelectedPopup = (popup: PopupMapMarker | null) =>
+    setSelectedPopupId(popup?.id ?? null);
+  const pendingPopupId =
+    pendingSearchAction.current?.kind === "popup"
+      ? pendingSearchAction.current.id
+      : undefined;
   const filteredPopups = useMemo(
-    () => selectedTag === "전체"
-      ? popups
-      : popups.filter((popup) => popup.tags?.some((tag) => tag.name === selectedTag)),
+    () =>
+      selectedTag === "전체"
+        ? popups
+        : popups.filter((popup) =>
+            popup.tags?.some((tag) => tag.name === selectedTag),
+          ),
     [popups, selectedTag],
   );
   const { clusterIndex, popupsById } = useMemo(() => {
     const validPopups = filteredPopups.filter(hasValidCoordinates);
-    const index = new Supercluster<PopupClusterProperties, Record<string, never>>({
+    const index = new Supercluster<
+      PopupClusterProperties,
+      Record<string, never>
+    >({
       radius: 40,
       maxZoom: 16,
       extent: CLUSTER_EXTENT,
     });
-    index.load(validPopups.map((popup) => ({
-      type: "Feature" as const,
-      geometry: {
-        type: "Point" as const,
-        coordinates: [popup.longitude, popup.latitude],
-      },
-      properties: { popupId: popup.id },
-    })));
+    index.load(
+      validPopups.map((popup) => ({
+        type: "Feature" as const,
+        geometry: {
+          type: "Point" as const,
+          coordinates: [popup.longitude, popup.latitude],
+        },
+        properties: { popupId: popup.id },
+      })),
+    );
     return {
       clusterIndex: index,
       popupsById: new Map(validPopups.map((popup) => [popup.id, popup])),
     };
   }, [filteredPopups]);
+  const selectedPopup = selectedPopupId
+    ? (popupsById.get(selectedPopupId) ?? null)
+    : null;
   // Supercluster uses a 512-pixel world tile; derive its zoom from the visible longitude span.
-  const clusterZoom = Math.max(0, Math.floor(Math.log2(
-    (360 * mapWidth) / (CLUSTER_EXTENT * mapRegion.longitudeDelta),
-  )));
+  const clusterZoom = Math.max(
+    0,
+    Math.floor(
+      Math.log2((360 * mapWidth) / (CLUSTER_EXTENT * mapRegion.longitudeDelta)),
+    ),
+  );
   const markerItems = useMemo((): MapMarkerItem[] => {
     if (mapRegion.latitudeDelta < CLUSTERING_LATITUDE_DELTA) {
-      return expandedMarkerPopups(filteredPopups, mapBounds, selectedPopupId, pendingPopupId)
-        .map((popup) => ({ type: "popup", popup }));
+      return expandedMarkerPopups(
+        filteredPopups,
+        mapBounds,
+        selectedPopupId ?? undefined,
+        pendingPopupId,
+      ).map((popup) => ({ type: "popup", popup }));
     }
 
-    return clusterIndex.getClusters([
-      mapBounds.minLng,
-      mapBounds.minLat,
-      mapBounds.maxLng,
-      mapBounds.maxLat,
-    ], clusterZoom).flatMap((feature): MapMarkerItem[] => {
-      const [longitude, latitude] = feature.geometry.coordinates;
-      if ("cluster" in feature.properties) {
-        return [{
-          type: "cluster",
-          id: feature.properties.cluster_id,
-          count: feature.properties.point_count,
-          latitude,
-          longitude,
-        }];
-      }
-      const popup = popupsById.get(feature.properties.popupId);
-      return popup ? [{ type: "popup", popup }] : [];
-    });
-  }, [clusterIndex, clusterZoom, filteredPopups, mapBounds, mapRegion.latitudeDelta,
-    popupsById, selectedPopupId, pendingPopupId, searchMoveVersion]);
+    return clusterIndex
+      .getClusters(
+        [
+          mapBounds.minLng,
+          mapBounds.minLat,
+          mapBounds.maxLng,
+          mapBounds.maxLat,
+        ],
+        clusterZoom,
+      )
+      .flatMap((feature): MapMarkerItem[] => {
+        const [longitude, latitude] = feature.geometry.coordinates;
+        if ("cluster" in feature.properties) {
+          return [
+            {
+              type: "cluster",
+              id: feature.properties.cluster_id,
+              count: feature.properties.point_count,
+              latitude,
+              longitude,
+            },
+          ];
+        }
+        const popup = popupsById.get(feature.properties.popupId);
+        return popup ? [{ type: "popup", popup }] : [];
+      });
+  }, [
+    clusterIndex,
+    clusterZoom,
+    filteredPopups,
+    mapBounds,
+    mapRegion.latitudeDelta,
+    popupsById,
+    selectedPopupId,
+    pendingPopupId,
+    searchMoveVersion,
+  ]);
   const visiblePopups = useMemo(
-    () => filteredPopups.filter((popup) => hasValidCoordinates(popup)
-      && popup.latitude >= mapBounds.minLat
-      && popup.latitude <= mapBounds.maxLat
-      && popup.longitude >= mapBounds.minLng
-      && popup.longitude <= mapBounds.maxLng),
+    () =>
+      filteredPopups.filter(
+        (popup) =>
+          hasValidCoordinates(popup) &&
+          popup.latitude >= mapBounds.minLat &&
+          popup.latitude <= mapBounds.maxLat &&
+          popup.longitude >= mapBounds.minLng &&
+          popup.longitude <= mapBounds.maxLng,
+      ),
     [filteredPopups, mapBounds],
   );
-  const [markerHeights, setMarkerHeights] = useState<Record<string, number>>({});
+  const [markerHeights, setMarkerHeights] = useState<Record<string, number>>(
+    {},
+  );
   const [previewPopup, setPreviewPopup] = useState<PopupMapMarker | null>(null);
   const [isListOpen, setIsListOpen] = useState(false);
   const [filterBottom, setFilterBottom] = useState<number | null>(null);
@@ -275,20 +410,33 @@ export default function MapScreen() {
   const sheetAnimatedStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: (1 - sheetTransition.get()) * sheetHeight }],
   }));
-  const hasSelectedPopup = selectedPopup !== null && !isListOpen;
+  const hasSelectedPopup = selectedPopupId !== null && !isListOpen;
   const hasPreviewPopup = previewPopup !== null;
+  const currentPreviewPopup = previewPopup
+    ? (popupsById.get(previewPopup.id) ?? null)
+    : null;
   const bottomInset = Math.max(insets.bottom, 28);
-  const previewReady = hasSelectedPopup && hasPreviewPopup
-    && actionHeight > 0 && previewHeight > 0;
+  const previewReady =
+    hasSelectedPopup &&
+    hasPreviewPopup &&
+    actionHeight > 0 &&
+    previewHeight > 0;
   const searchCardTop = insets.top + 62;
-  const searchCardMaxHeight = Math.max(96, Math.min(360,
-    Math.min(windowHeight, keyboardTop ?? windowHeight) - searchCardTop - 12));
+  const searchCardMaxHeight = Math.max(
+    96,
+    Math.min(
+      360,
+      Math.min(windowHeight, keyboardTop ?? windowHeight) - searchCardTop - 12,
+    ),
+  );
 
   useEffect(() => {
     const show = Keyboard.addListener("keyboardDidShow", (event) => {
       setKeyboardTop(event.endCoordinates.screenY);
     });
-    const hide = Keyboard.addListener("keyboardDidHide", () => setKeyboardTop(null));
+    const hide = Keyboard.addListener("keyboardDidHide", () =>
+      setKeyboardTop(null),
+    );
     return () => {
       show.remove();
       hide.remove();
@@ -297,37 +445,92 @@ export default function MapScreen() {
 
   useEffect(() => {
     const query = searchQuery.trim();
+    const controller = new AbortController();
     if (!isSearchMode || Array.from(query).length < 2) {
-      setSearchState({ status: "idle", results: [] });
+      setPopupSearch({
+        languageCode: resolvedLanguage,
+        query,
+        state: { status: "idle", results: [] },
+      });
+      return;
+    }
+    const version = searchRequestVersion.current;
+    setPopupSearch({
+      languageCode: resolvedLanguage,
+      query,
+      state: { status: "loading", results: [] },
+    });
+    const timer = setTimeout(() => {
+      searchPopups(query, controller.signal, resolvedLanguage)
+        .then((results) => {
+          if (
+            !controller.signal.aborted &&
+            searchRequestVersion.current === version
+          ) {
+            setPopupSearch({
+              languageCode: resolvedLanguage,
+              query,
+              state: { status: "success", results },
+            });
+          }
+        })
+        .catch(() => {
+          if (
+            !controller.signal.aborted &&
+            searchRequestVersion.current === version
+          ) {
+            setPopupSearch({
+              languageCode: resolvedLanguage,
+              query,
+              state: { status: "error", results: [] },
+            });
+          }
+        });
+    }, 300);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [isSearchMode, searchQuery, resolvedLanguage]);
+
+  useEffect(() => {
+    setMarkerHeights({});
+  }, [resolvedLanguage]);
+
+  useEffect(() => {
+    if (!GOOGLE_PLACES_SEARCH_ENABLED) {
+      setPlaceSearchState({ status: "hidden", results: [] });
+      return;
+    }
+    const query = searchQuery.trim();
+    if (!isSearchMode || Array.from(query).length < 2) {
       setPlaceSearchState({ status: "idle", results: [] });
       return;
     }
 
     const version = searchRequestVersion.current;
     const controller = new AbortController();
-    const sessionToken = searchSessionToken.current ?? (searchSessionToken.current = uuid.v4());
-    setSearchState({ status: "loading", results: [] });
+    const sessionToken =
+      searchSessionToken.current ?? (searchSessionToken.current = uuid.v4());
     setPlaceSearchState({ status: "loading", results: [] });
     const timer = setTimeout(() => {
-      searchPopups(query, controller.signal)
+      autocompletePlaces(
+        { query, languageCode: getApiLocale(), sessionToken },
+        controller.signal,
+      )
         .then((results) => {
-          if (!controller.signal.aborted && searchRequestVersion.current === version) {
-            setSearchState({ status: "success", results });
-          }
-        })
-        .catch(() => {
-          if (!controller.signal.aborted && searchRequestVersion.current === version) {
-            setSearchState({ status: "error", results: [] });
-          }
-        });
-      autocompletePlaces({ query, languageCode: getApiLocale(), sessionToken }, controller.signal)
-        .then((results) => {
-          if (!controller.signal.aborted && searchRequestVersion.current === version) {
+          if (
+            !controller.signal.aborted &&
+            searchRequestVersion.current === version
+          ) {
             setPlaceSearchState({ status: "success", results });
           }
         })
         .catch(() => {
-          if (!controller.signal.aborted && searchRequestVersion.current === version) {
+          if (
+            !controller.signal.aborted &&
+            searchRequestVersion.current === version
+          ) {
             // Disabled, unconfigured and upstream errors affect only the Google section.
             setPlaceSearchState({ status: "hidden", results: [] });
           }
@@ -339,12 +542,40 @@ export default function MapScreen() {
     };
   }, [isSearchMode, searchQuery]);
 
-  useEffect(() => () => { placeResolveController.current?.abort(); }, []);
+  const invalidateCameraRequests = useCallback(() => {
+    cameraRequestVersion.current += 1;
+    pendingSearchAction.current = null;
+    pendingDetailPopupId.current = null;
+    if (locatingRef.current) {
+      locatingRef.current = false;
+      if (cameraScreenActive.current) setIsLocating(false);
+    }
+    if (placeResolveController.current) {
+      placeResolveController.current.abort();
+      placeResolveController.current = null;
+      placeResolveId.current = null;
+      if (cameraScreenActive.current) setResolvingPlaceId(null);
+    }
+  }, []);
+
+  useFocusEffect(useCallback(() => {
+    cameraScreenActive.current = true;
+    setIsLocating(false);
+    setResolvingPlaceId(null);
+    return () => {
+      cameraScreenActive.current = false;
+      invalidateCameraRequests();
+    };
+  }, [invalidateCameraRequests]));
+
+  const isCameraRequestCurrent = (version: number) =>
+    cameraScreenActive.current && cameraRequestVersion.current === version;
 
   const cancelPlaceResolve = () => {
     const wasResolving = placeResolveController.current !== null;
     placeResolveController.current?.abort();
     placeResolveController.current = null;
+    placeResolveId.current = null;
     setResolvingPlaceId(null);
     setResolveError(null);
     return wasResolving;
@@ -366,41 +597,61 @@ export default function MapScreen() {
   };
 
   const handleMapInteraction = () => {
-    pendingSearchAction.current = null;
+    invalidateCameraRequests();
     if (isSearchMode) closeSearch();
   };
 
   const selectSearchPlace = async (suggestion: PlaceSuggestion) => {
-    if (placeResolveController.current || !searchSessionToken.current) return;
+    if (!GOOGLE_PLACES_SEARCH_ENABLED) return;
+    if (!cameraScreenActive.current || !searchSessionToken.current) return;
+    if (placeResolveController.current && placeResolveId.current === suggestion.placeId) return;
+    invalidateCameraRequests();
+    const cameraVersion = cameraRequestVersion.current;
     const controller = new AbortController();
     placeResolveController.current = controller;
+    placeResolveId.current = suggestion.placeId;
     const version = searchRequestVersion.current;
     const sessionToken = searchSessionToken.current;
     setResolvingPlaceId(suggestion.placeId);
     setResolveError(null);
     try {
-      const place = await resolvePlace({ placeId: suggestion.placeId, sessionToken }, controller.signal);
-      if (controller.signal.aborted || searchRequestVersion.current !== version) return;
+      const place = await resolvePlace(
+        { placeId: suggestion.placeId, sessionToken },
+        controller.signal,
+      );
+      if (!isCameraRequestCurrent(cameraVersion) || controller.signal.aborted || searchRequestVersion.current !== version)
+        return;
       const region = placeCameraRegion(place);
       if (!region || !mapRef.current) throw new Error("Invalid place location");
       closeSearch();
       setSelectedPopup(null);
       setIsListOpen(false);
       setPlaceAttributions(place.attributions);
-      const alreadyAtPlace = !mapMoving.current && isPlaceCameraComplete(mapRegion, region);
-      pendingSearchAction.current = { kind: "place", region, moveComplete: alreadyAtPlace };
+      const alreadyAtPlace =
+        !mapMoving.current && isPlaceCameraComplete(mapRegion, region);
+      pendingSearchAction.current = {
+        kind: "place",
+        region,
+        moveComplete: alreadyAtPlace,
+      };
       if (alreadyAtPlace) {
         setSearchMoveVersion((value) => value + 1);
       } else {
+        if (!isCameraRequestCurrent(cameraVersion)) return;
         mapMoving.current = true;
         mapRef.current.animateToRegion(region, 350);
       }
     } catch (error) {
-      if (controller.signal.aborted || searchRequestVersion.current !== version) return;
+      if (!isCameraRequestCurrent(cameraVersion) || controller.signal.aborted || searchRequestVersion.current !== version)
+        return;
       placeResolveController.current = null;
+      placeResolveId.current = null;
       setResolvingPlaceId(null);
-      if (error instanceof Error && (error.message === "place_search_disabled"
-        || error.message === "place_search_not_configured")) {
+      if (
+        error instanceof Error &&
+        (error.message === "place_search_disabled" ||
+          error.message === "place_search_not_configured")
+      ) {
         setPlaceSearchState({ status: "hidden", results: [] });
       } else {
         setResolveError("위치를 불러올 수 없어요. 다시 선택해 주세요.");
@@ -408,7 +659,14 @@ export default function MapScreen() {
     }
   };
 
-  const moveToPopup = async (popupId: string, clearQuery: boolean, showError: boolean) => {
+  const moveToPopup = async (
+    popupId: string,
+    clearQuery: boolean,
+    showError: boolean,
+  ) => {
+    if (!cameraScreenActive.current) return;
+    invalidateCameraRequests();
+    const cameraVersion = cameraRequestVersion.current;
     closeSearch();
     // A new command supersedes an older camera completion even while awaiting data.
     pendingSearchAction.current = null;
@@ -421,26 +679,33 @@ export default function MapScreen() {
     if (!popup) {
       try {
         const refreshed = await refreshMap();
-        if (searchRequestVersion.current !== version) return;
+        if (!isCameraRequestCurrent(cameraVersion) || searchRequestVersion.current !== version) return;
         popup = refreshed.find((item) => item.id === popupId);
       } catch {
-        if (searchRequestVersion.current !== version) return;
-        if (showError) Alert.alert(t("map.popupLoadFailed"), t("place.detail.tryLater"));
+        if (!isCameraRequestCurrent(cameraVersion) || searchRequestVersion.current !== version) return;
+        if (showError)
+          Alert.alert(t("map.popupLoadFailed"), t("place.detail.tryLater"));
         return;
       }
     }
     if (!popup || !hasValidCoordinates(popup) || !mapRef.current) {
-      if (showError) Alert.alert(t("map.popupMissing"), t("map.refreshAndRetry"));
+      if (showError)
+        Alert.alert(t("map.popupMissing"), t("map.refreshAndRetry"));
       return;
     }
 
-    if (selectedTag !== "전체" && !popup.tags?.some((tag) => tag.name === selectedTag)) {
+    if (
+      selectedTag !== "전체" &&
+      !popup.tags?.some((tag) => tag.name === selectedTag)
+    ) {
       setSelectedTag("전체");
     }
 
-    const alreadyAtPopup = !mapMoving.current && Math.abs(mapRegion.latitude - popup.latitude) < 0.001
-      && Math.abs(mapRegion.longitude - popup.longitude) < 0.001
-      && mapRegion.latitudeDelta <= initialRegion.latitudeDelta * 1.2;
+    const alreadyAtPopup =
+      !mapMoving.current &&
+      Math.abs(mapRegion.latitude - popup.latitude) < 0.001 &&
+      Math.abs(mapRegion.longitude - popup.longitude) < 0.001 &&
+      mapRegion.latitudeDelta <= initialRegion.latitudeDelta * 1.2;
     pendingSearchAction.current = {
       kind: "popup",
       id: popup.id,
@@ -451,13 +716,17 @@ export default function MapScreen() {
     if (alreadyAtPopup) {
       setSearchMoveVersion((version) => version + 1);
     } else {
+      if (!isCameraRequestCurrent(cameraVersion)) return;
       mapMoving.current = true;
-      mapRef.current.animateToRegion({
-        latitude: popup.latitude,
-        longitude: popup.longitude,
-        latitudeDelta: initialRegion.latitudeDelta,
-        longitudeDelta: initialRegion.longitudeDelta,
-      }, 350);
+      mapRef.current.animateToRegion(
+        {
+          latitude: popup.latitude,
+          longitude: popup.longitude,
+          latitudeDelta: initialRegion.latitudeDelta,
+          longitudeDelta: initialRegion.longitudeDelta,
+        },
+        350,
+      );
     }
   };
 
@@ -477,6 +746,7 @@ export default function MapScreen() {
     if (mapReady.current) {
       void moveToPopup(id, false, false);
     } else {
+      invalidateCameraRequests();
       pendingDetailPopupId.current = id;
     }
   }, [popupId]);
@@ -490,7 +760,9 @@ export default function MapScreen() {
       setIsListOpen(true);
       return;
     }
-    const marker = markerItems.find((item) => item.type === "popup" && item.popup.id === pending.id);
+    const marker = markerItems.find(
+      (item) => item.type === "popup" && item.popup.id === pending.id,
+    );
     if (!marker || marker.type !== "popup") return;
     pendingSearchAction.current = null;
     setSelectedPopup(marker.popup);
@@ -503,21 +775,30 @@ export default function MapScreen() {
         if (active) setShowsUserLocation(granted);
       })
       .catch(() => {});
-    return () => { active = false; };
+    return () => {
+      active = false;
+    };
   }, []);
 
   const moveToCurrentLocation = async () => {
-    if (locatingRef.current) return;
+    if (!cameraScreenActive.current || locatingRef.current) return;
+    invalidateCameraRequests();
+    const cameraVersion = cameraRequestVersion.current;
     locatingRef.current = true;
     setIsLocating(true);
     try {
       let permission = await Location.getForegroundPermissionsAsync();
+      if (!isCameraRequestCurrent(cameraVersion)) return;
       if (!permission.granted && permission.canAskAgain) {
         permission = await Location.requestForegroundPermissionsAsync();
+        if (!isCameraRequestCurrent(cameraVersion)) return;
       }
       if (!permission.granted) {
         setShowsUserLocation(false);
-        Alert.alert(t("map.locationPermissionTitle"), t("map.locationPermissionDescription"));
+        Alert.alert(
+          t("map.locationPermissionTitle"),
+          t("map.locationPermissionDescription"),
+        );
         return;
       }
 
@@ -525,17 +806,24 @@ export default function MapScreen() {
       const { coords } = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.Balanced,
       });
-      mapRef.current?.animateToRegion({
-        latitude: coords.latitude,
-        longitude: coords.longitude,
-        latitudeDelta: initialRegion.latitudeDelta,
-        longitudeDelta: initialRegion.longitudeDelta,
-      }, 350);
+      if (!isCameraRequestCurrent(cameraVersion)) return;
+      mapRef.current?.animateToRegion(
+        {
+          latitude: coords.latitude,
+          longitude: coords.longitude,
+          latitudeDelta: initialRegion.latitudeDelta,
+          longitudeDelta: initialRegion.longitudeDelta,
+        },
+        350,
+      );
     } catch {
+      if (!isCameraRequestCurrent(cameraVersion)) return;
       Alert.alert(t("map.locationFailed"), t("map.checkLocationService"));
     } finally {
-      locatingRef.current = false;
-      setIsLocating(false);
+      if (isCameraRequestCurrent(cameraVersion)) {
+        locatingRef.current = false;
+        setIsLocating(false);
+      }
     }
   };
 
@@ -545,26 +833,26 @@ export default function MapScreen() {
 
   useEffect(() => {
     if (sheetHeight === 0) return;
-    sheetTransition.set(withTiming(isListOpen ? 1 : 0, {
-      duration: 400,
-      easing: ReanimatedEasing.out(ReanimatedEasing.cubic),
-    }));
+    sheetTransition.set(
+      withTiming(isListOpen ? 1 : 0, {
+        duration: 400,
+        easing: ReanimatedEasing.out(ReanimatedEasing.cubic),
+      }),
+    );
     return () => cancelAnimation(sheetTransition);
   }, [isListOpen, sheetHeight, sheetTransition]);
 
   useEffect(() => {
-    if (selectedPopup) {
-      const current = popupsById.get(selectedPopup.id) ?? null;
-      if (current !== selectedPopup) setSelectedPopup(current);
-    }
-  }, [popupsById, selectedPopup]);
-
-  useEffect(() => {
-    if (selectedPopup && !markerItems.some((item) =>
-      item.type === "popup" && item.popup.id === selectedPopup.id)) {
+    if (
+      mapStatus === "ready" &&
+      selectedPopupId &&
+      !markerItems.some(
+        (item) => item.type === "popup" && item.popup.id === selectedPopupId,
+      )
+    ) {
       setSelectedPopup(null);
     }
-  }, [markerItems, selectedPopup]);
+  }, [markerItems, selectedPopupId, mapStatus]);
 
   useEffect(() => {
     if (!hasSelectedPopup && !hasPreviewPopup) return;
@@ -592,8 +880,6 @@ export default function MapScreen() {
     outputRange: [previewHeight + 12, 0],
   });
 
-
-
   return (
     <View style={styles.container}>
       <MapView
@@ -612,8 +898,10 @@ export default function MapScreen() {
         zoomEnabled
         onMapReady={() => {
           mapReady.current = true;
+          if (!cameraScreenActive.current) return;
           const requestVersion = regionChangeVersion.current;
-          mapRef.current?.getMapBoundaries()
+          mapRef.current
+            ?.getMapBoundaries()
             .then(({ northEast, southWest }) => {
               if (regionChangeVersion.current !== requestVersion) return;
               setMapBounds({
@@ -633,12 +921,19 @@ export default function MapScreen() {
           if (detailPopupId) void moveToPopup(detailPopupId, false, false);
         }}
         onPress={(event) => {
-          if (event.nativeEvent.action === "press" || event.nativeEvent.action === undefined) {
+          if (
+            event.nativeEvent.action === "press" ||
+            event.nativeEvent.action === undefined
+          ) {
             handleMapInteraction();
             setSelectedPopup(null);
           }
         }}
         onPanDrag={handleMapInteraction}
+        onRegionChangeStart={(_region, details) => {
+          mapMoving.current = true;
+          if (details?.isGesture) handleMapInteraction();
+        }}
         onRegionChange={(_region, details) => {
           mapMoving.current = true;
           if (details?.isGesture) handleMapInteraction();
@@ -649,25 +944,41 @@ export default function MapScreen() {
           regionChangeVersion.current += 1;
           // Keep equal snapshots stable without skipping pending completion or
           // the version increment that protects the initial native bounds read.
-          setMapRegion((current) => current.latitude === region.latitude
-            && current.longitude === region.longitude
-            && current.latitudeDelta === region.latitudeDelta
-            && current.longitudeDelta === region.longitudeDelta ? current : region);
-          setMapBounds((current) => current.minLat === bounds.minLat
-            && current.maxLat === bounds.maxLat
-            && current.minLng === bounds.minLng
-            && current.maxLng === bounds.maxLng ? current : bounds);
+          setMapRegion((current) =>
+            current.latitude === region.latitude &&
+            current.longitude === region.longitude &&
+            current.latitudeDelta === region.latitudeDelta &&
+            current.longitudeDelta === region.longitudeDelta
+              ? current
+              : region,
+          );
+          setShowMarkerLabels((visible) => visible
+            ? region.latitudeDelta < MARKER_LABEL_HIDE_LATITUDE_DELTA
+            : region.latitudeDelta <= MARKER_LABEL_SHOW_LATITUDE_DELTA);
+          setMapBounds((current) =>
+            current.minLat === bounds.minLat &&
+            current.maxLat === bounds.maxLat &&
+            current.minLng === bounds.minLng &&
+            current.maxLng === bounds.maxLng
+              ? current
+              : bounds,
+          );
           console.log("Map bounds:", bounds);
           const pending = pendingSearchAction.current;
           if (pending && details?.isGesture) {
             pendingSearchAction.current = null;
-          } else if (pending?.kind === "place" && isPlaceCameraComplete(region, pending.region)) {
+          } else if (
+            pending?.kind === "place" &&
+            isPlaceCameraComplete(region, pending.region)
+          ) {
             pending.moveComplete = true;
             setSearchMoveVersion((version) => version + 1);
-          } else if (pending?.kind === "popup"
-            && Math.abs(region.latitude - pending.latitude) < 0.005
-            && Math.abs(region.longitude - pending.longitude) < 0.005
-            && region.latitudeDelta < CLUSTERING_LATITUDE_DELTA) {
+          } else if (
+            pending?.kind === "popup" &&
+            Math.abs(region.latitude - pending.latitude) < 0.005 &&
+            Math.abs(region.longitude - pending.longitude) < 0.005 &&
+            region.latitudeDelta < CLUSTERING_LATITUDE_DELTA
+          ) {
             pending.moveComplete = true;
             setSearchMoveVersion((version) => version + 1);
           }
@@ -682,28 +993,65 @@ export default function MapScreen() {
                 longitude={item.longitude}
                 count={item.count}
                 onPress={() => {
+                  if (!cameraScreenActive.current) return;
+                  invalidateCameraRequests();
                   setSelectedPopup(null);
-                  const expansionZoom = clusterIndex.getClusterExpansionZoom(item.id);
+                  const expansionZoom = clusterIndex.getClusterExpansionZoom(
+                    item.id,
+                  );
                   const targetZoom = Math.min(expansionZoom, clusterZoom + 2);
-                  const longitudeDelta = (360 * mapWidth) / (CLUSTER_EXTENT * 2 ** targetZoom);
-                  mapRef.current?.animateToRegion({
-                    latitude: item.latitude,
-                    longitude: item.longitude,
-                    latitudeDelta: mapRegion.latitudeDelta * longitudeDelta / mapRegion.longitudeDelta,
-                    longitudeDelta,
-                  }, 350);
+                  const longitudeDelta =
+                    (360 * mapWidth) / (CLUSTER_EXTENT * 2 ** targetZoom);
+                  mapRef.current?.animateToRegion(
+                    {
+                      latitude: item.latitude,
+                      longitude: item.longitude,
+                      latitudeDelta:
+                        (mapRegion.latitudeDelta * longitudeDelta) /
+                        mapRegion.longitudeDelta,
+                      longitudeDelta,
+                    },
+                    350,
+                  );
                 }}
               />
             );
           }
           const popup = item.popup;
-          const { backgroundColor, iconName } = markerStyleFor(popup.primaryTag);
+          const { backgroundColor, iconName } = markerStyleFor(
+            popup.primaryTag,
+          );
           const isSelected = selectedPopup?.id === popup.id;
-          const markerKey = `${popup.id}-${isSelected}`;
-          const markerHeight = markerHeights[markerKey];
+          const markerKey = `${popup.id}-${isSelected}-${resolvedLanguage}`;
+          // Keep the native marker key stable when labels toggle. Labelled
+          // measurements must not be overwritten by the icon-only layout.
+          const markerMeasurementKey = `${markerKey}-labels`;
+          const markerHeight = showMarkerLabels
+            ? markerHeights[markerMeasurementKey]
+            : styles.markerGraphicSlot.height;
+
+          if (USE_BASIC_MARKERS_FOR_PERF_TEST) {
+            return (
+              <Marker
+                key={markerKey}
+                coordinate={{
+                  latitude: popup.latitude,
+                  longitude: popup.longitude,
+                }}
+                tracksViewChanges={false}
+                zIndex={isSelected ? 1 : 0}
+                onPress={() => setSelectedPopup(popup)}
+              />
+            );
+          }
+
           return (
             <Marker
-              key={`${popup.id}-${isSelected}`}
+              key={markerKey}
+              ref={(marker) => {
+                if (marker) markerRefs.current.set(markerKey, marker);
+                else markerRefs.current.delete(markerKey);
+              }}
               coordinate={{
                 latitude: popup.latitude,
                 longitude: popup.longitude,
@@ -720,14 +1068,24 @@ export default function MapScreen() {
                 style={styles.markerContent}
                 onLayout={(event) => {
                   const height = event.nativeEvent.layout.height;
-                  if (height > 0) {
-                    setMarkerHeights((current) => current[markerKey] === height
-                      ? current
-                      : { ...current, [markerKey]: height });
+                  if (height > 0 && showMarkerLabels) {
+                    setMarkerHeights((current) =>
+                      current[markerMeasurementKey] === height
+                        ? current
+                        : { ...current, [markerMeasurementKey]: height },
+                    );
                   }
+                  // tracksViewChanges stays false; refresh the changed native
+                  // snapshot after layout without remounting the marker.
+                  if (height > 0) markerRefs.current.get(markerKey)?.redraw();
                 }}
               >
-                <View style={[styles.markerGraphicSlot, !isSelected && styles.markerGraphicBottom]}>
+                <View
+                  style={[
+                    styles.markerGraphicSlot,
+                    !isSelected && styles.markerGraphicBottom,
+                  ]}
+                >
                   {isSelected ? (
                     <View style={styles.selectedPin}>
                       <Svg width={34} height={38} viewBox="0 0 48 52">
@@ -738,24 +1096,42 @@ export default function MapScreen() {
                         <Circle cx={24} cy={21} r={15} fill="#FFFFFF" />
                       </Svg>
                       <View style={styles.selectedPinIcon}>
-                        <MaterialIcons name={iconName} size={14} color={backgroundColor} />
+                        {iconName === "lucide-star" ? (
+                          <Star size={14} color={backgroundColor} />
+                        ) : (
+                          <MaterialIcons
+                            name={iconName}
+                            size={14}
+                            color={backgroundColor}
+                          />
+                        )}
                       </View>
                     </View>
                   ) : (
                     <View style={styles.markerWrapper}>
                       <View style={[styles.marker, { backgroundColor }]}>
-                        <MaterialIcons name={iconName} size={12} color="#FFFFFF" />
+                        {iconName === "lucide-star" ? (
+                          <Star size={12} color="#FFFFFF" />
+                        ) : (
+                          <MaterialIcons
+                            name={iconName}
+                            size={12}
+                            color="#FFFFFF"
+                          />
+                        )}
                       </View>
                     </View>
                   )}
                 </View>
-                <Text
-                  style={styles.markerTitle}
-                  numberOfLines={1}
-                  ellipsizeMode="tail"
-                >
-                  {popup.name}
-                </Text>
+                {showMarkerLabels && (
+                  <Text
+                    style={styles.markerTitle}
+                    numberOfLines={1}
+                    ellipsizeMode="tail"
+                  >
+                    {popup.name}
+                  </Text>
+                )}
               </View>
             </Marker>
           );
@@ -776,7 +1152,9 @@ export default function MapScreen() {
           <View style={[styles.listSheetContent, { top: filterBottom }]}>
             <MapPopupListSheet
               status={mapStatus}
-              onRetry={() => { void refreshMap().catch(() => {}); }}
+              onRetry={() => {
+                void refreshMap().catch(() => {});
+              }}
               popups={visiblePopups}
               bottomPadding={actionHeight}
               onPopupPress={(id) => openPopup(id)}
@@ -787,10 +1165,15 @@ export default function MapScreen() {
       {isSearchMode && (
         <View pointerEvents="box-none" style={styles.searchOverlay}>
           {Array.from(searchQuery.trim()).length >= 2 && (
-            <View style={[styles.searchResultsCard, {
-              top: searchCardTop,
-              maxHeight: searchCardMaxHeight,
-            }]}>
+            <View
+              style={[
+                styles.searchResultsCard,
+                {
+                  top: searchCardTop,
+                  maxHeight: searchCardMaxHeight,
+                },
+              ]}
+            >
               <MapSearchOverlay
                 query={searchQuery}
                 search={searchState}
@@ -805,12 +1188,23 @@ export default function MapScreen() {
           )}
         </View>
       )}
-      {placeAttributions.length > 0 && !isSearchMode && !isListOpen && !selectedPopup && (
-        <View style={[styles.placeAttributions, { bottom: actionHeight + 8 }]}>
-          <GooglePlaceAttribution providers={placeAttributions} />
-        </View>
-      )}
-      <View style={[styles.searchBar, { top: insets.top + 12 }, isSearchMode && styles.searchBarActive]}>
+      {placeAttributions.length > 0 &&
+        !isSearchMode &&
+        !isListOpen &&
+        !selectedPopup && (
+          <View
+            style={[styles.placeAttributions, { bottom: actionHeight + 8 }]}
+          >
+            <GooglePlaceAttribution providers={placeAttributions} />
+          </View>
+        )}
+      <View
+        style={[
+          styles.searchBar,
+          { top: insets.top + 12 },
+          isSearchMode && styles.searchBarActive,
+        ]}
+      >
         <Search size={20} color={colors.secondaryText} />
         <TextInput
           ref={searchInputRef}
@@ -832,16 +1226,28 @@ export default function MapScreen() {
           underlineColorAndroid="transparent"
         />
         {searchQuery.length > 0 && (
-          <Pressable accessibilityRole="button" accessibilityLabel={t("place.all.clearSearch")} hitSlop={8} onPress={() => changeSearchQuery("")}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t("place.all.clearSearch")}
+            hitSlop={8}
+            onPress={() => changeSearchQuery("")}
+          >
             <X size={18} color={colors.secondaryText} />
           </Pressable>
         )}
         {isSearchMode && (
-          <Pressable accessibilityRole="button" onPress={closeSearch} style={styles.searchCancelButton}>
+          <Pressable
+            accessibilityRole="button"
+            onPress={closeSearch}
+            style={styles.searchCancelButton}
+          >
             <Text style={styles.searchCancel}>{t("community.cancel")}</Text>
           </Pressable>
         )}
-        <View pointerEvents="none" style={[styles.tagFilterBorder, { borderColor: colors.border }]} />
+        <View
+          pointerEvents="none"
+          style={[styles.tagFilterBorder, { borderColor: colors.border }]}
+        />
       </View>
       <ScrollView
         horizontal
@@ -875,11 +1281,19 @@ export default function MapScreen() {
                 ]}
                 numberOfLines={1}
               >
-                {tag === "전체" ? t("community.category.all") : getTagDisplayName({ id: tagFilterIds[tag], name: tag }, resolvedLanguage)}
+                {tag === "전체"
+                  ? t("community.category.all")
+                  : getTagDisplayName(
+                      { id: tagFilterIds[tag], name: tag },
+                      resolvedLanguage,
+                    )}
               </Text>
               <View
                 pointerEvents="none"
-                style={[styles.tagFilterBorder, { borderColor: isSelected ? colors.text : colors.border }]}
+                style={[
+                  styles.tagFilterBorder,
+                  { borderColor: isSelected ? colors.text : colors.border },
+                ]}
               />
             </Pressable>
           );
@@ -902,7 +1316,10 @@ export default function MapScreen() {
         onLayout={(event) => setActionHeight(event.nativeEvent.layout.height)}
         style={[
           styles.mapActions,
-          { paddingBottom: bottomInset, transform: [{ translateY: actionTranslateY }] },
+          {
+            paddingBottom: bottomInset,
+            transform: [{ translateY: actionTranslateY }],
+          },
         ]}
       >
         <View style={styles.mapActionButtons}>
@@ -919,15 +1336,19 @@ export default function MapScreen() {
             onPress={() => setIsListOpen((open) => !open)}
           >
             <Text style={styles.viewPopupsButtonText}>
-              {isListOpen ? t("map.returnToMap") : t("map.viewPopups", { count: visiblePopups.length })}
+              {isListOpen
+                ? t("map.returnToMap")
+                : t("map.viewPopups", { count: visiblePopups.length })}
             </Text>
           </Pressable>
         </View>
       </Animated.View>
-      {previewPopup && (
+      {currentPreviewPopup && (
         <Animated.View
           pointerEvents={hasSelectedPopup ? "auto" : "none"}
-          onLayout={(event) => setPreviewHeight(event.nativeEvent.layout.height)}
+          onLayout={(event) =>
+            setPreviewHeight(event.nativeEvent.layout.height)
+          }
           style={[
             styles.previewOverlay,
             {
@@ -937,9 +1358,9 @@ export default function MapScreen() {
           ]}
         >
           <MapPopupPreviewCard
-            popup={previewPopup}
+            popup={currentPreviewPopup}
             bottomInset={bottomInset}
-            onPress={() => openPopup(previewPopup.id)}
+            onPress={() => openPopup(currentPreviewPopup.id)}
           />
         </Animated.View>
       )}
@@ -991,19 +1412,19 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
   },
   clusterMarker: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: colors.background,
-    borderColor: colors.primary,
-    borderWidth: 2,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(48, 48, 48, 0.9)",
+    borderColor: "#FFFFFF",
+    borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
   },
   clusterMarkerText: {
     fontSize: 14,
     fontWeight: "700",
-    color: colors.text,
+    color: "#FFFFFF",
   },
   markerWrapper: {
     width: 24,
@@ -1013,15 +1434,18 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
 
-    shadowColor: "#000",
-    shadowOffset: {
-      width: 0,
-      height: 1,
-    },
-    shadowOpacity: 0.18,
-    shadowRadius: 2,
-
-    elevation: 2,
+    ...(DISABLE_MARKER_VIEW_SHADOWS_FOR_PERF_TEST
+      ? {}
+      : {
+          shadowColor: "#000",
+          shadowOffset: {
+            width: 0,
+            height: 1,
+          },
+          shadowOpacity: 0.18,
+          shadowRadius: 2,
+          elevation: 2,
+        }),
   },
   marker: {
     width: 20,
@@ -1051,9 +1475,13 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#111827",
     textAlign: "center",
-    textShadowColor: "rgba(255, 255, 255, 0.9)",
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 2,
+    ...(DISABLE_MARKER_TEXT_SHADOWS_FOR_PERF_TEST
+      ? {}
+      : {
+          textShadowColor: "rgba(255, 255, 255, 0.9)",
+          textShadowOffset: { width: 0, height: 0 },
+          textShadowRadius: 2,
+        }),
   },
   searchBar: {
     position: "absolute",
@@ -1212,7 +1640,7 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 48,
     borderRadius: 16,
-    backgroundColor: "#22C55E",
+    backgroundColor: colors.text,
     alignItems: "center",
     justifyContent: "center",
   },

@@ -101,6 +101,32 @@ test('Root push/back preserves the original Tabs key and nested profile state fo
   }
 });
 
+test('My Page login uses the existing Root entry, retaining Tabs and the tab bar on push/back', () => {
+  assert.match(fs.readFileSync('src/app/(tabs)/profile/index.tsx', 'utf8'), /pathname: "\/login", params: \{ loginOrigin: "profile" \}/);
+  assert.ok(tree.children.some(route => route.route === 'login'));
+  const driver = rootStack();
+  const pushed = driver.router.getStateForAction(driver.state, StackActions.push('login', { loginOrigin: 'profile' }), driver.options);
+  assert.equal(pushed.routes.at(-1).name, 'login');
+  assert.equal(pushed.routes[0].state, driver.tabsState);
+  assert.equal(pushed.routes[0].key, driver.state.routes[0].key);
+  const popped = driver.router.getStateForAction(pushed, StackActions.pop(), driver.options);
+  assert.deepEqual(popped.routes, driver.state.routes);
+});
+
+test('Root profile login success pops back without replacing Tabs or disabling the transition', () => {
+  const source = ts.transpileModule(fs.readFileSync('src/lib/loginReturn.ts', 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const module = { exports: {} };
+  new Function('module', 'exports', source)(module, module.exports);
+  const driver = rootStack();
+  const pushed = driver.router.getStateForAction(driver.state, StackActions.push('login', { loginOrigin: 'profile' }), driver.options);
+  const calls = [];
+  module.exports.finishLoginReturn({ back: () => calls.push('back'), replace: () => calls.push('replace'),
+    setParams: () => calls.push('setParams'), canGoBack: () => true }, { getState: () => pushed }, null, 'profile');
+  assert.deepEqual(calls, ['back']);
+});
+
 test('dismissTo across Root/Tabs preserves the Tabs instance for logout and login redirection', () => {
   for (const destination of ['index', 'login']) {
     const driver = rootStack();
@@ -138,5 +164,6 @@ test('FloatingTabBar keeps auth hiding while favorites uses Root Stack coverage'
   const hidden = new Function('pathname', `return ${condition};`);
   assert.equal(hidden('/profile/login'), true);
   assert.equal(hidden('/profile/signup'), true);
+  assert.equal(hidden('/login'), false, 'Root login covers the retained tab bar instead of hiding it');
   for (const route of ['/profile', '/profile/favorites', '/profile/settings']) assert.equal(hidden(route), false);
 });

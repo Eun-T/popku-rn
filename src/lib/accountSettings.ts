@@ -1,5 +1,5 @@
 import { API_BASE_URL } from '../constants/api';
-import { getAuthSession, getAuthUser, setAuthUser, type CurrentUser } from './auth';
+import { authenticatedFetch, getAuthSession, getAuthUser, setAuthUser, type CurrentUser } from './auth';
 
 export class AccountSettingsError extends Error {
   constructor(readonly status: number, readonly reason: string | null, readonly authGeneration: number) {
@@ -11,11 +11,11 @@ async function patch(path: 'nickname' | 'password', body: object, signal: AbortS
   const { accessToken, generation } = await getAuthSession();
   if (signal.aborted) throw new Error('Account settings request cancelled');
   if (!accessToken) throw new AccountSettingsError(401, null, generation);
-  const response = await fetch(`${API_BASE_URL}/api/users/me/${path}`, {
+  const response = await authenticatedFetch(`${API_BASE_URL}/api/users/me/${path}`, {
     method: 'PATCH', signal,
     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  });
+  }, { accessToken, generation });
   if (!response.ok) {
     // Only retain known, constant messages; never log request or response bodies.
     const failure: unknown = await response.json().catch(() => null);

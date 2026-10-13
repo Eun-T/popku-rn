@@ -5,27 +5,30 @@ const popup=Object.freeze({publicId:'popup-original',name:'サーバー 행사�
  tags:Object.freeze([Object.freeze({id:5,name:'뷰티'}),Object.freeze({id:999,name:'미등록 원문'})])});
 const files=['src/app/(tabs)/profile/index.tsx','src/app/profile/posts.tsx','src/app/profile/reviews.tsx',
  'src/app/profile/favorites.tsx','src/components/profile/AccountSettingsScreen.tsx'];
-async function app({guest=false,empty=false,fail=false,transform,realCard=false}={}){
- const calls=[],routes=[],alerts=[],authListeners=new Set(),cacheListeners=new Set(),userListeners=new Set();
+async function app({guest=false,empty=false,fail=false,transform,realCard=false,openMail=async()=>{},copyEmail=async()=>true}={}){
+ const calls=[],routes=[],alerts=[],authListeners=new Set(),cacheListeners=new Set(),userListeners=new Set(),statusListeners=new Set();
  let user=guest?null:Object.freeze({id:7,nickname:'ニックネーム原文',email:'raw@example.test',provider:'LOCAL'});
  let favorites=fail?null:Object.freeze(empty?[]:[popup]),saveFailure=null,available=true,restoreFailure=fail;
+ let authStatus=guest?(fail?'error':'anonymous'):'authenticated';
  const router={push:x=>routes.push(x),replace:x=>routes.push(x),dismissTo:x=>routes.push(x),back:()=>routes.push('back'),canGoBack:()=>true};
  const subscribe=set=>fn=>{set.add(fn);return()=>set.delete(fn);};
  const native=Object.fromEntries(['View','Text','Pressable','TextInput','ScrollView','FlatList','Image','ActivityIndicator','KeyboardAvoidingView'].map(n=>[n,n]));
- Object.assign(native,{Platform:{OS:'ios'},StyleSheet:{create:s=>s,hairlineWidth:1},Keyboard:{dismiss(){}},Alert:{alert:(...args)=>alerts.push(args)}});
+ Object.assign(native,{Platform:{OS:'ios'},StyleSheet:{create:s=>s,hairlineWidth:1},Keyboard:{dismiss(){}},Alert:{alert:(...args)=>alerts.push(args)},Linking:{openURL:openMail}});
  class ApiError extends Error{constructor(status){super('server free text');this.status=status;this.authGeneration=3;}}
  const page=async(type,cursor,signal)=>{calls.push([type,cursor,signal]);if(fail)throw new ApiError(500);
   const item=type==='posts'?post:review;return{items:empty?[]:[cursor?Object.freeze({...item,id:item.id+1}):item],nextCursor:cursor?null:'cursor-original'};};
  const ui=runtime({
   'react-native':native,'expo-blur':{BlurTargetView:'BlurTargetView',BlurView:'BlurView'},
+  'expo-clipboard':{setStringAsync:copyEmail},
   'expo-router':{useRouter:()=>router,useFocusEffect:fn=>ui.react.useEffect(fn,[fn])},
   'react-native-safe-area-context':{SafeAreaView:'SafeAreaView'},
-  'lucide-react-native':Object.fromEntries(['ChevronLeft','ChevronRight','Eye','EyeOff','Heart','MessageSquare','MessageCircle','Settings','Star','UserRound','MoreHorizontal'].map(n=>[n,n])),
+  'lucide-react-native':Object.fromEntries(['ChevronLeft','ChevronRight','Eye','EyeOff','Heart','Mail','MessageSquare','MessageCircle','Settings','Star','UserRound','MoreHorizontal'].map(n=>[n,n])),
   'src/lib/auth.ts':{getAuthUser:()=>user,subscribeAuthUser:subscribe(userListeners),subscribeAuthSession:subscribe(authListeners),
-   refreshAuthUser:async()=>{calls.push(['restore']);if(restoreFailure)throw new Error('offline');return user;},
+   getAuthStatus:()=>authStatus,subscribeAuthStatus:subscribe(statusListeners),
+   refreshAuthUser:async()=>{calls.push(['restore']);if(restoreFailure)throw new Error('offline');authStatus=user?'authenticated':'anonymous';statusListeners.forEach(fn=>fn());return user;},
    getAuthSession:async()=>{calls.push(['session']);return{accessToken:guest?null:'token-original',generation:3};},clearTokens:async()=>{throw new Error('no session mutation expected');}},
   'src/lib/community.ts':{CommunityApiError:ApiError},
-  'src/lib/communityFeedRefresh.ts':Object.fromEntries(['subscribeCommunityPostChanges','subscribeCommunityCommentCounts'].map(n=>[n,()=>()=>{}])),
+  'src/lib/communityFeedRefresh.ts':Object.fromEntries(['subscribeCommunityPostChanges','subscribeCommunityCommentCounts','subscribeCommunityLikes'].map(n=>[n,()=>()=>{}])),
   'src/lib/myPosts.ts':{appendMyPosts:(a,b)=>[...a,...b],getMyPosts:(c,s)=>page('posts',c,s)},
   'src/lib/myReviews.ts':{appendMyReviews:(a,b)=>[...a,...b],getMyReviews:(c,s)=>page('reviews',c,s)},
   'src/lib/reviews.ts':{subscribeReviews:()=>()=>{}},

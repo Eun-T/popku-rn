@@ -3,20 +3,23 @@ import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 
 import { CommunityApiError, communityRequest, createCommunityPost, updateCommunityPost, type CommunityPostCategory } from './community';
 import { describeS3Put, logCommunityError, readCommunityErrorBody, readS3PutError } from './communityDiagnostics';
+import { RequestCancelledError, throwIfRequestAborted, UPLOAD_TIMEOUT_MS, withRequestTimeout } from './requestTimeout';
+import { assertAttemptOwner, assertSubmissionOwner, captureSubmissionOwner, isSubmissionOwnerCurrent, type SubmissionOwner } from './submissionSession';
 
 export const MAX_POST_IMAGES = 5;
 export const MAX_IMAGE_EDGE = 1600;
 export const WEBP_QUALITY = 0.8;
+export const MAX_IMAGE_SIZE_BYTES = 5_242_880;
 export type PostImage = { uri: string; width: number; height: number; mimeType: 'image/webp' };
 type Upload = { uploadUrl: string; imageKey: string; contentType: string; sortOrder: number };
 type UploadGrant = { uploadToken: string; images: Upload[] };
-type CommitRecovery = { outcomeUnknown?: boolean; authRequired?: boolean };
+type CommitRecovery = { owner?: SubmissionOwner; outcomeUnknown?: boolean; authRequired?: boolean };
 export type ImagePostAttempt = CommitRecovery & { uploadToken: string; category: CommunityPostCategory; content: string };
 export type ImagePostAttemptRef = { current: ImagePostAttempt | null };
 export type ImageEditAttempt = CommitRecovery & { uploadToken: string; postId: number; content: string; retainedImageIds: number[] };
 
 export class ImageSelectionError extends Error {
-  constructor(public readonly reason: 'permission' | 'limit' | 'conversion') { super(reason); }
+  constructor(public readonly reason: 'permission' | 'limit' | 'conversion' | 'size') { super(reason); }
 }
 
 export function resizeForPost(width: number, height: number): { width: number } | { height: number } | null {
@@ -93,115 +96,205 @@ export async function selectPostImages(current: PostImage[], observer?: Selectio
   return appendPostImages(current, converted);
 }
 
-export async function cancelUpload(uploadToken: string, request: typeof communityRequest = communityRequest, path = 'post-image-uploads'): Promise<void> {
-  try { await request(path, 'DELETE', { uploadToken }); }
-  catch { /* Best effort only: app termination/network/S3 failure can leave unregistered objects. */ }
+export async function cancelUpload(uploadToken: string, request: typeof communityRequest = communityRequest, path = 'post-image-uploads', owner?: SubmissionOwner): Promise<void> {
+  try {
+    await withRequestTimeout('cleanup', UPLOAD_TIMEOUT_MS.cleanup, (signal, onHttpError) =>
+      request(path, 'DELETE', { uploadToken }, signal, onHttpError, owner ? generation => assertSubmissionOwner(owner, generation) : undefined));
+  } catch (error) {
+    // Best effort: a lost/timed-out response does not establish whether deletion completed.
+    // Keep cleanup errors separate so callers can rethrow the original submission error.
+    logCommunityError('CLEANUP', { method: 'DELETE',
+      path: request === communityRequest ? `/api/community/${path}` : `/api/${path}`,
+      ...(error instanceof CommunityApiError ? { status: error.status, responseBody: error.responseBody } : {}),
+    }, error);
+  }
 }
 
-export async function uploadPostImages(images: PostImage[], request: typeof communityRequest = communityRequest, path = 'post-image-uploads'): Promise<string> {
+export async function uploadPostImages(images: PostImage[], request: typeof communityRequest = communityRequest, path = 'post-image-uploads', signal?: AbortSignal, owner?: SubmissionOwner): Promise<string> {
+    const assertOwner = (generation?: number) => { if (owner) assertSubmissionOwner(owner, generation); };
+    assertOwner();
     const apiPath = request === communityRequest ? `/api/community/${path}` : `/api/${path}`;
     if (images.length < 1 || images.length > MAX_POST_IMAGES) throw new ImageSelectionError('limit');
-    const response = await request(path, 'POST', { count: images.length, contentType: 'image/webp' });
+    // Read each final WebP once, before presigning. Keep the exact buffers for PUT.
+    const fileBytes: (ArrayBuffer | undefined)[] = [];
+    const sizeBytes: number[] = [];
+    for (let i = 0; i < images.length; i++) {
+      let file: Response | undefined;
+      let fileErrorBody: string | undefined;
+      try {
+        const bytes = await withRequestTimeout('local', UPLOAD_TIMEOUT_MS.local, async requestSignal => {
+          assertOwner();
+          file = await fetch(images[i].uri, { signal: requestSignal });
+          throwIfRequestAborted(requestSignal);
+          if (!file.ok) {
+            fileErrorBody = await readCommunityErrorBody(file);
+            throw new Error('Image file unavailable');
+          }
+          return file.arrayBuffer();
+        }, signal);
+        if (bytes.byteLength < 1 || bytes.byteLength > MAX_IMAGE_SIZE_BYTES) throw new ImageSelectionError('size');
+        fileBytes.push(bytes);
+        sizeBytes.push(bytes.byteLength);
+      } catch (error) {
+        logCommunityError('LOCAL_FILE', { method: 'GET', path: 'local WebP cache', imageIndex: i + 1, status: file?.status,
+          responseBody: fileErrorBody }, error);
+        throw error;
+      }
+    }
+    let response: Response | undefined;
     let grant: UploadGrant;
     let responseBody: string | undefined;
     try {
-      responseBody = await response.text();
-      grant = JSON.parse(responseBody);
-      if (!grant || typeof grant.uploadToken !== 'string' || !Array.isArray(grant.images)
-        || grant.images.length !== images.length) throw new Error('Invalid upload grant');
+      grant = await withRequestTimeout('presign', UPLOAD_TIMEOUT_MS.presign, async (requestSignal, onHttpError) => {
+        assertOwner();
+        response = await request(path, 'POST', { version: 2, count: images.length, contentType: 'image/webp', sizeBytes }, requestSignal, onHttpError, assertOwner);
+        throwIfRequestAborted(requestSignal);
+        responseBody = await response.text();
+        throwIfRequestAborted(requestSignal);
+        const parsed: UploadGrant = JSON.parse(responseBody);
+        if (!parsed || typeof parsed.uploadToken !== 'string' || !Array.isArray(parsed.images)
+          || parsed.images.length !== images.length) throw new Error('Invalid upload grant');
+        return parsed;
+      }, signal);
     } catch (error) {
-      logCommunityError('PRESIGN', { method: 'POST', path: apiPath, status: response.status, responseBody }, error);
+      if (response) logCommunityError('PRESIGN', { method: 'POST', path: apiPath, status: response.status, responseBody }, error);
       throw error;
     }
     try {
+      assertOwner();
       for (let i = 0; i < images.length; i++) {
         const upload = grant.images[i];
         if (!upload || upload.contentType !== 'image/webp' || upload.sortOrder !== i
           || typeof upload.imageKey !== 'string' || !upload.imageKey.endsWith('.webp') || typeof upload.uploadUrl !== 'string') {
           const error = new Error('Invalid WebP upload');
-          logCommunityError('PRESIGN', { method: 'POST', path: apiPath, imageIndex: i + 1, status: response.status }, error);
+          logCommunityError('PRESIGN', { method: 'POST', path: apiPath, imageIndex: i + 1, status: response?.status }, error);
           throw error;
         }
-        let bytes: ArrayBuffer;
-        let file: Response | undefined;
-        try {
-          file = await fetch(images[i].uri);
-          if (!file.ok) throw new Error('Image file unavailable');
-          bytes = await file.arrayBuffer();
-        } catch (error) {
-          logCommunityError('LOCAL_FILE', { method: 'GET', path: 'local WebP cache', imageIndex: i + 1, status: file?.status,
-            responseBody: file && !file.ok ? await readCommunityErrorBody(file) : undefined }, error);
-          throw error;
-        }
+        const bytes = fileBytes[i]!;
         let put: Response | undefined;
+        let putErrorDetails: Awaited<ReturnType<typeof readS3PutError>> | undefined;
         try {
-          put = await fetch(upload.uploadUrl, {
-            // Expo SDK 57 overrides explicit Content-Type with Blob.type (empty for cache files).
-            // ArrayBuffer preserves the signed header and avoids the RN Blob/base64 round trip.
-            method: 'PUT', headers: { 'Content-Type': 'image/webp' }, body: bytes,
-          });
-          if (!put.ok) throw new Error('Image upload failed');
+          await withRequestTimeout('put', UPLOAD_TIMEOUT_MS.put, async requestSignal => {
+            assertOwner();
+            put = await fetch(upload.uploadUrl, {
+              // Expo SDK 57 overrides explicit Content-Type with Blob.type (empty for cache files).
+              // ArrayBuffer preserves the signed header and avoids the RN Blob/base64 round trip.
+              method: 'PUT', headers: { 'Content-Type': 'image/webp' }, body: bytes, signal: requestSignal,
+            });
+            throwIfRequestAborted(requestSignal);
+            assertOwner();
+            if (!put.ok) {
+              putErrorDetails = await readS3PutError(put);
+              throw new Error('Image upload failed');
+            }
+          }, signal);
         } catch (error) {
           logCommunityError('S3_PUT', { method: 'PUT', path: 'S3 post image', imageIndex: i + 1, status: put?.status,
             ...describeS3Put(upload.uploadUrl, bytes),
-            ...(put && !put.ok ? await readS3PutError(put) : {}),
+            ...putErrorDetails,
             requestId: put?.headers.get('x-amz-request-id') ?? undefined }, error);
           throw error;
+        } finally {
+          // Release uploaded buffers while the remaining PUTs are still in flight.
+          fileBytes[i] = undefined;
         }
       }
+      throwIfRequestAborted(signal);
+      assertOwner();
     } catch (error) {
-      await cancelUpload(grant.uploadToken, request, path);
+      fileBytes.length = 0;
+      await cancelUpload(grant.uploadToken, request, path, owner);
       throw error;
     }
     return grant.uploadToken;
 }
 
 export async function publishPostWithImages(
-  category: CommunityPostCategory, content: string, images: PostImage[], attempt: ImagePostAttemptRef,
+  category: CommunityPostCategory, content: string, images: PostImage[], attempt: ImagePostAttemptRef, signal?: AbortSignal, owner = captureSubmissionOwner(),
 ) {
-  if (!attempt.current) attempt.current = { uploadToken: await uploadPostImages(images), category, content };
-  const pending = attempt.current;
+  throwIfRequestAborted(signal);
+  assertSubmissionOwner(owner);
+  if (!attempt.current) {
+    const prepared = { uploadToken: await uploadPostImages(images, communityRequest, 'post-image-uploads', signal, owner), category, content, owner };
+    assertSubmissionOwner(owner);
+    attempt.current = prepared;
+  }
+  assertAttemptOwner(attempt.current, owner);
+  const pending = { ...attempt.current, owner };
+  attempt.current = pending;
   pending.authRequired = false;
+  let commitStarted = false;
+  const beforeSend = (generation?: number) => { assertSubmissionOwner(owner, generation); throwIfRequestAborted(signal); commitStarted = true; };
   try {
-    const result = await createCommunityPost(pending.category, pending.content, pending.uploadToken);
-    attempt.current = null;
+    throwIfRequestAborted(signal);
+    // Check again after the API client's asynchronous auth read, immediately before fetch.
+    // The screen signal never aborts a commit that may already have saved on the server.
+    const result = await createCommunityPost(pending.category, pending.content, pending.uploadToken, beforeSend);
+    if (isSubmissionOwnerCurrent(owner) && attempt.current === pending) attempt.current = null;
     return result;
   } catch (error) {
+    if (!isSubmissionOwnerCurrent(owner)) {
+      pending.authRequired = true;
+      if (commitStarted && !(error instanceof CommunityApiError && [400, 401, 403, 404, 409].includes(error.status))) pending.outcomeUnknown = true;
+      throw error;
+    }
     // Never delete images when the commit outcome is unknown (network failure/5xx).
     // Retain the signed grant and immutable request; retry returns the same post id after a lost response.
-    if (error instanceof CommunityApiError && error.status === 401 && pending.outcomeUnknown) {
+    if (error instanceof RequestCancelledError && !commitStarted && !pending.outcomeUnknown) {
+      attempt.current = null;
+      await cancelUpload(pending.uploadToken, communityRequest, 'post-image-uploads', owner);
+    } else if (error instanceof CommunityApiError && error.status === 401 && pending.outcomeUnknown) {
       // This rejection says nothing about an earlier lost response. Reauthenticate and retry the same token.
       pending.authRequired = true;
     } else if (error instanceof CommunityApiError && [400, 401, 403, 404, 409].includes(error.status)) {
       attempt.current = null;
       // Authentication recovery must not wait for best-effort cleanup with an expired token.
-      if (error.status === 401) void cancelUpload(pending.uploadToken);
-      else await cancelUpload(pending.uploadToken);
+      if (error.status === 401) void cancelUpload(pending.uploadToken, communityRequest, 'post-image-uploads', owner);
+      else await cancelUpload(pending.uploadToken, communityRequest, 'post-image-uploads', owner);
     } else pending.outcomeUnknown = true;
     throw error;
   }
 }
 
 export async function updatePostWithImages(postId: number, content: string, retainedImageIds: number[],
-  images: PostImage[], attempt: { current: ImageEditAttempt | null }) {
+  images: PostImage[], attempt: { current: ImageEditAttempt | null }, signal?: AbortSignal, owner = captureSubmissionOwner()) {
   return commitImageEdit(attempt,
-    async () => ({ postId, content, retainedImageIds: [...retainedImageIds], uploadToken: await uploadPostImages(images) }),
-    pending => updateCommunityPost(pending.postId, pending.content, pending.retainedImageIds, pending.uploadToken),
-    token => cancelUpload(token));
+    async () => ({ postId, content, owner, retainedImageIds: [...retainedImageIds], uploadToken: await uploadPostImages(images, communityRequest, 'post-image-uploads', signal, owner) }),
+    (pending, beforeSend) => updateCommunityPost(pending.postId, pending.content, pending.retainedImageIds, pending.uploadToken, beforeSend),
+    token => cancelUpload(token, communityRequest, 'post-image-uploads', owner), signal, owner);
 }
 
 export async function commitImageEdit<T extends CommitRecovery & { uploadToken: string }, R>(
-  attempt: { current: T | null }, prepare: () => Promise<T>, commit: (pending: T) => Promise<R>, cleanup: (token: string) => Promise<void>): Promise<R> {
-  if (!attempt.current) attempt.current = await prepare();
-  const pending = attempt.current;
+  attempt: { current: T | null }, prepare: () => Promise<T>, commit: (pending: T, beforeSend: (generation?: number) => void) => Promise<R>, cleanup: (token: string) => Promise<void>, signal?: AbortSignal, owner = captureSubmissionOwner()): Promise<R> {
+  throwIfRequestAborted(signal);
+  assertSubmissionOwner(owner);
+  if (!attempt.current) {
+    const prepared = await prepare();
+    assertSubmissionOwner(owner);
+    attempt.current = prepared;
+  }
+  assertAttemptOwner(attempt.current, owner);
+  const pending = { ...attempt.current, owner };
+  attempt.current = pending;
   pending.authRequired = false;
+  let commitStarted = false;
+  const beforeSend = (generation?: number) => { assertSubmissionOwner(owner, generation); throwIfRequestAborted(signal); commitStarted = true; };
   try {
-    const result = await commit(pending);
-    attempt.current = null;
+    throwIfRequestAborted(signal);
+    const result = await commit(pending, beforeSend);
+    if (isSubmissionOwnerCurrent(owner) && attempt.current === pending) attempt.current = null;
     return result;
   } catch (error) {
+    if (!isSubmissionOwnerCurrent(owner)) {
+      pending.authRequired = true;
+      if (commitStarted && !(error instanceof CommunityApiError && [400, 401, 403, 404, 409].includes(error.status))) pending.outcomeUnknown = true;
+      throw error;
+    }
     // Keep the exact request for a lost commit response, just as image creation does.
-    if (error instanceof CommunityApiError && error.status === 401 && pending.outcomeUnknown) {
+    if (error instanceof RequestCancelledError && !commitStarted && !pending.outcomeUnknown) {
+      attempt.current = null;
+      await cleanup(pending.uploadToken);
+    } else if (error instanceof CommunityApiError && error.status === 401 && pending.outcomeUnknown) {
       pending.authRequired = true;
     } else if (error instanceof CommunityApiError && [400, 401, 403, 404, 409].includes(error.status)) {
       attempt.current = null;

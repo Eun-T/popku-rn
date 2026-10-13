@@ -9,7 +9,7 @@ const detail = Object.freeze({ ...marker,regionId:1,regionName:'성수',countryC
   socialLinks:Object.freeze({website:'https://original.test'}),reservationUrl:'https://reserve.test',
   reservationStartAt:'2026-10-01T10:00:00',reservationEndAt:'2026-10-10T18:00:00' });
 
-async function app({failDetail=false,failReviews=false,realReviewCard=false,transform}={}) {
+async function app({failDetail=false,failReviews=false,realReviewCard=false,transform,detailResponse}={}) {
   const calls={ detail:[],reviews:[],routes:[],links:[],share:[],images:[] };
   const nativeImage=function Image(){};
   nativeImage.resolveAssetSource=()=>({width:100,height:100});
@@ -19,6 +19,7 @@ async function app({failDetail=false,failReviews=false,realReviewCard=false,tran
     Alert:{alert(){}},Share:{share:async value=>calls.share.push(value)},Linking:{openURL:async url=>calls.links.push(url)} };
   const ui=runtime({
     'expo-constants':{__esModule:true,default:{expoConfig:{ios:{bundleIdentifier:'com.popku.app'},android:{package:'com.popku.app'}}}},
+    'expo-image':{Image:'ExpoImage'},
     'react-native':native,'lucide-react-native':Object.fromEntries(['ArrowLeft','ArrowUpRight','CalendarDays','ChevronLeft','ChevronRight','Clock3','Heart','MapPin','MessageCircle','Share2','Star','Ticket'].map(n=>[n,n])),
     'expo-router':{useFocusEffect(){},useLocalSearchParams:()=>({id:detail.publicId}),useRouter:()=>({back(){},push:r=>calls.routes.push(r),dismissTo:r=>calls.routes.push(r)})},
     'react-native-safe-area-context':{SafeAreaView:'SafeAreaView',useSafeAreaInsets:()=>({top:40,bottom:20})},
@@ -29,9 +30,9 @@ async function app({failDetail=false,failReviews=false,realReviewCard=false,tran
     ...(!realReviewCard ? {'src/components/community/CommunityPostItem.tsx':{__esModule:true,default:'ReviewCard'}} : {}),
     'src/components/reviews/ReviewActions.tsx':{__esModule:true,default:'ReviewActions'},
     'src/hooks/useCommunityNow.ts':{useCommunityNow:()=>({now:1})},
-    'src/lib/auth.ts':{getAuthUser:()=>null,subscribeAuthUser:()=>()=>{},subscribeAuthSession:()=>()=>{},getAuthSession:async()=>({accessToken:null,generation:0})},
+    'src/lib/auth.ts':{getAuthUser:()=>null,getAuthStatus:()=> 'anonymous',subscribeAuthStatus:()=>()=>{},subscribeAuthUser:()=>()=>{},subscribeAuthSession:()=>()=>{},getAuthSession:async()=>({accessToken:null,generation:0})},
     'src/lib/favorites.ts':{favoritePopup:async()=>{},unfavoritePopup:async()=>{},FavoriteUnauthorizedError:class extends Error{}},
-    'src/lib/popups.ts':{getPopupDetail:async(...args)=>{ calls.detail.push(args); if(failDetail) throw new Error('read failed'); return detail; },PopupDetailUnauthorizedError:class extends Error{}},
+    'src/lib/popups.ts':{getPopupDetail:async(...args)=>{ calls.detail.push(args); if(failDetail) throw new Error('read failed'); return detailResponse?detailResponse(...args):detail; },PopupDetailUnauthorizedError:class extends Error{}},
     'src/lib/reviews.ts':{subscribeReviews:()=>()=>{},getPopupReviews:async(...args)=>{ calls.reviews.push(args); if(failReviews) throw new Error('read failed'); return {items:[],nextCursor:null}; }},
     'src/lib/communityFeedRefresh.ts':Object.fromEntries(['subscribeCommunityLikes','subscribeCommunityCommentCounts','subscribeCommunityPostChanges'].map(n=>[n,()=>()=>{}])),
     'src/lib/communityLikes.ts':{changeCommunityLike:async()=>{}},
@@ -39,7 +40,7 @@ async function app({failDetail=false,failReviews=false,realReviewCard=false,tran
   },{transform});
   const {languageStore}=ui.load('src/locales/languageStore.ts');
   await languageStore.initialize({read:async()=> 'ko',write:async()=>{},getLanguageTags:()=>['ja-JP']});
-  return { ...ui,calls,languageStore,async language(value) { await languageStore.setLanguagePreference(value); },async settle() { await flush(); await flush(); } };
+  return { ...ui,calls,languageStore,async language(value) { await languageStore.setLanguagePreference(value); },async settle() { await flush(); await flush(); ui.renderAll(); } };
 }
 
 module.exports={app,marker,detail};

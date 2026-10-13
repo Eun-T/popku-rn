@@ -1,5 +1,6 @@
+import { Platform } from 'react-native';
 import { API_BASE_URL } from '../constants/api';
-import { DEVICE_ID } from './auth';
+import { getDeviceId } from './auth';
 
 export type PopkuTokens = { accessToken: string; refreshToken: string };
 export type GoogleAuthResult =
@@ -7,6 +8,7 @@ export type GoogleAuthResult =
   | { kind: 'signup'; signupToken: string; expiresInSeconds: number };
 
 export type GoogleCompleteRequest = {
+  ageConfirmed: boolean;
   signupToken: string;
   nickname: string;
   consents: { termsOfService: boolean; privacyPolicy: boolean; marketing: boolean };
@@ -51,7 +53,7 @@ export async function authenticateWithGoogle(idToken: string): Promise<GoogleAut
   const response = await fetch(`${API_BASE_URL}/api/auth/google`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ idToken, deviceId: DEVICE_ID }),
+    body: JSON.stringify({ idToken, deviceId: await getDeviceId() }),
   });
   if (!response.ok) throw await errorFromResponse(response);
   const body: unknown = await response.json();
@@ -91,11 +93,17 @@ export async function getGoogleIdToken(): Promise<string | null> {
   const webClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID?.trim();
   if (__DEV__) console.info('[GOOGLE] signin starting, web client ID configured:', !!webClientId);
   if (!webClientId) throw new Error('Google 로그인 설정을 확인해 주세요.');
+  const iosClientId = Platform.OS === 'ios'
+    ? process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID?.trim()
+    : undefined;
+  if (Platform.OS === 'ios' && !iosClientId) {
+    throw new Error('Google 로그인 설정을 확인해 주세요.');
+  }
   // Load the native module on demand so the existing LOCAL login stays available before a dev-client rebuild.
   const { GoogleOneTapSignIn, isCancelledResponse, isNoSavedCredentialFoundResponse, isSuccessResponse } =
     await import('react-native-nitro-google-signin');
   if (__DEV__) console.info('[GOOGLE] native module loaded');
-  GoogleOneTapSignIn.configure({ webClientId });
+  GoogleOneTapSignIn.configure(Platform.OS === 'ios' ? { webClientId, iosClientId } : { webClientId });
   if (__DEV__) console.info('[GOOGLE] configure complete');
   await GoogleOneTapSignIn.checkPlayServices();
   if (__DEV__) console.info('[GOOGLE] signin starting: saved credentials');

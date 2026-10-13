@@ -144,6 +144,7 @@ test('compiled Provider gates startup once, listens to Appearance/foreground and
       AppState:{addEventListener(_name,fn){foregroundCallback=fn;return {remove(){removed++;}};}} },
     '@react-native-async-storage/async-storage': { getItem:()=>read.promise,setItem:async()=>{} },
     'src/locales/LanguageProvider.tsx': {__esModule:true,default:'LanguageProvider'},
+    'src/lib/auth.ts': { initializeAuth: async () => {} },
     'expo-router': { Stack:Object.assign('Stack', {Screen:'Screen'}) },
   }, { transform:compilerTransform(['src/theme/ThemeProvider.tsx','src/theme/useTheme.ts']) });
   const Provider = ui.load('src/theme/ThemeProvider.tsx').default, store = ui.load('src/theme/themeStore.ts').themeStore;
@@ -152,7 +153,8 @@ test('compiled Provider gates startup once, listens to Appearance/foreground and
   await store.setThemePreference('system'); appearanceCallback(); assert.equal(store.getSnapshot().resolvedTheme,'dark');
   scheme='light'; appearanceCallback(); assert.equal(store.getSnapshot().resolvedTheme,'light');
   scheme='dark'; foregroundCallback('active'); assert.equal(store.getSnapshot().resolvedTheme,'dark'); assert.equal(mounted.tree,child);
-  const root = ui.load('src/app/_layout.tsx').default();
+  const Root = ui.load('src/app/_layout.tsx').default;
+  const root = ui.mount(() => Root()).tree;
   assert.equal(root.type,Provider); assert.equal(root.props.children.type,'LanguageProvider');
   const stack = root.props.children.props.children;
   assert.deepEqual(stack.props.screenOptions,{headerShown:false});
@@ -227,9 +229,10 @@ test('Expo native config follows the single flag and preserves all other static 
   const loaded=require('@expo/config').getConfig(process.cwd(),{skipSDKVersionRequirement:true});
   assert.equal(loaded.exp.userInterfaceStyle,'light');
   const module={exports:{}};
-  new Function('require','module',fs.readFileSync('app.config.js','utf8'))(name=>{
+  new Function('require','module','process',fs.readFileSync('app.config.js','utf8'))(name=>{
+    if(name==='./src/constants/apiEnvironment.js') return require('../src/constants/apiEnvironment.js');
     assert.equal(name,'./src/theme/themeFeature.js');return {DARK_MODE_ENABLED:true};
-  },module);
+  },module,{env:{}});
   assert.deepEqual(module.exports({config}),{...config,userInterfaceStyle:'automatic'});
   assert.equal(config.userInterfaceStyle,'automatic');
 });

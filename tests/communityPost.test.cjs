@@ -59,7 +59,9 @@ function writeScreen(createPost, imageOptions = {}) {
     react,
     'react-native': primitive,
     'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView', useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) },
-    '../../lib/community': { createCommunityPost: createPost, CommunityApiError: class extends Error {} },
+    '../../lib/community': { createCommunityPost: (category, content, token, beforeSend) => {
+      beforeSend?.(); return token === undefined ? createPost(category, content) : createPost(category, content, token);
+    }, CommunityApiError: class extends Error {} },
     '../../lib/communityFeedRefresh': { markCommunityFeedChanged() { feedRefreshes++; } },
     '../../lib/communityDiagnostics': diagnostics,
     '../../lib/communityImages': {

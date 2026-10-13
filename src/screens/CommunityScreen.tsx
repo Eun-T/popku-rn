@@ -1,3 +1,5 @@
+import { useModerationRevision } from '../hooks/useModerationRevision';
+import { isLocallyBlocked } from '../lib/moderationState';
 import { useTranslation } from '../hooks/useTranslation';
 import { useFocusEffect, useRouter, useScrollToTop } from "expo-router";
 import { Pencil, Settings } from "lucide-react-native";
@@ -18,6 +20,8 @@ import {
 } from "react-native-safe-area-context";
 
 import CommunityPostItem from "../components/community/CommunityPostItem";
+import PostActions from '../components/community/PostActions';
+import ReviewActions from '../components/reviews/ReviewActions';
 import {
   FLOATING_TAB_BAR_BOTTOM_GAP,
   FLOATING_TAB_BAR_HEIGHT,
@@ -50,6 +54,7 @@ const categories: readonly CommunityCategory[] = [
 
 export default function CommunityScreen() {
   const { t } = useTranslation();
+  const moderation = useModerationRevision();
   const translation = useRef(t);
   useEffect(() => { translation.current = t; }, [t]);
   const router = useRouter();
@@ -205,7 +210,7 @@ export default function CommunityScreen() {
           }
         });
     },
-    [category, sort, retryKey, updateNow],
+    [category, sort, retryKey, updateNow, moderation],
   );
 
   useFocusEffect(
@@ -288,12 +293,14 @@ export default function CommunityScreen() {
         style={styles.list}
         refreshing={refreshing}
         onRefresh={refresh}
-        data={posts}
+        data={posts.some(item => isLocallyBlocked(item.author.id)) ? posts.filter(item => !isLocallyBlocked(item.author.id)) : posts}
         extraData={now}
         keyExtractor={(post) => `${post.type}:${post.id}`}
         renderItem={({ item }) => (
           <CommunityPostItem
             post={item}
+            postActions={item.type === 'POST' ? <PostActions post={item} /> : undefined}
+            reviewActions={item.type === 'REVIEW' ? <ReviewActions review={item} /> : undefined}
             now={now}
             onPressLike={
               item.type === "REVIEW" ||

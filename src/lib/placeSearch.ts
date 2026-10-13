@@ -1,4 +1,6 @@
-import { API_BASE_URL } from '../constants/api';
+import { API_BASE_URL, IS_DEVELOPMENT_ENVIRONMENT } from '../constants/api';
+
+export const GOOGLE_PLACES_SEARCH_ENABLED = IS_DEVELOPMENT_ENVIRONMENT;
 
 export type PlaceLanguageCode = 'ko' | 'ja';
 export type PlaceViewport = { south: number; west: number; north: number; east: number };
@@ -26,6 +28,7 @@ export type AutocompletePlacesInput = {
 export type ResolvePlaceInput = { placeId: string; sessionToken: string };
 
 async function postPlaceSearch<T>(path: string, body: object, signal?: AbortSignal): Promise<T> {
+  if (!GOOGLE_PLACES_SEARCH_ENABLED) throw new Error('place_search_disabled');
   const response = await fetch(`${API_BASE_URL}/api/place-search/${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

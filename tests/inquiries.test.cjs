@@ -1,7 +1,7 @@
 const assert=require('node:assert/strict'),{readFileSync}=require('node:fs'),{test}=require('node:test'),ts=require('typescript');
 const jsx=(type,props,key)=>({type,props,key});
 function load(file,mocks,globals={}){
-  mocks=require('./helpers/uiDependencies.cjs').withUiDependencies(file,mocks);
+  mocks=require('./helpers/uiDependencies.cjs').withUiDependencies(file, mocks, globals.fetch);
   const code=ts.transpileModule(readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText;
   const module={exports:{}};new Function('require','module','exports',...Object.keys(globals),code)(name=>{assert.ok(name in mocks,name);return mocks[name];},module,module.exports,...Object.values(globals));return module.exports;
 }

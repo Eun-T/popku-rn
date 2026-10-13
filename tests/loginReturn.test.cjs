@@ -1,3 +1,4 @@
+const { savedToken } = require('./helpers/authStorage.cjs');
 const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
 const { test } = require('node:test');
@@ -51,6 +52,8 @@ const response = (body, status = 200) => ({ ok: status >= 200 && status < 300, s
 const tokensFor = email => ({ accessToken: email, refreshToken: `refresh:${email}` });
 const userFor = email => ({ email, nickname: email });
 const target = publicId => ({ intent: 'review', publicId });
+const retainedTabState = { type: 'tab', index: 0, selected: 'map', camera: 'unchanged',
+  routes: [{ key: 'map-original', name: 'map' }] };
 const post = { type: 'POST', id: 1, category: 'FREE', content: 'public', createdAt: '2026-10-08T10:00:00+09:00',
   author: { id: 1, nickname: 'me', avatarUrl: null }, images: [], likeCount: 0, commentCount: 0, viewCount: 0, popup: null, rating: null, regionName: null };
 
@@ -75,7 +78,9 @@ function setup(t, publicId = 'one', profileLogin = false) {
       setItemAsync: async (key, value) => storage.set(key, value), deleteItemAsync: async key => storage.delete(key) },
     '../constants/api': { API_BASE_URL: 'https://api' }, './favoriteCache': { clearFavoriteCache() {} }, './communityFeedRefresh': sync,
   }, { fetch });
-  const google = load('src/lib/googleAuth.ts', { '../constants/api': { API_BASE_URL: 'https://api' }, './auth': auth }, { fetch });
+  // Model RootLayout's startup restoration; individual screens only subscribe.
+  void auth.initializeAuth();
+  const google = load('src/lib/googleAuth.ts', { 'react-native': { Platform: { OS: 'ios' } }, '../constants/api': { API_BASE_URL: 'https://api' }, './auth': auth }, { fetch });
   const diagnostics = { readCommunityErrorBody: async r => r.text(), logCommunityError() {} };
   const community = load('src/lib/community.ts', { '../constants/api': { API_BASE_URL: 'https://api' }, './auth': auth,
     './communityFeedRefresh': sync, './communityDiagnostics': diagnostics }, { fetch });
@@ -83,24 +88,24 @@ function setup(t, publicId = 'one', profileLogin = false) {
     './community': community, './communityFeedRefresh': sync, './communityDiagnostics': diagnostics, './communityImages': {} }, { fetch });
   const returns = loadPure('src/lib/loginReturn.ts');
   const stackRouter = StackRouter({ initialRouteName: '(tabs)' });
-  const routeNames = profileLogin ? ['index', 'login', 'signup'] : ['(tabs)', 'places/[id]', 'login', 'signup', 'reviews/write', 'community/write'];
+  const routeNames = ['(tabs)', 'places/[id]', 'login', 'signup', 'reviews/write', 'community/write'];
   const options = { routeParamList: {}, routeGetIdList: {} };
   let stack = { type: 'stack', key: 'root', index: 1, routeNames, preloadedRoutes: [],
-    routes: [{ key: 'tabs-original', name: '(tabs)', state: { selected: 'map', camera: 'unchanged' } }, { key: 'popup-original', name: 'places/[id]', params: { id: publicId } }] };
-  if (profileLogin) stack = { ...stack, key: 'profile-stack-original', index: 0,
+    routes: [{ key: 'tabs-original', name: '(tabs)', state: retainedTabState }, { key: 'popup-original', name: 'places/[id]', params: { id: publicId } }] };
+  const profileStack = { type: 'stack', key: 'profile-stack-original', index: 0,
     routes: [{ key: 'profile-index-original', name: 'index' }] };
   let parentTabs = { key: 'tabs-state-original', index: 4,
-    routes: ['index', 'places', 'map', 'community', 'profile'].map(name => ({ name, key: `${name}-tab-original`, ...(name === 'profile' ? { state: stack } : {}) })) };
-  let parentRoot = { key: 'root-original', index: 0, routes: [{ key: 'tabs-screen-original', name: '(tabs)', state: parentTabs }] };
+    routes: ['index', 'places', 'map', 'community', 'profile'].map(name => ({ name, key: `${name}-tab-original`, ...(name === 'profile' ? { state: profileStack } : {}) })) };
+  if (profileLogin) stack = { ...stack, key: 'root-original', index: 0,
+    routes: [{ key: 'tabs-screen-original', name: '(tabs)', state: parentTabs }] };
   const optionCommits = [], transitions = [];
   const apply = action => {
     const next = stackRouter.getStateForAction(stack, action, options); assert.ok(next); stack = next;
     if (profileLogin) {
-      parentTabs = { ...parentTabs, routes: parentTabs.routes.map(route => route.name === 'profile' ? { ...route, state: stack } : route) };
-      parentRoot = { ...parentRoot, routes: [{ ...parentRoot.routes[0], state: parentTabs }] };
+      parentTabs = stack.routes[0].state;
     }
   };
-  const navigation = { getState: () => stack, setParams(params) {
+  const navigation = { getState: () => stack, dispatch: apply, setParams(params) {
     navigationCalls.push(['setParams', params]);
     apply({ type: 'SET_PARAMS', target: stack.key, source: stack.routes[stack.index].key, payload: { params } });
   } };
@@ -136,9 +141,13 @@ function setup(t, publicId = 'one', profileLogin = false) {
     let Component, guard;
     if (kind === 'profile') {
       Component = load('src/app/(tabs)/profile/index.tsx', { ...common,
+        'expo-clipboard': { setStringAsync: async () => true },
         'expo-blur': { BlurTargetView: 'BlurTargetView', BlurView: 'BlurView' }, '../../../lib/auth': auth }).default;
     } else if (kind === 'login') {
       const Login = load('src/app/(tabs)/profile/login.tsx', { ...common, '../../../lib/auth': auth,
+        '../../../../assets/fonts/google-sans-medium.ttf': 1,
+        '../../../../assets/images/auth/google-g.png': 2,
+        '../../../../assets/images/auth/apple-logo-white.svg': 3,
         '../../../hooks/useLoginAttempt': { useLoginAttempt }, '../../../lib/googleAuth': { ...google, getGoogleIdToken: () => googlePicker() } }).default;
       Component = load('src/app/login.tsx', { './(tabs)/profile/login': { __esModule: true, default: Login } }).default;
     } else if (kind === 'signup') {
@@ -157,11 +166,11 @@ function setup(t, publicId = 'one', profileLogin = false) {
         const authentication = useLoginAttempt(JSON.stringify(returns.parseLoginReturn(params())));
         const [joining, setJoining] = state.react.useState(false), joiningRef = state.react.useRef(false);
         const [signupStep, setSignupStep] = state.react.useState('terms');
-        const scope = { canJoin: true, isGoogle: true, joiningRef, authentication, setJoining, setJoinError() {},
+        const scope = { canJoin: true, ageConfirmed: true, isGoogle: true, isApple: false, isSocial: true, joiningRef, authentication, setJoining, setJoinError() {},
           signupStep, setSignupStep, cancelNicknameCheck() {}, setNicknameError() {},
           signupDraft: { nickname: 'me', termsAccepted: true, privacyAccepted: true, marketingAccepted: false },
-          ...google, ...auth, target: returns.parseLoginReturn(params()), ...returns,
-          router, Keyboard: { dismiss() {} }, setPassword() {}, setPasswordConfirmation() {}, setCode() {}, setEmail() {}, setNickname() {}, setConfirmedNickname() {},
+          ...google, ...auth, target: returns.parseLoginReturn(params()), params: params(), allowLeaveRef: { current: false }, ...returns,
+          router, navigation, Keyboard: { dismiss() {} }, setPassword() {}, setPasswordConfirmation() {}, setCode() {}, setEmail() {}, setNickname() {}, setConfirmedNickname() {},
           googleJoinErrorMessage: () => 'signup failed', joinErrorMessage: () => 'failed' };
         const handlers = new Function(...Object.keys(scope), code)(...Object.values(scope));
         state.react.useEffect(handlers.expiry, []);
@@ -210,7 +219,7 @@ function setup(t, publicId = 'one', profileLogin = false) {
   function fill(login) { login.input('이메일').props.onChangeText('me@test'); login.input('비밀번호').props.onChangeText('password'); login.render(); }
   t.after(() => clients.forEach(c => c.unmount()));
   return { auth, google, storage, calls, held, navigationCalls, navigation, router, returns, client, settle, startLogin, fill,
-    optionCommits, transitions, get parentTabs() { return parentTabs; }, get parentTabsRouteKey() { return parentRoot.routes[0].key; },
+    optionCommits, transitions, get parentTabs() { return parentTabs; }, get parentTabsRouteKey() { return stack.routes[0].key; },
     get stack() { return stack; }, hold: fn => { gate = fn; }, fail: fn => { fail = fn; },
     googleSignup: () => { googleSignup = true; }, picker: fn => { googlePicker = fn; },
   };
@@ -225,7 +234,7 @@ for (const publicId of ['one', 'another-popup']) test(`guest review button carri
   const login = s.client('login'); s.fill(login); const submit = login.button('로그인').props.onPress; submit(); submit(); await s.settle();
   assert.deepEqual(s.stack.routes.map(r => r.name), ['(tabs)', 'places/[id]', 'reviews/write']);
   assert.deepEqual(s.stack.routes.at(-1).params, { publicId });
-  assert.equal(s.stack.routes[0].key, 'tabs-original'); assert.deepEqual(s.stack.routes[0].state, { selected: 'map', camera: 'unchanged' });
+  assert.equal(s.stack.routes[0].key, 'tabs-original'); assert.deepEqual(s.stack.routes[0].state, retainedTabState);
   assert.equal(s.stack.routes[1].key, 'popup-original'); assert.equal(s.calls.filter(c => c.url.endsWith('/auth/login')).length, 1);
   assert.equal(s.navigationCalls.filter(([method]) => method === 'replace').length, 1);
   await s.auth.refreshAuthUser(); await s.auth.refreshAuthUser(); await s.settle();
@@ -297,11 +306,11 @@ for (const reason of ['back', 'expired']) test(`Google signup ${reason} preserve
 
 test('cancel after token save invalidates only its own attempt; a subsequent account survives late /me success and failure', async t => {
   const s = setup(t), login = s.startLogin(target('one')); s.hold(c => c.url.endsWith('/users/me')); s.fill(login);
-  login.button('로그인').props.onPress(); await s.settle(); assert.equal(s.storage.get('accessToken'), 'me@test');
+  login.button('로그인').props.onPress(); await s.settle(); assert.equal(savedToken(s.storage, 'accessToken'), 'me@test');
   login.button('뒤로가기').props.onPress(); await s.settle(); assert.equal(s.storage.size, 0);
   await s.auth.saveTokens(tokensFor('new@test')); s.auth.setAuthUser(userFor('new@test'));
   s.held[0].release(userFor('old@test')); await s.settle();
-  assert.deepEqual(s.auth.getAuthUser(), userFor('new@test')); assert.equal(s.storage.get('accessToken'), 'new@test');
+  assert.deepEqual(s.auth.getAuthUser(), userFor('new@test')); assert.equal(savedToken(s.storage, 'accessToken'), 'new@test');
   assert.equal(s.stack.routes.at(-1).key, 'popup-original');
 });
 
@@ -310,7 +319,7 @@ for (const status of [200, 401, 500]) test(`new session survives old /me HTTP ${
   login.button('로그인').props.onPress(); await s.settle();
   await s.auth.saveTokens(tokensFor('new@test')); s.auth.setAuthUser(userFor('new@test'));
   s.held[0].release(userFor('old@test'), status); await s.settle();
-  assert.deepEqual(s.auth.getAuthUser(), userFor('new@test')); assert.equal(s.storage.get('accessToken'), 'new@test');
+  assert.deepEqual(s.auth.getAuthUser(), userFor('new@test')); assert.equal(savedToken(s.storage, 'accessToken'), 'new@test');
   assert.equal(s.stack.routes.at(-1).name, 'login'); assert.equal(s.navigationCalls.filter(([method]) => method === 'replace').length, 0);
 });
 
@@ -365,7 +374,7 @@ test('direct anonymous writer submission keeps API authentication protection and
     assert.equal(s.stack.routes.at(-1).key, key); assert.equal(input().props.value, 'keep my draft');
     assert.equal(writer.button('별점 4점').props.accessibilityState.selected, true);
     assert.equal(s.stack.routes.filter(r => r.name === '(tabs)').length, 1);
-    assert.deepEqual(s.stack.routes[0].state, { selected: 'map', camera: 'unchanged' });
+    assert.deepEqual(s.stack.routes[0].state, retainedTabState);
   }
   assert.equal(s.stack.routes.filter(r => r.name === '(tabs)').length, 1); assert.equal(s.stack.routes.filter(r => r.name === 'reviews/write').length, 1);
   assert.equal(writer.guard.nativeFlags.at(-1), true, 'F02 guard still belongs to the original dirty writer');
@@ -381,7 +390,7 @@ for (const status of [401, 500]) test(`current /me failure ${status} preserves t
   assert.equal(s.stack.routes.at(-1).name, 'reviews/write'); assert.equal(s.navigationCalls.filter(([method]) => method === 'replace').length, 1);
 });
 
-for (const method of ['email', 'Google']) test(`My Page ${method} login commits no-animation before returning to the same profile route`, async t => {
+for (const method of ['email', 'Google']) test(`My Page ${method} login pops Root login with the default transition and retains the same profile route`, async t => {
   const s = setup(t, 'one', true), profile = s.client('profile');
   await s.settle();
   const slots = profile.slots, blurRef = nodes(profile.tree).find(node => node.type === 'BlurTargetView').props.ref;
@@ -393,9 +402,10 @@ for (const method of ['email', 'Google']) test(`My Page ${method} login commits 
   const submit = login.button(method === 'email' ? '로그인' : 'Google로 계속하기').props.onPress;
   submit(); submit();
   await s.settle();
-  assert.deepEqual(s.stack.routes.map(route => route.name), ['index']);
-  assert.equal(s.stack.routes[0].key, 'profile-index-original');
-  assert.equal(s.stack.key, 'profile-stack-original');
+  assert.deepEqual(s.stack.routes.map(route => route.name), ['(tabs)']);
+  assert.equal(s.parentTabs.routes[4].state.routes[0].key, 'profile-index-original');
+  assert.equal(s.parentTabs.routes[4].state.key, 'profile-stack-original');
+  assert.equal(s.stack.key, 'root-original');
   assert.equal(s.parentTabs.key, 'tabs-state-original');
   assert.equal(s.parentTabs.index, 4);
   assert.equal(s.parentTabs.routes[4].key, 'profile-tab-original');
@@ -403,15 +413,14 @@ for (const method of ['email', 'Google']) test(`My Page ${method} login commits 
   assert.equal(profile.slots, slots);
   assert.equal(nodes(profile.tree).find(node => node.type === 'BlurTargetView').props.ref, blurRef);
   assert.deepEqual(s.navigationCalls, [
-    ['push', { pathname: '/profile/login', params: { loginOrigin: 'profile' } }],
-    ['setParams', { profileLoginSuccess: '1' }], ['back', undefined],
+    ['push', { pathname: '/login', params: { loginOrigin: 'profile' } }], ['back', undefined],
   ]);
-  assert.deepEqual(s.transitions, [{ method: 'back', animation: 'none' }]);
+  assert.deepEqual(s.transitions, [{ method: 'back', animation: 'default' }]);
   const email = method === 'email' ? 'me@test' : 'google@test';
   assert.equal(s.auth.getAuthUser().email, email);
   assert.ok(nodes(profile.tree).some(node => node.type === 'Text' && node.props.children === email));
   assert.equal(s.calls.filter(call => call.url.endsWith(method === 'email' ? '/auth/login' : '/auth/google')).length, 1);
-  assert.equal(s.calls.filter(call => call.url.endsWith('/users/me')).length, 2, 'authentication reads /me once; the existing Profile focus refresh reads it once');
+  assert.equal(s.calls.filter(call => call.url.endsWith('/users/me')).length, 1, 'authentication reads /me once; returning to Profile only subscribes');
   assert.equal(s.stack.index, 0, 'back/swipe cannot reveal the removed login route');
 });
 
@@ -427,7 +436,7 @@ test('My Page login cancellation and failed authentication retain the native def
       assert.equal(s.stack.routes.at(-1).params.profileLoginSuccess, undefined);
     }
     login.button('뒤로가기').props.onPress(); await s.settle();
-    assert.equal(s.stack.routes[0].key, 'profile-index-original');
+    assert.equal(s.parentTabs.routes[4].state.routes[0].key, 'profile-index-original');
     assert.deepEqual(s.transitions, [{ method: 'back', animation: 'default' }]);
     assert.equal(s.navigationCalls.some(([method]) => method === 'setParams'), false);
     assert.equal(s.auth.getAuthUser(), null);
@@ -443,7 +452,7 @@ test('review/resume intents win over My Page origin, and unmarked or invalid-con
     const navigation = { getState: () => ({ index: 1, routes: [{ key: 'tabs', name: '(tabs)' }, { key: 'login', name: 'login' }] }),
       setParams: () => assert.fail('must not mark a Root or unrelated login') };
     returns.finishLoginReturn(router, navigation, null, loginOrigin);
-    assert.deepEqual(calls, [['replace', '/(tabs)']]);
+    assert.deepEqual(calls, loginOrigin === 'profile' ? [['back']] : [['replace', '/(tabs)']]);
   }
   for (const target of [{ intent: 'review', publicId: 'one' }, { intent: 'resume', resumeKey: 'writer' }]) {
     const calls = [], previous = target.intent === 'review'

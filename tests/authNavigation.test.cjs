@@ -18,11 +18,11 @@ for (const [label, file, name] of [
   ['email login', 'login', 'handleLogin'],
   ['Google login', 'login', 'handleGoogleLogin'],
   ['Google signup', 'signup', 'handleJoin'],
-]) test(`${label} replaces with the generated tab home route after saving authentication`, async () => {
+]) test(`${label} saves authentication before its login/return handoff`, async () => {
   const calls = [], noop = () => {};
   const tokens = { accessToken: 'access', refreshToken: 'refresh' }, user = { id: 1 };
   const scope = {
-    __DEV__: false, loading: false, googleLoadingRef: { current: false }, email: 'user@example.com', password: 'password',
+    __DEV__: false, loading: false, googleLoadingRef: { current: false }, appleLoadingRef: { current: false }, email: 'user@example.com', password: 'password',
     login: async () => tokens, getGoogleIdToken: async () => 'google',
     authenticateWithGoogle: async () => ({ kind: 'login', tokens }),
     saveTokens: async (value) => { assert.equal(value, tokens); calls.push('save'); },
@@ -32,13 +32,13 @@ for (const [label, file, name] of [
     router: { replace: (route) => calls.push(['replace', route]), push: () => assert.fail('must preserve replace semantics') },
     GoogleAuthApiError: class extends Error {},
     setLoading: noop, setGoogleLoading: noop, setError: (error) => { assert.equal(error, ''); },
-    canJoin: true, joiningRef: { current: false }, isGoogle: true, DEVICE_ID: 'device',
+    canJoin: true, ageConfirmed: true, joiningRef: { current: false }, isGoogle: true, isApple: false, isSocial: true, getDeviceId: async () => 'device',
     signupDraft: { nickname: 'nickname', termsAccepted: true, privacyAccepted: true, marketingAccepted: false },
     getGoogleSignupToken: () => 'signup', completeGoogleSignup: async () => tokens,
     setJoining: noop, setJoinError: (error) => assert.equal(error, ''),
     setPassword: noop, setPasswordConfirmation: noop, setCode: noop, setEmail: noop, setNickname: noop, setConfirmedNickname: noop,
     Keyboard: { dismiss: noop }, clearGoogleSignup: () => calls.push('signup cleared'),
-    target: null, params: {}, navigation: {}, redirected: { current: false },
+    target: null, params: {}, navigation: {}, redirected: { current: false }, allowLeaveRef: { current: false },
   };
   scope.authentication = {
     begin: () => ({}), active: () => true, valid: () => true, complete: () => true, release: noop,
@@ -46,7 +46,10 @@ for (const [label, file, name] of [
     authenticate: async (_attempt, value) => { await scope.saveTokens(value); scope.setAuthUser(await scope.getCurrentUser(value.accessToken)); return true; },
   };
   scope.finishLoginReturn = handler('src/lib/loginReturn.ts', 'finishLoginReturn', {});
+  scope.completedSignupHref = require('./helpers/uiDependencies.cjs').loadPure('src/lib/loginReturn.ts').completedSignupHref;
+  scope.authSessionGeneration = () => 3;
+  scope.router.dismissTo = (href) => calls.push(['dismissTo', href]);
   await handler(`src/app/(tabs)/profile/${file}.tsx`, name, scope)();
-  assert.deepEqual(calls, ['save', 'user', ...(file === 'signup' ? ['signup cleared'] : []), ['replace', '/(tabs)']]);
+  assert.deepEqual(calls, ['save', 'user', ...(file === 'signup' ? ['signup cleared', ['dismissTo', { pathname: '/login', params: { completedGeneration: '3' } }]] : [['replace', '/(tabs)']])]);
   assert.match(readFileSync('.expo/types/router.d.ts', 'utf8'), /pathname: `\$\{'\/\(tabs\)'\}` \| `\/`/);
 });

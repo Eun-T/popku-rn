@@ -56,7 +56,11 @@ function setup({ owner = true } = {}) {
   let feedResponse = async cursor => ({ items: cursor ? [{ ...item, id: 2 }] : [item, { ...item, id: 1, type: 'REVIEW', category: 'REVIEW' }], nextCursor: cursor ? 'cursor-2' : 'cursor-1' });
   class ApiError extends Error { constructor(status) { super(String(status)); this.status = status; } }
   const api = { CommunityApiError: ApiError, getCommunityPost: async () => ({ ...post, isOwner: owner }),
-    getCommunityPostForEdit: (...args) => editRead(...args), updateCommunityPost: (...args) => { calls.push(['patch', ...args]); return update(...args); },
+    getCommunityPostForEdit: (...args) => editRead(...args), updateCommunityPost: (id, content, retained, token, beforeSend) => {
+      beforeSend?.();
+      const args = token === undefined ? [id, content, retained] : [id, content, retained, token];
+      calls.push(['patch', ...args]); return update(...args);
+    },
     deleteCommunityPost: (...args) => { calls.push(['delete', ...args]); return remove(...args); },
     getCommunityFeed: (category, sort, cursor) => { calls.push(['feed', category, sort, cursor]); return feedResponse(cursor); },
     createCommunityPost: async () => { throw new Error('edit must not create'); },
@@ -267,15 +271,19 @@ test('image edit shares binary WebP upload and retries identical signed batch af
     './communityDiagnostics':diagnostics, './community':{ CommunityApiError:ApiError,
       communityRequest:async (_, method) => { if (method === 'DELETE') { cancelled++; return {}; }
         presigns++; return { text:async () => JSON.stringify({ uploadToken:'same-batch', images:[{imageKey:'key.webp', uploadUrl:'https://s3.example/put',sortOrder:0,contentType:'image/webp'}] }) }; },
-      updateCommunityPost:async (...args) => { updates.push(args); if (++saves === 1) throw new ApiError(500); return {...post,...patch}; },
+      updateCommunityPost:async (id, content, retained, token, beforeSend) => {
+        beforeSend?.(); updates.push([id, content, retained, token]);
+        if (++saves === 1) throw new ApiError(500); return {...post,...patch};
+      },
     } });
   const original = global.fetch; const uploads=[];
-  global.fetch = async (url,options) => { if (options) { uploads.push(options); return {ok:true}; }
+  global.fetch = async (url,options) => { if (options?.method === 'PUT') { uploads.push(options); return {ok:true}; }
     return {ok:true,arrayBuffer:async () => new ArrayBuffer(3)}; };
   try {
     const attempt={current:null}, images=[{uri:'file://new.webp',width:100,height:100,mimeType:'image/webp'}];
     await assert.rejects(helper.updatePostWithImages(1,'immutable',[10],images,attempt));
-    assert.deepEqual(attempt.current,{postId:1,content:'immutable',retainedImageIds:[10],uploadToken:'same-batch',authRequired:false,outcomeUnknown:true});
+    assert.deepEqual(attempt.current,{postId:1,content:'immutable',retainedImageIds:[10],uploadToken:'same-batch',authRequired:false,outcomeUnknown:true,
+      owner:{generation:0,email:'fixture@example.test'}});
     await helper.updatePostWithImages(1,'changed elsewhere',[],images,attempt);
     assert.equal(presigns,1); assert.equal(uploads.length,1); assert.ok(uploads[0].body instanceof ArrayBuffer);
     assert.equal(uploads[0].headers['Content-Type'],'image/webp');

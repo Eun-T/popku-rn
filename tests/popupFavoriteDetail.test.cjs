@@ -5,7 +5,7 @@ const { test } = require('node:test');
 const ts = require('typescript');
 
 function load(file, mocks, globals = {}) {
-  mocks = require('./helpers/uiDependencies.cjs').withI18nDependencies(file, mocks);
+  mocks = require('./helpers/uiDependencies.cjs').withI18nDependencies(file, mocks, globals.fetch);
   const source = readFileSync(path.join(__dirname, '..', file), 'utf8');
   const code = ts.transpileModule(source, { compilerOptions: {
     module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022,
@@ -216,8 +216,8 @@ test('favorite digits use tabular advances without reserved width or extra group
 
 test('stats use server rating/count with one decimal, hide zero review count and preserve review navigation', async () => {
   for (const [averageRating, reviewCount, expectedRating, expectedReviews] of [
-    [undefined, undefined, '—', '후기'], [null, null, '—', '후기'],
-    [0, 0, '—', '후기'], [4, 1, '4.0', '후기 1개'], [14 / 3, 12, '4.7', '후기 12개'],
+    [undefined, undefined, '0.0', '후기'], [null, null, '0.0', '후기'],
+    [0, 0, '0.0', '후기'], [4, 1, '4.0', '후기 1개'], [14 / 3, 12, '4.7', '후기 12개'],
   ]) {
     const s = screen({ detail: { averageRating, reviewCount } }); await s.settle();
     const stats = s.nodes().find(node => node.props?.children?.includes?.(s.bodyHeart()));

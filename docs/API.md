@@ -1,8 +1,17 @@
 # POPKU API
 
+## API 환경 선택과 인증 저장
+
+- `src/constants/api.ts`의 `API_BASE_URL`은 `EXPO_PUBLIC_API_URL`을 사용하며 공백과 URL 끝의 `/`를 제거한다. 개발 번들(`__DEV__`)이고 `EXPO_PUBLIC_APP_ENV`가 production/preview가 아닐 때만 미설정·빈 값을 기존 `http://192.168.50.146:8080`으로 대체한다. 출시 번들은 환경 마커와 관계없이 public HTTPS 주소를 필수로 요구하며 로컬·사설 IP, 인증정보, query/hash가 들어간 주소를 거부한다.
+- `eas.json`의 production은 EAS production 환경을 명시적으로 선택하고 `EXPO_PUBLIC_APP_ENV=production`을 주입한다. `EXPO_PUBLIC_API_URL`의 실제 값은 EAS production 환경에 별도로 등록해야 하며 저장소에 자동 설정하지 않는다. `app.config.js`는 production/preview 빌드 프로필·환경 마커 또는 `NODE_ENV=production`에서 같은 주소 검증을 수행하므로 잘못된 값은 설정 해석 단계에서 실패한다. 명시적인 EAS development 프로필에서는 네이티브 의존성 빌드의 `NODE_ENV=production`만으로 개발 기본값을 막지 않는다. preview도 릴리스 번들이므로 유효한 HTTPS 주소가 필요하다.
+- Google Places 자동완성·장소 resolve는 개발 환경에서만 가능하다. 출시 환경에서는 화면의 요청 예약과 서비스의 네트워크 요청을 모두 차단한다. 자체 팝업 검색, Google Maps 지도·마커·카메라 및 상세 Static Map은 이 flag와 무관하다.
+- 운영 예시는 `EXPO_PUBLIC_API_URL=https://api.popchive.com`이다. 요청 코드가 `/api/...`를 추가하므로 Base URL에 `/api`를 넣지 않는다. 비밀키나 토큰은 `EXPO_PUBLIC_` 변수에 넣지 않는다.
+- 기본 로컬 주소의 SecureStore 키는 기존 `accessToken`, `refreshToken`을 유지한다. 다른 API 주소는 URL별 namespace를 사용하며 로컬 토큰으로 fallback하거나 토큰을 복사하지 않는다. 로그인·로그아웃·401 정리는 선택된 환경의 키에만 적용된다.
+- 환경변수 변경 후 앱을 전체 Reload하여 주소·인증 상태·메모리 캐시를 새 환경으로 초기화한다. 기존 로컬 `.env`를 유지한 채 테스트 터미널의 `EXPO_PUBLIC_API_URL`을 지정할 수 있다. 빌드된 앱에는 번들 생성 시 선택된 값이 반영된다.
+
 ## 홈 메인 배너
 
-- 홈 최상단은 `GET /api/main-banners?languageCode=ko|ja`의 `{ popups: [...] }`를 조회한다. 언어는 기존 `getLocale()`을 사용하며 별도 언어 상태를 만들지 않는다. 현재 locale 모듈의 기본 언어는 ko다.
+- 홈 최상단은 `GET /api/main-banners?languageCode=ko|ja`의 `{ popups: [...] }`를 조회한다. 언어는 `useTranslation().resolvedLanguage`를 사용하며 국가 선택과 독립적이다. 언어별 기존 캐시를 사용하고 이전 언어 응답은 해당 언어 캐시에만 반영한다.
 - `placeId`, `publicId`, `name`, `countryCode`, `regionId`, `regionName`, `startDate`, `endDate`, `coverImageUrl`, `coverImageCacheKey`를 기존 응답 그대로 받는다. 날짜·지역·이미지는 null일 수 있다. 국가별 필터·분리·재정렬 없이 서버 순서를 유지한다.
 - 높이 380dp / 전체 너비 영역에서 가로 ScrollView의 pagingEnabled로 한 번에 한 배너를 수동 스와이프한다. 각 페이지의 배경·포스터·정보가 함께 이동한다. 하단 중앙에 활성 24×4dp pill / 비활성 4×4dp dot을 8dp 간격으로 표시하고 1개도 pill을 표시한다. 자동 재생은 없다. 터치는 기존 usePopupNavigation에 publicId를 전달한다.
 - HomeBanner는 backgroundColors를 시각적으로 사용하지 않는다. 응답 타입·API·백엔드 색상 데이터는 유지한다. 대신 동일한 coverImageUrl과 coverImageCacheKey를 expo-image 배경에 재사용하고 contentFit=cover, blurRadius=50, memory-disk 캐시를 적용한다. 배경을 사방 32dp 확장해 blur 가장자리의 빈 공간을 방지하고 배경 위에 검정 28% overlay를 적용한다. 이미지 누락/로드 실패 시 중립 어두운 배경을 유지한다.
@@ -10,6 +19,17 @@
 - 정보는 좌우 Safe Area + 16dp 여백과 하단 32dp 여백을 적용한다. 팝업명(최대 2줄, 20/700/28), 기간(14/400/20), MapPin + regionName(14/400/20)을 모두 #FFFFFF로 좌측 정렬한다. 날짜는 기존 displayDate를 재사용해 시작일 YY.MM.DD, 같은 연도의 종료일 MM.DD, 다른 연도의 종료일 YY.MM.DD로 표시한다. 누락된 날짜/지역은 빈 값으로 처리하고 지역이 없으면 아이콘도 숨긴다. MapPin은 기존 Lucide outline 아이콘 16dp다.
 - 대표 이미지는 응답의 coverImageUrl을 사용한다. 기존 expo-image 패턴처럼 source.cacheKey에 coverImageCacheKey를 전달하고 cachePolicy는 memory-disk다. 이미지 URL을 생성하거나 상세 API를 별도로 호출하지 않는다.
 - 메인 배너 hook은 다른 홈 섹션과 독립된 locale별 캐시와 loading/ready/error 상태를 사용한다. 기존 대표 이미지 freshness 상수(4분)로 목록을 갱신하고 갱신 실패 시 받은 배너를 유지한다. 최초 로딩은 기존 높이의 중립 영역, 0개/최초 오류는 배너만 숨긴다. 대표 이미지가 없거나 이미지 로드가 실패하면 Image를 렌더링하지 않는다. 임시 팝업·로컬 배너 이미지는 표시하지 않는다.
+
+## 지도 팝업 제목 언어
+
+- 지도는 `GET /api/popups/map?languageCode=ko|ja`, 팝업 검색은 `GET /api/popups/search?q=...&limit=10&languageCode=ko|ja`를 사용한다. 언어는 `useTranslation().resolvedLanguage`이며 국가·좌표와 독립적이다. 서버가 번역 및 원본 fallback을 적용한 기존 `name`을 그대로 표시한다.
+- 언어 변경 시 지도·팝업 검색을 다시 조회하고 이전 요청을 취소한다. 이전 언어의 목록·검색 결과·선택 카드 제목은 새 응답까지 숨기며 선택 ID·검색어·카메라·태그 필터는 유지한다. 같은 언어의 지도 갱신 실패는 기존 데이터를 유지한다.
+- 팝업 마커와 제목 높이 측정 key에 언어를 포함하고 언어 변경 시 측정값을 초기화한다. `tracksViewChanges=false`를 유지한다. Google Place 검색과 `getApiLocale()`의 기존 정책은 유지한다.
+
+## 홈 인기·신규 팝업 콘텐츠 언어
+
+- 인기 목록은 `GET /api/home-curations/NOW_HOT?countryCode=KR|JP&languageCode=ko|ja`, 신규 목록은 기존 `GET /api/popups?countryCode=KR|JP&openingFrom=...&openingTo=...&homeNew=true&limit=8`에 `languageCode=ko|ja`를 추가한다. 언어는 `useTranslation().resolvedLanguage`이며 국가 필터와 독립적이다.
+- 목록의 10분 캐시 정책은 유지하고 키를 `섹션:국가:언어`로 구분한다. 동일 키 요청은 공유하며 늦은 응답은 원래 키의 캐시에만 반영한다. 전환한 언어의 캐시가 없으면 새 응답까지 이전 언어 목록을 표시하지 않는다. 서버가 반환한 번역 및 원본 fallback을 그대로 사용한다.
 
 ## Place 전체 기간 필터
 
@@ -20,12 +40,12 @@
 
 ## Place 탐색 주간 조회 / 전체 pagination
 
-- 탐색 최초 진입은 `GET /api/popups?endingSoon=true`(기존 최대 7개)와 `GET /api/popups?weekStart=YYYY-MM-DD&weekEnd=YYYY-MM-DD`만 요청한다. 국가가 선택되면 두 요청에 `countryCode`를 전달한다. 일반 전체 목록은 미리 요청하지 않는다.
-- 주간 날짜는 기존 RN 로컬 날짜 기준 월요일~일요일 선택 동작을 유지한다. Backend는 DATE의 `start_date <= weekEnd AND end_date >= weekStart` 경계를 포함해 조회하고 기존 정렬로 최대 9개를 반환한다. 과거 주도 조회 가능하며 현재 날짜 기준 종료 제외 정책은 주간 조회에 적용하지 않는다. 양쪽 날짜 필수, 월요일부터 정확히 7일인 범위만 허용한다. RN Weekly 내부에 `국가 또는 ALL|weekStart|weekEnd`별 `{ popups, fetchedAt }`을 저장하며 빈 결과도 캐시한다. freshness는 요청 시작 시점부터 4분 미만이고, 재방문/탐색 재표시 시 fresh 캐시는 요청 없이 표시하고 stale 캐시만 재조회한다. 팝업 내부 페이지는 3개씩 최대 3페이지이며 페이지 이동은 API를 호출하지 않는다.
+- 탐색 최초 진입은 `GET /api/popups?endingSoon=true`(기존 최대 7개)와 `GET /api/popups?weekStart=YYYY-MM-DD&weekEnd=YYYY-MM-DD`만 요청한다. 탐색·전체 요청에는 `useTranslation().resolvedLanguage`의 `languageCode=ko|ja`를 명시한다. 국가가 선택되면 별도로 `countryCode`를 전달하며 언어와 독립적이다. 서버의 번역 제목과 원본 fallback을 그대로 사용한다. 일반 전체 목록은 미리 요청하지 않는다.
+- 주간 날짜는 기존 RN 로컬 날짜 기준 월요일~일요일 선택 동작을 유지한다. Backend는 DATE의 `start_date <= weekEnd AND end_date >= weekStart` 경계를 포함해 조회하고 기존 정렬로 최대 9개를 반환한다. 과거 주도 조회 가능하며 현재 날짜 기준 종료 제외 정책은 주간 조회에 적용하지 않는다. 양쪽 날짜 필수, 월요일부터 정확히 7일인 범위만 허용한다. RN Weekly 내부에 `국가 또는 ALL|weekStart|weekEnd|언어`별 `{ popups, fetchedAt }`을 저장하며 빈 결과도 캐시한다. freshness는 요청 시작 시점부터 4분 미만이고, 재방문/탐색 재표시 시 fresh 캐시는 요청 없이 표시하고 stale 캐시만 재조회한다. 탭을 숨겼다 돌아올 때 같은 키의 진행 중 요청도 유지한다. 주·국가·언어 변경 또는 unmount는 요청을 취소하고 늦은 응답을 무시한다. 팝업 내부 페이지는 3개씩 최대 3페이지이며 페이지 이동은 API를 호출하지 않는다.
 - Place 전체 최초 진입은 `GET /api/popups?limit=10`을 요청한다. 응답은 `{ popups: [...], nextCursor: string | null }`이며 null이면 마지막 페이지다. 이후 동일 조건에 `cursor`를 추가한다. limit은 10만 허용하고 endingSoon/주간 모드와 혼합하지 않는다.
 - cursor는 마지막 반환 행의 `start_date|places.id`를 UTF-8 Base64URL로 인코딩한다. SQL은 해당 날짜보다 뒤이거나 같은 날짜의 더 큰 id를 조회한다. 11행 lookahead 중 최대 10행만 응답/서명한다. 잘못된 cursor는 400이다. 데이터가 유지되는 동안 같은 날짜의 팝업도 중복/누락 없이 정렬된다. 페이지 조회 사이의 날짜 변경·등록·삭제에 대한 DB snapshot은 제공하지 않는다.
 - `limit=10`의 status 미지정은 서울 오늘 기준 `end_date >= today`, 즉 운영중+오픈예정이다. ONGOING/UPCOMING/ENDED 명시 조회와 단일 상태 선택 UI는 유지한다. 미선택을 기본으로 유지하며 기본 정책을 Active Filter chip으로 표시하지 않는다. limit 없는 기존 호출의 기본 정책은 Home 호환을 위해 유지한다.
-- 필터 queryKey 변경 시 기존 목록/cursor를 초기화하고 이전 요청을 abort한다. 전체 탭이 활성화돼 있으면 새 첫 페이지, 탐색이면 다음 전체 진입 시 요청한다. 단순 탭 전환은 기존 목록/cursor와 진행 중 요청을 유지한다. 하단 접근 시 다음 페이지를 요청하며 ref lock과 abort/queryKey 검사로 중복 요청·오래된 응답을 차단한다. 실패한 페이지는 재시도할 수 있다.
+- 필터·언어를 포함한 queryKey 변경 시 기존 목록/cursor를 초기화하고 이전 요청을 abort한다. 전체 탭이 활성화돼 있으면 새 첫 페이지, 탐색이면 다음 전체 진입 시 요청한다. 단순 탭 전환은 기존 목록/cursor와 진행 중 요청을 유지한다. 하단 접근 시 다음 페이지를 요청하며 ref lock과 abort/queryKey 검사로 중복 요청·오래된 응답을 차단한다. 실패한 페이지는 재시도할 수 있다. 종료 임박 응답도 국가·언어를 구분하며 전환 중 이전 언어 제목을 표시하지 않는다.
 - Sheet draft 선택은 목록 요청을 하지 않고 적용 시 기존 queryKey가 바뀐다. 기존 국가·지역·카테고리·상태·기간을 각 페이지에 동일하게 전달한다. 사전예약·혜택은 기존대로 UI 선택만 있고 API 연결은 추가하지 않았다.
 - S3 GET TTL은 5분을 유지한다. Place 전체 대표 이미지의 캐시·복구 정책은 아래 항목을 따른다. 다른 이미지 응답의 freshness 정책은 변경하지 않는다.
 
@@ -40,16 +60,16 @@
 
 ## 팝업 상세 콘텐츠
 
-- 상세는 `GET /api/popups/{publicId}?languageCode=ko|ja`를 호출한다. `languageCode`는 앱의 `getLocale()` 값이며 팝업 국가/GPS와 독립적이다. 현재 앱 언어 설정은 기존 고정 KO이며 언어 전환 UI는 제공하지 않는다.
+- 상세는 `GET /api/popups/{publicId}?languageCode=ko|ja`를 호출한다. `languageCode`는 `useTranslation().resolvedLanguage`이며 팝업 국가/GPS와 독립적이다. 제목·소개·혜택·공지·운영시간 등 서버가 반환한 번역 및 원본 fallback을 그대로 사용한다.
 - `averageRating`은 해당 place의 전체 reviews.rating 평균, `reviewCount`는 전체 방문 후기 수다. 상세 SQL에서 함께 집계하며 후기가 없으면 `averageRating: 0.0`, `reviewCount: 0`을 반환한다. RN은 평균을 소수점 한 자리로 표시하고 후기 수가 1 이상일 때만 `후기 N개`를 표시한다. 리뷰 pagination과 독립적이며 RN에서 재조회하거나 평균을 계산하지 않는다.
 - `summary: string | null`, `highlights: { type, text }[] | null`을 사용한다. 구조화 소개의 다국어 fallback은 Backend가 담당한다. RN은 null 배열을 빈 표시 목록으로 처리하며 과거 소개 텍스트 필드를 사용하지 않는다.
 - highlights는 Backend 순서대로 표시한다. 고정 type 8종의 제목은 `place.detail.highlights`의 KO/JA 리소스에서 가져온다. 알 수 없는 type은 HIGHLIGHT 제목, blank text는 표시 생략이다. title/emoji를 서버에 요구하지 않는다.
-- 상세는 캐시 라이브러리 없이 `(id, languageCode)` 요청 상태와 AbortController를 사용한다. 렌더링 시 앱 언어가 달라지면 해당 언어로 재조회한다. 인증 만료 후 anonymous 재조회에도 같은 언어를 전달한다.
+- 상세는 캐시 라이브러리 없이 `(id, languageCode)` 요청 상태와 AbortController를 사용한다. 앱 언어가 달라지면 이전 요청을 취소하고 해당 언어로 재조회한다. 이전 응답은 무시하고 새 응답까지 이전 언어 상세를 표시하지 않는다. 인증 만료 후 anonymous 재조회에도 같은 언어를 전달한다.
 - `socialLinks`는 public JSON 객체의 `website`, `instagram`, `x`, `youtube`, `threads`, `facebook` 키를 사용한다. 유효한 http/https URL만 기존 공식 채널 UI에서 표시한다. URL은 번역하지 않으며 외부 링크 열기 실패는 안내한다.
 
 ## 현재 구현
 
-회원가입 화면에서 다음 API를 사용한다. Android 에뮬레이터의 base URL은 `http://10.0.2.2:8080`이다.
+회원가입 화면에서 다음 API를 사용한다. 모든 플랫폼의 base URL은 위 API 환경 선택 규칙을 따른다. Android 에뮬레이터에서 호스트 PC의 개발 서버를 사용하려면 `EXPO_PUBLIC_API_URL=http://10.0.2.2:8080`을 명시한다.
 
 커뮤니티 메인 피드는 `GET /api/community/feed`를 인증 없이 조회한다. `category`는 `ALL`(기본값), `REVIEW`, `QUESTION`, `FREE`; `sort`는 `LATEST`(기본값), `POPULAR`; `limit`은 기본 20, 최대 50이다. 응답은 `{ "items": [...], "nextCursor": string | null }`이며 다음 페이지에는 같은 필터와 정렬에 `cursor`를 전달한다. 인기순은 좋아요 수 내림차순이다. 각 항목에는 `type`, `id`, `category`, `author`, `content`, `createdAt`, `regionName`, `popup`, `rating`, `images`, `likeCount`, `commentCount`, `viewCount`가 포함된다.
 
@@ -125,7 +145,7 @@ Pull-to-refresh는 서버의 최신 item 전체 값으로 목록을 교체한다
 - 응답: `{ id, category, author: { id, nickname, avatarUrl }, content, createdAt, updatedAt, images: string[], imageIds: number[], likeCount, commentCount, viewCount, liked, isOwner }`. imageIds는 images와 같은 순서의 post_images ID이며 isOwner는 인증 사용자와 posts.user_id를 서버에서 비교한다. 비로그인은 false다. 시간은 기존 피드처럼 Asia/Seoul offset을 포함한다. 지역·팝업·별점은 제공하지 않는다.
 - images는 post_images의 sort_order / id 순서이며 기존 PopupImageStore의 signed GET URL을 반환한다. author.avatarUrl은 users.profile_image_key의 signed GET URL 또는 null이다.
 - 상세 조회 트랜잭션에서 view_count를 1 증가한 후 조회하며 증가한 값을 반환한다. 조회수 중복 방지는 없고, 실패한 상세 조회는 rollback한다. 조회수 증가만으로 updated_at이 바뀌지 않도록 기존 값을 명시적으로 유지한다.
-- QUESTION/FREE 댓글 목록·작성·답글·본인 댓글 삭제는 아래 API를 사용한다. 게시글 좋아요는 아래 토글 API를 사용한다. 댓글 좋아요/수정/신고 API는 제공하지 않는다.
+- QUESTION/FREE 댓글 목록·작성·답글·본인 댓글 삭제는 아래 API를 사용한다. 게시글 좋아요는 아래 토글 API를 사용한다. 댓글 좋아요/수정 API는 제공하지 않는다. 신고는 아래 공통 /api/reports 계약을 사용한다.
 
 ## 커뮤니티 QUESTION / FREE 게시글 수정·삭제
 
@@ -186,6 +206,10 @@ Pull-to-refresh는 서버의 최신 item 전체 값으로 목록을 교체한다
 - cleanup은 현재 요청에서 가능한 범위로만 수행한다. 앱 강제 종료, 서버 중단, 지속적인 네트워크/S3 삭제 실패, 실패 응답 이후 늦게 완료된 PUT은 미등록 S3 object를 남길 수 있다. 이를 자동 추적하거나 재시도하는 구조는 이번 범위에 포함하지 않는다.
 - 작성 응답을 잃으면 화면의 원래 요청과 token을 유지해 등록 버튼으로 완료 여부를 재확인한다. 이때 편집 및 화면 종료를 막으며, 이미 확정된 S3 파일을 cleanup하지 않는다.
 - 신규 작성·수정의 명확한 저장 401은 draft와 로컬 미리보기를 유지하고 pending attempt를 해제한 뒤, 해당 세션에 한해 토큰을 정리하고 기존 로그인 화면으로 이동한다. 이때 cleanup은 최선 노력으로 수행하며 인증 복구를 기다리게 하지 않는다. 단, 앞선 저장 결과가 불명확한 attempt를 재시도하다 401을 받은 경우에는 원래 token/요청을 보존하고 cleanup하지 않는다. 이 경우 중복 저장 방지를 위한 편집 잠금은 유지하되 로그인 및 화면 이탈을 허용하며, 재인증 후 동일 token으로 재확인한다. 401·실패·취소는 작성 revision을 증가시키지 않는다.
+- RN 커뮤니티·방문 리뷰 제출은 로컬 파일당 15초, presign 30초, S3 PUT 이미지당 120초, 등록·수정 60초의 제한 시간을 적용한다. 응답 본문 읽기도 같은 단계의 제한 시간에 포함하며 fetch에 연결한 AbortController를 abort한다. 등록 timeout은 결과 불명확으로 기존 uploadToken과 요청을 보존하고 재업로드·cleanup 없이 재확인한다. HTTP 거절 상태를 이미 받은 경우 본문 읽기가 지연돼도 상태 및 auth generation을 보존한다. 화면 이탈·인증 세션 고정 정책은 변경하지 않는다.
+- DELETE cleanup은 별도로 최대 10초 기다린 뒤 fetch의 AbortController를 abort하며, abort에 반응하지 않는 Promise도 호출자의 대기를 끝낸다. HTTP 오류 본문 읽기에도 같은 제한이 적용된다. 정리 요청 오류는 기존 개발 진단 CLEANUP 로그에 민감정보를 가려 기록하고 원래 PUT·등록 오류는 그대로 전달한다. timeout·응답 유실은 서버 삭제 여부가 불명확하며 성공·실패 확정으로 기록하지 않는다. 자동 재시도·정리 큐는 없고, 결과 불명확한 등록 attempt에는 DELETE를 실행하지 않는다.
+- 작성 화면 언마운트 시 제출 작업을 무효화하고 로컬 읽기·presign·PUT을 abort한다. 순차 PUT의 다음 단계와 등록·수정 fetch 직전에도 취소 여부를 확인한다. 아직 전송하지 않은 새 업로드는 기존 10초 cleanup으로 정리하지만, 앞선 등록 결과가 불명확한 token은 삭제하지 않는다. 이미 전송한 등록·수정은 화면 이탈로 abort하지 않고 기존 60초 제한 및 결과 불명확 정책을 유지한다. 성공 시 공통 목록 변경 이벤트는 유지하되 이전 작업의 화면 state·이동은 차단한다. 미확인 attempt는 여전히 화면 메모리에만 보관되어 강제 언마운트·프로세스 종료 후 재확인을 보장하지 않는다(영속화는 별도 범위).
+- 제출 시작 시 현재 인증된 사용자(id가 없으면 email)와 기존 auth generation을 고정한다. 로그인 토큰 저장·토큰 삭제·로그아웃 시작 시 진행 중 로컬 읽기·presign·PUT을 abort하고 각 PUT 및 인증 조회 후 실제 API fetch 직전에도 작업 소유자와 generation을 검사한다. 계정이 바뀐 작업의 응답은 새 계정 UI·목록 변경 이벤트에 반영하지 않는다. 이미 전송한 등록은 이탈 때와 같이 결과를 보존하며 계정 변경만으로 abort하거나 DELETE하지 않는다. cleanup도 실제 fetch 직전 소유 세션을 검사하며, 현재 세션이 달라졌으면 오래된 access token을 저장·재사용하거나 새 계정으로 정리하지 않는다. 미확인 token은 다른 계정에서 재사용할 수 없다. 같은 계정이 재인증 후 직접 재시도하는 경우에만 새 generation의 별도 작업 snapshot으로 원래 token·요청을 재확인하며 자동 재개·재업로드하지 않는다. 동일 generation에서는 access token 문자열을 비교·고정하지 않고 실제 요청 시 현재 토큰을 읽는다. 계정 변경으로 건너뛴 정리의 S3 고아 객체와 미확인 작업 영속화는 별도 범위다.
 
 ## 계획
 
@@ -226,3 +250,23 @@ Pull-to-refresh는 서버의 최신 item 전체 값으로 목록을 교체한다
 - 비밀번호 변경과 모든 본인 Refresh Token 폐기는 같은 transaction에서 처리한다. 기존 발급/회전/탈퇴와 같은 사용자 행 우선 잠금을 사용한다. RN은 성공 시 요청 당시 generation의 인증 정보만 삭제하고 재로그인을 안내한다. 기존 JWT 즉시 폐기 기능은 없으므로 이미 발급된 Access Token은 만료까지 최대 30분 유효할 수 있다. 기존 로그인/로그아웃/탈퇴 정책은 유지한다.
 - RN 설정에서 `/profile/nickname`, `/profile/password`로 진입한다. 비밀번호 메뉴는 `provider === LOCAL`일 때만 표시하며 소셜 계정의 직접 진입도 안내만 표시한다. 회원가입 검증 함수는 `accountPolicy.ts`로 옮겨 공유하며 기존 가입 동작을 유지한다. 변경 화면은 기존 설정 Header/SafeArea와 디자인 토큰을 사용하고 키보드 회피·스크롤·중복 저장 방지·요청 취소를 지원한다. 비밀번호 draft는 화면 이탈·세션 변경·성공 시 지운다.
 - 닉네임 저장 응답을 generation 확인 후 기존 setAuthUser에 반영하여 마이페이지와 현재 닉네임을 갱신한다. 게시글·댓글·방문 리뷰의 작성자는 기존 users JOIN을 사용하므로 재조회 시 새 닉네임을 반환한다. 해당 API 구조는 변경하지 않는다.
+
+## iOS Apple 로그인
+
+- iOS에서 Apple 인증이 사용 가능한 경우 Google 버튼 아래 공식 AppleAuthenticationButton을 표시한다. Android/Web에서는 Apple 인증을 호출하지 않는다.
+- `POST /api/auth/apple/challenge`는 body 없이 호출하고 `{ challengeId, nonce, expiresInSeconds }`를 받는다. nonce는 해시하지 않고 EMAIL scope와 함께 네이티브 인증에 전달한다.
+- `POST /api/auth/apple`에 `{ identityToken, authorizationCode, challengeId, deviceId }`를 보낸다. authorizationCode는 해당 Apple 인증 시도에서 한 번만 전달하고 저장하거나 자동 재사용하지 않는다. null은 백엔드의 구버전 호환 정책에 따라 그대로 전달한다. 기존 회원의 앱 Access/Refresh Token은 기존 useLoginAttempt로 저장하고 `/api/users/me`와 로그인 복귀 처리를 재사용한다.
+- `SIGNUP_REQUIRED`의 Apple 가입 토큰은 Google 토큰과 별도의 메모리에 보관하며 URL에 넣지 않는다. 기존 가입 화면의 `mode=apple`에서 닉네임·필수 약관을 받고 `/api/auth/apple/complete`에 `{ signupToken, nickname, consents: { termsOfService, privacyPolicy, marketing }, deviceId }`를 보낸다.
+- 인증 취소는 조용히 종료하며 화면 이탈 후 늦은 응답은 로그인 상태를 갱신하지 않는다. 토큰·nonce는 로그에 출력하지 않는다. 실기기 연동은 별도 확인이 필요하다.
+
+## 신고 및 개인 사용자 차단 (RN 9-2)
+
+백엔드 docs/moderation-api.md 및 ModerationRows DTO 계약을 사용한다. 모두 Bearer 인증이며 mutation 자동 재시도는 하지 않는다.
+
+- POST /api/reports: { targetType: POST|COMMENT|REVIEW, targetId, reason: SPAM|ABUSE|SEXUAL|PRIVACY|OTHER, detail?: string }. 설명은 trim 전 200 Unicode 문자 이하. 201 { id, status: PENDING }, 중복 409. RN은 단일 사유를 보내며 작성자/신고자 ID를 보내지 않는다.
+- POST /api/users/me/blocks: { targetType, targetId }. 서버가 작성자를 조회한다. 201 빈 본문, 중복 409.
+- GET /api/users/me/blocks?limit=20&cursor=...: { items: [{ blockedUserId, nickname, avatarUrl, createdAt }], nextCursor: string|null }. cursor는 opaque 값으로 그대로 인코딩한다.
+- DELETE /api/users/me/blocks/{blockedUserId}: 204 빈 본문. 본인 차단 관계만 해제한다.
+- 400 잘못된 입력/본인 대상, 401 인증 필요, 404 삭제되거나 사용할 수 없는 대상, 409 중복. 일반 사용자 신고 기록 조회 API는 없다.
+- 댓글 응답 isBlocked=true는 ID/부모 관계를 보존한다. RN은 서버의 placeholder 본문 대신 해당 언어 안내를 표시하고 작성자/멘션/액션을 숨긴다. 정상 답글은 제거하지 않는다. REVIEW 댓글 UI는 기존 결정대로 상세에서 노출하지 않으며 공용 API/컴포넌트에서 호환된다.
+- moderationState revision + 인증 세대 검사, 기존 AbortController/read-version 보호로 차단 전 GET을 무효화한다. 차단/해제 후 관련 목록은 첫 페이지부터, 상세/댓글은 해당 ID로 재조회한다. 전체 평점/리뷰 수 집계는 개인 차단과 독립적이다.

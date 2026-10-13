@@ -54,6 +54,7 @@ test('verify rejects missing, empty, whitespace, and non-string proof without ma
 test('signup API sends the proof at the top level alongside unchanged consents', async () => {
   const request = {
     email: 'user@example.com', password: 'Passw0rdLong', nickname: 'tester', signupProof: 'proof.jwt.value',
+    ageConfirmed: true,
     consents: { termsOfService: true, privacyPolicy: true, marketing: false },
   };
   const register = productionFunction(signupFile, 'registerUser', {
@@ -145,7 +146,8 @@ function joinScope(registerUser) {
   let proof = 'proof.jwt.value';
   const calls = [], signupRequest = [];
   const scope = {
-    canJoin: true, joiningRef: { current: false }, isGoogle: false, signupProof: proof, target: null,
+    canJoin: true, ageConfirmed: true, joiningRef: { current: false }, isGoogle: false, isApple: false, isSocial: false, signupProof: proof, target: null,
+    params: {}, allowLeaveRef: { current: false }, loginHref: require('./helpers/uiDependencies.cjs').loadPure('src/lib/loginReturn.ts').loginHref,
     signupDraft: { email: 'user@example.com', password: 'Passw0rdLong', nickname: 'tester',
       termsAccepted: true, privacyAccepted: true, marketingAccepted: false },
     setJoining: () => {}, setJoinError: (value) => calls.push(['joinError', value]),

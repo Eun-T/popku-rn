@@ -42,10 +42,11 @@ const theme = { colors: {}, radius: {}, spacing: {}, typography: {} };
 test('logged in profile opens favorites', () => {
   const navigation = [];
   const Profile = load('src/app/(tabs)/profile/index.tsx', {
-    'react': { useCallback: (callback) => callback, useState: () => [false, () => {}],
+    'react': { useEffect() {}, useCallback: (callback) => callback, useState: () => [false, () => {}],
       useRef: initial => ({ current: initial }),
       useSyncExternalStore: () => ({ nickname: '사용자', email: 'user@example.com' }) },
     'expo-blur': { BlurTargetView: 'BlurTargetView', BlurView: 'BlurView' },
+    'expo-clipboard': { setStringAsync: async () => true },
     'react/jsx-runtime': runtime,
     'expo-router': { useFocusEffect() {}, useRouter: () => ({ push: (route) => navigation.push(route) }) },
     'lucide-react-native': { Heart: 'Heart', Star: 'Star' },

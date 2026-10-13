@@ -353,7 +353,7 @@ test('cards render review popup and rating; posts have no popup, rating or image
   assert.equal(nodes(profile).filter(node => node.type === 'MoreHorizontal').length, 1);
   assert.equal(nodes(profile).find(node => node.type === 'MoreHorizontal').props.onPress, undefined);
   assert.ok(nodes(profile).some(node => node.type === 'Text' && node.props.children === '4.5'));
-  assert.equal(nodes(review).find(node => node.props?.children === base.content).props.numberOfLines, 3);
+  assert.equal(nodes(review).find(node => node.props?.children === base.content).props.numberOfLines, 2);
   for (let count = 0; count <= 5; count++) {
     const images = Array.from({ length: count }, (_, index) => `signed:review-${index}`);
     let placeId;
@@ -395,6 +395,15 @@ test('cards render review popup and rating; posts have no popup, rating or image
     card.props.onPress();
   }
   assert.equal(presses, 2);
+  const postMenu = { type: 'PostActions', props: {} };
+  let menuBodyPresses = 0;
+  const postWithMenu = Card({ post: { ...base, type: 'POST', category: 'FREE' }, postActions: postMenu, onPressPost: () => menuBodyPresses++ });
+  assert.ok(nodes(postWithMenu).includes(postMenu), 'post action slot is connected inside the card');
+  const reviewMenu = { type: 'ReviewActions', props: {} };
+  const reviewWithMenu = Card({ post: { ...base, type: 'REVIEW', category: 'REVIEW' }, reviewActions: reviewMenu, onPressReview: () => menuBodyPresses++ });
+  assert.ok(nodes(reviewWithMenu).includes(reviewMenu), 'review action slot replaces the decorative icon');
+  postWithMenu.props.onPress(); reviewWithMenu.props.onPress();
+  assert.equal(menuBodyPresses, 2, 'body navigation remains connected for both types');
   let reviewPresses = 0;
   const clickableReview = Card({ post: { ...base, type: 'REVIEW', category: 'REVIEW' },
     onPressReview: () => reviewPresses++, onPressPost: () => presses++ });

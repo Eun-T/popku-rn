@@ -9,7 +9,8 @@ const dataLines=p=>[p.title,p.effectiveDate,...p.sections.flatMap(s=>[...(s.titl
 for(const [id,file]of Object.entries(files))test(`Japanese ${id}: all source text, article numbers, lists, dates, contacts and supplementary provisions match`,()=>{
  const p=require('../src/content/policies.ja.json')[id],source=fs.readFileSync('docs/legal/ja/'+file,'utf8');
  assert.deepEqual(dataLines(p),plainLines(source));assert.equal(p.sections.filter(s=>/^第\d+条|^\d+\./.test(s.title)).length,{terms:12,privacy:11,location:8}[id]);
- assert.ok(dataLines(p).some(l=>l==='メールアドレス：[サービス専用メールアドレス]'));assert.equal(p.effectiveDate,'施行日：[YYYY.MM.DD]');assert.equal(p.sections.at(-1).title,'附則');
+ assert.ok(dataLines(p).includes('運営者：김은태'));assert.ok(dataLines(p).includes('メールアドレス：popchive.support@gmail.com'));assert.equal(p.effectiveDate,id==='privacy'?'施行日：2026年10月13日':'施行日：未定');assert.equal(p.sections.at(-1).title,'附則');
+ assert.ok(!dataLines(p).join('\n').match(/\[運営者名\]|\[サービス専用メールアドレス\]|YYYY|POPKU/));
 });
 for(const compiled of [false,true])test(`${compiled?'actual React Compiler':'Hook'}: retained policy list and all three full documents change ko-ja-ko/system without I/O or remount`,async()=>{
  const transform=compiled?compilerTransform([detailFile,listFile,'src/hooks/useTranslation.ts']):undefined;

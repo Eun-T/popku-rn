@@ -30,6 +30,7 @@ type Props = {
   onPressReview?: () => void;
   onPressLike?: () => void;
   reviewActions?: ReactNode;
+  postActions?: ReactNode;
 };
 
 export default function CommunityPostItem({
@@ -40,6 +41,7 @@ export default function CommunityPostItem({
   onPressReview,
   onPressLike,
   reviewActions,
+  postActions,
 }: Props) {
   const { t } = useTranslation();
   const user = useSyncExternalStore(
@@ -74,7 +76,7 @@ export default function CommunityPostItem({
         onPress={onPressPost}
       >
         <View style={styles.compactText}>
-          <View style={styles.compactHeader}>
+          <View style={[styles.compactHeader, !!postActions && { paddingRight: 44 }]}>
             <View style={styles.compactTag}>
               <Text style={styles.compactTagText}>
                 {t(`community.category.${post.category.toLowerCase()}`)}
@@ -103,12 +105,20 @@ export default function CommunityPostItem({
             </Text>
           </View>
         </View>
+        {postActions && <View style={[styles.postMenu, cover && { right: 76 + spacing.space12 }]}>{postActions}</View>}
         {cover && (
-          <Image
-            source={{ uri: cover }}
-            resizeMode="cover"
-            style={styles.compactCover}
-          />
+          <View style={styles.compactCover}>
+            <Image
+              source={{ uri: cover }}
+              resizeMode="cover"
+              style={styles.compactCover}
+            />
+            {post.images.length > 1 && (
+              <View style={styles.photoCount}>
+                <Text style={styles.photoCountText}>{post.images.length}</Text>
+              </View>
+            )}
+          </View>
         )}
       </Pressable>
     );
@@ -133,7 +143,7 @@ export default function CommunityPostItem({
             <Text numberOfLines={1} style={styles.compactNickname}>
               {post.author.nickname}
             </Text>
-            {reviewActions ?? (user && (
+            {reviewActions ? <View style={styles.reviewMenu}>{reviewActions}</View> : (user && (
               <View style={styles.reviewMenu} accessible={false}>
                 <MoreHorizontal
                   size={20}
@@ -525,6 +535,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  postMenu: { position: 'absolute', right: 0, top: 8, width: 44, height: 44 },
   reviewCollage: {
     flexDirection: "row",
     height: 200,

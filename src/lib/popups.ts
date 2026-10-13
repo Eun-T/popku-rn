@@ -76,9 +76,13 @@ export type PublicPopupDetail = {
 
 export type PopupStatus = 'ONGOING' | 'UPCOMING' | 'ENDED';
 export type PopupListFilters = {
+  hasReservation?: boolean;
+  hasBenefits?: boolean;
   visitPeriod?: VisitPeriod;
   openingFrom?: string;
   openingTo?: string;
+  operatingFrom?: string;
+  operatingTo?: string;
   regionIds?: readonly number[];
   tagIds?: readonly number[];
   status?: PopupStatus;
@@ -122,8 +126,8 @@ async function requestPopupList(query: string, signal: AbortSignal): Promise<Pub
   return body.popups as PublicPopup[];
 }
 
-export async function getPopupMap(signal: AbortSignal): Promise<PopupMapMarker[]> {
-  const response = await fetch(`${API_BASE_URL}/api/popups/map`, { signal });
+export async function getPopupMap(signal: AbortSignal, languageCode: Locale): Promise<PopupMapMarker[]> {
+  const response = await fetch(`${API_BASE_URL}/api/popups/map?languageCode=${encodeURIComponent(languageCode)}`, { signal });
   if (!response.ok) throw new Error('Popup map request failed');
 
   const body: unknown = await response.json();
@@ -133,8 +137,8 @@ export async function getPopupMap(signal: AbortSignal): Promise<PopupMapMarker[]
   return body.popups as PopupMapMarker[];
 }
 
-export async function searchPopups(query: string, signal: AbortSignal): Promise<PopupSearchResult[]> {
-  const response = await fetch(`${API_BASE_URL}/api/popups/search?q=${encodeURIComponent(query)}&limit=10`, { signal });
+export async function searchPopups(query: string, signal: AbortSignal, languageCode: Locale): Promise<PopupSearchResult[]> {
+  const response = await fetch(`${API_BASE_URL}/api/popups/search?q=${encodeURIComponent(query)}&limit=10&languageCode=${encodeURIComponent(languageCode)}`, { signal });
   if (!response.ok) throw new Error('Popup search request failed');
 
   const body: unknown = await response.json();
@@ -161,8 +165,10 @@ export function getPopups(
 export type PopupPage = { popups: PublicPopup[]; nextCursor: string | null };
 
 export async function getPopupPage(countryCode: 'KR' | 'JP' | undefined, signal: AbortSignal,
-  filters: PopupListFilters = {}, cursor: string | null = null): Promise<PopupPage> {
-  const parameters = ['limit=10'];
+  filters: PopupListFilters = {}, cursor: string | null = null, languageCode: Locale = getApiLocale()): Promise<PopupPage> {
+  const parameters = ['limit=10', `languageCode=${encodeURIComponent(languageCode)}`];
+  if (filters.hasReservation) parameters.push('hasReservation=true');
+  if (filters.hasBenefits) parameters.push('hasBenefits=true');
   if (countryCode) parameters.push(`countryCode=${countryCode}`);
   if (filters.regionIds?.length) parameters.push(`regionIds=${filters.regionIds.join(',')}`);
   if (filters.tagIds?.length) parameters.push(`tagIds=${filters.tagIds.join(',')}`);
@@ -170,6 +176,8 @@ export async function getPopupPage(countryCode: 'KR' | 'JP' | undefined, signal:
   if (filters.visitPeriod && filters.visitPeriod !== 'all') parameters.push(`visitPeriod=${filters.visitPeriod}`);
   if (filters.openingFrom) parameters.push(`openingFrom=${filters.openingFrom}`);
   if (filters.openingTo) parameters.push(`openingTo=${filters.openingTo}`);
+  if (filters.operatingFrom) parameters.push(`operatingFrom=${encodeURIComponent(filters.operatingFrom)}`);
+  if (filters.operatingTo) parameters.push(`operatingTo=${encodeURIComponent(filters.operatingTo)}`);
   if (cursor) parameters.push(`cursor=${encodeURIComponent(cursor)}`);
   const response = await fetch(`${API_BASE_URL}/api/popups?${parameters.join('&')}`, { signal });
   if (!response.ok) throw new Error('Popup page request failed');
@@ -182,22 +190,27 @@ export async function getPopupPage(countryCode: 'KR' | 'JP' | undefined, signal:
 }
 
 export function getWeeklyPopups(countryCode: 'KR' | 'JP' | undefined, weekStart: string,
-  weekEnd: string, signal: AbortSignal): Promise<PublicPopup[]> {
+  weekEnd: string, signal: AbortSignal, languageCode: Locale = getApiLocale()): Promise<PublicPopup[]> {
   const country = countryCode ? `&countryCode=${countryCode}` : '';
-  return requestPopupList(`?weekStart=${weekStart}&weekEnd=${weekEnd}${country}`, signal);
+  return requestPopupList(`?weekStart=${weekStart}&weekEnd=${weekEnd}${country}&languageCode=${encodeURIComponent(languageCode)}`, signal);
 }
 
-export function getEndingSoonPopups(countryCode: 'KR' | 'JP' | undefined, signal: AbortSignal): Promise<PublicPopup[]> {
+export function getEndingSoonPopups(countryCode: 'KR' | 'JP' | undefined, signal: AbortSignal, languageCode: Locale = getApiLocale()): Promise<PublicPopup[]> {
   const country = countryCode ? `&countryCode=${countryCode}` : '';
-  return requestPopupList(`?endingSoon=true${country}`, signal);
+  return requestPopupList(`?endingSoon=true${country}&languageCode=${encodeURIComponent(languageCode)}`, signal);
 }
 
-export async function getPopupDetail(publicId: string, signal: AbortSignal, accessToken?: string, languageCode: Locale = getApiLocale()): Promise<PublicPopupDetail> {
-  const response = await fetch(`${API_BASE_URL}/api/popups/${encodeURIComponent(publicId)}?languageCode=${encodeURIComponent(languageCode)}`, {
+export async function getPopupDetail(publicId: string, signal: AbortSignal, accessToken?: string, languageCode: Locale = getApiLocale(),
+  generation?: number): Promise<PublicPopupDetail> {
+  const url = `${API_BASE_URL}/api/popups/${encodeURIComponent(publicId)}?languageCode=${encodeURIComponent(languageCode)}`;
+  const init = {
     signal,
     headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
-  });
-  if (response.status === 401) throw new PopupDetailUnauthorizedError();
+  };
+  const auth = accessToken ? await import('./auth') : null;
+  const response = auth ? await auth.authenticatedFetch(url, init,
+    { accessToken: accessToken ?? null, generation: generation ?? auth.authSessionGeneration() }) : await fetch(url, init);
+  if (response.status === 401) throw new PopupDetailUnauthorizedError(auth?.wasAuthRetried?.(response) ?? false);
   if (!response.ok) throw new Error('Popup detail request failed');
 
   const body: unknown = await response.json();
@@ -208,16 +221,16 @@ export async function getPopupDetail(publicId: string, signal: AbortSignal, acce
 }
 
 export class PopupDetailUnauthorizedError extends Error {
-  constructor() { super('Popup detail token expired'); }
+  constructor(readonly requestRetried = false) { super('Popup detail token expired'); }
 }
 
-export async function getNewPopups(countryCode: 'KR' | 'JP', signal: AbortSignal): Promise<PublicPopup[]> {
+export async function getNewPopups(countryCode: 'KR' | 'JP', signal: AbortSignal, languageCode: Locale = getApiLocale()): Promise<PublicPopup[]> {
   const { openingFrom, openingTo } = currentWeekRange();
-  return requestPopupList(`?countryCode=${countryCode}&openingFrom=${openingFrom}&openingTo=${openingTo}&homeNew=true&limit=8`, signal);
+  return requestPopupList(`?countryCode=${countryCode}&openingFrom=${openingFrom}&openingTo=${openingTo}&homeNew=true&limit=8&languageCode=${encodeURIComponent(languageCode)}`, signal);
 }
 
-export async function getNowHotPopups(countryCode: 'KR' | 'JP', signal: AbortSignal): Promise<PublicPopup[]> {
-  const response = await fetch(`${API_BASE_URL}/api/home-curations/NOW_HOT?countryCode=${countryCode}`, { signal });
+export async function getNowHotPopups(countryCode: 'KR' | 'JP', signal: AbortSignal, languageCode: Locale = getApiLocale()): Promise<PublicPopup[]> {
+  const response = await fetch(`${API_BASE_URL}/api/home-curations/NOW_HOT?countryCode=${countryCode}&languageCode=${encodeURIComponent(languageCode)}`, { signal });
   if (!response.ok) throw new Error('NOW_HOT request failed');
 
   const body: unknown = await response.json();

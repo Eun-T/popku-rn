@@ -10,12 +10,13 @@ function profileMenu(user) {
   const file = 'src/app/(tabs)/profile/index.tsx';
   const jsx = (type, props, key) => ({ type, props, key });
   const mocks = withUiDependencies(file, {
-    react: { useState: value => [value, () => {}], useRef: value => ({ current: value }),
+    react: { useEffect() {}, useState: value => [value, () => {}], useRef: value => ({ current: value }),
       useCallback: fn => fn, useSyncExternalStore: (_subscribe, snapshot) => snapshot() },
     'react/jsx-runtime': { jsx, jsxs: jsx },
     'expo-router': { useFocusEffect() {}, useRouter: () => ({ push: route => routes.push(route) }) },
     'expo-blur': { BlurTargetView: 'BlurTargetView', BlurView: 'BlurView' },
-    'lucide-react-native': Object.fromEntries(['ChevronRight', 'Heart', 'Star', 'MessageSquare', 'Settings'].map(name => [name, name])),
+    'expo-clipboard': { setStringAsync: async () => true },
+    'lucide-react-native': Object.fromEntries(['ChevronRight', 'Heart', 'Star', 'Mail', 'MessageSquare', 'Settings'].map(name => [name, name])),
     'react-native': { ActivityIndicator: 'ActivityIndicator', Pressable: 'Pressable', ScrollView: 'ScrollView',
       Text: 'Text', View: 'View', StyleSheet: { create: style => style } },
     'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView' },

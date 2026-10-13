@@ -1,0 +1,60 @@
+# Prepared for Ubuntu host Nginx 1.24.0. Not installed on EC2.
+# Install as /etc/nginx/sites-available/zz-popchive-public only after the
+# separate Certbot lineage popchive-public has been issued and verified.
+# Enable using /etc/nginx/sites-enabled/zz-popchive-public.
+# Leave sites-enabled/default, API certificates and Docker unchanged.
+# The zz- name keeps this addition after default in the existing glob include.
+# Abort installation if another popchive.com server block already exists.
+
+server {
+    listen 443 ssl;
+    # Add listen [::]:443 ssl only after confirming IPv6 routing and DNS.
+    server_name popchive.com;
+
+    ssl_certificate     /etc/letsencrypt/live/popchive-public/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/popchive-public/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    # Prevent serving these files for another Host if this block is selected
+    # as a fallback. Preserve the existing default server during integration.
+    if ($host != popchive.com) {
+        return 404;
+    }
+
+    types { }
+    default_type text/html;
+    charset utf-8;
+    autoindex off;
+    add_header X-Content-Type-Options nosniff always;
+
+    location = /privacy {
+        alias /var/www/popchive-public/privacy.html;
+        limit_except GET { deny all; }
+    }
+
+    location = /ja/privacy {
+        alias /var/www/popchive-public/privacy-ja.html;
+        limit_except GET { deny all; }
+    }
+
+    location = /support {
+        alias /var/www/popchive-public/support.html;
+        limit_except GET { deny all; }
+    }
+
+    # Includes /, *.html, trailing slashes, /api and /admin.
+    location / {
+        return 404;
+    }
+}
+
+# HTTPS is the only public page entry point. HTTP does not redirect or serve
+# pages. Review any existing popchive.com port 80 block before integrating.
+server {
+    listen 80;
+    server_name popchive.com;
+
+    location / {
+        return 404;
+    }
+}

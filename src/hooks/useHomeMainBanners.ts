@@ -2,7 +2,8 @@ import { useCallback, useEffect, useSyncExternalStore } from 'react';
 
 import { getMainBanners, type MainBannerPopup } from '../lib/mainBanners';
 import { COVER_URL_FRESH_MS } from '../lib/placeCoverRecovery';
-import { getApiLocale, type Locale } from '../locales';
+import type { Locale } from '../locales';
+import { useTranslation } from './useTranslation';
 
 type CacheEntry = ({ data: MainBannerPopup[]; fetchedAt: number } | { error: true }) & { retryAt?: number };
 const cache: Partial<Record<Locale, CacheEntry>> = {};
@@ -34,7 +35,7 @@ export function useHomeMainBanners(): {
   status: 'loading' | 'ready' | 'error';
   popups: MainBannerPopup[];
 } {
-  const languageCode = getApiLocale();
+  const { resolvedLanguage: languageCode } = useTranslation();
   const subscribe = useCallback((listener: () => void) => {
     const current = listeners[languageCode] ?? new Set<() => void>();
     listeners[languageCode] = current;

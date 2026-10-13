@@ -3,7 +3,7 @@ const {readFileSync} = require('node:fs');
 const {test} = require('node:test');
 const ts = require('typescript');
 function load(file,mocks,globals={}) {
-  mocks = require('./helpers/uiDependencies.cjs').withUiDependencies(file, mocks);
+  mocks = require('./helpers/uiDependencies.cjs').withUiDependencies(file, mocks, globals.fetch);
   const code=ts.transpileModule(readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText;
   const module={exports:{}};
   new Function('require','module','exports',...Object.keys(globals),code)(name=>{assert.ok(name in mocks,name);return mocks[name];},module,module.exports,...Object.values(globals));
@@ -11,9 +11,9 @@ function load(file,mocks,globals={}) {
 }
 class ApiError extends Error { constructor(status,body,authGeneration){super(String(status));Object.assign(this,{status,authGeneration});} }
 const review=id=>({id,type:'REVIEW',category:'REVIEW',author:{id:1,nickname:'me',avatarUrl:null},popup:{publicId:`popup-${id}`,title:`Popup ${id}`},rating:4,content:'visited',createdAt:'2026-10-08T10:00:00+09:00',images:['https://signed/image'],regionName:null,likeCount:0,commentCount:0,viewCount:0,liked:false});
-function api(token='jwt',body={items:[review(1)],nextCursor:null},status=200) {
+function api(token='jwt',body={items:[review(1)],nextCursor:null},status=200,refresh=load('src/lib/communityFeedRefresh.ts',{}),fetchPage) {
   const calls=[];
-  return {calls,...load('src/lib/myReviews.ts',{'../constants/api':{API_BASE_URL:'https://api'},'./auth':{getAuthSession:async()=>({accessToken:token,generation:7})},'./community':{CommunityApiError:ApiError},'./communityDiagnostics':{readCommunityErrorBody:async()=> 'error'},'./communityFeedRefresh':load('src/lib/communityFeedRefresh.ts',{})},{fetch:async(url,init)=>{calls.push({url,...init});return {ok:status<400,status,json:async()=>body};}})};
+  return {calls,...load('src/lib/myReviews.ts',{'../constants/api':{API_BASE_URL:'https://api'},'./auth':{getAuthSession:async()=>({accessToken:token,generation:7})},'./community':{CommunityApiError:ApiError},'./communityDiagnostics':{readCommunityErrorBody:async()=> 'error'},'./communityFeedRefresh':refresh},{fetch:async(url,init)=>{calls.push({url,...init});return fetchPage?fetchPage(url,init):{ok:status<400,status,json:async()=>body};}})};
 }
 test('authenticated endpoint, encoded cursor, actual review fields and server order',async()=>{
   const a=api('jwt',{items:[review(2),review(1)],nextCursor:'1'}),signal=new AbortController().signal;
@@ -48,24 +48,25 @@ function harness() {
   };
   return {react,render(Component){let tree,count=0;do{assert.ok(count++<25);cursor=0;dirty=false;tree=Component();pending.splice(0).forEach(fn=>fn());}while(dirty);return tree;},unmount(){slots.forEach(s=>s?.cleanup?.());}};
 }
-function screen(canGoBack=true) {
-  const h=harness(),pages=[],opened=[],routes=[];let tree,authListener,changeListener;
+function screen(canGoBack=true,realReads=false) {
+  const h=harness(),pages=[],opened=[],routes=[];let tree,authListener,reviewListener,user=null;
+  const refresh=load('src/lib/communityFeedRefresh.ts',{});
   const router={push:route=>routes.push(route),canGoBack:()=>canGoBack,back:()=>routes.push('back'),replace:path=>routes.push(path),dismissTo:path=>routes.push(path)};
-  const theme=load('src/theme/tokens.ts',{}),my=api();
+  const theme=load('src/theme/tokens.ts',{}),my=api('jwt',undefined,200,refresh,async(url,{signal})=>({ok:true,json:()=>new Promise((resolve,reject)=>pages.push({cursor:new URL(url).searchParams.get('cursor'),signal,resolve,reject}))}));
   const Component=load('src/app/profile/reviews.tsx',{
     react:h.react,'react/jsx-runtime':{jsx,jsxs:jsx},'expo-router':{useRouter:()=>router,useFocusEffect:fn=>h.react.useEffect(fn,[fn])},'lucide-react-native':{ChevronLeft:'ChevronLeft',Star:'Star'},
     'react-native':{ActivityIndicator:'ActivityIndicator',FlatList:'FlatList',Pressable:'Pressable',Text:'Text',View:'View',StyleSheet:{create:s=>s}},
     'react-native-safe-area-context':{SafeAreaView:'SafeAreaView'},'../../components/community/CommunityPostItem':{__esModule:true,default:'Card'},
     '../../hooks/usePopupNavigation':{usePopupNavigation:()=>id=>opened.push(id)},'../../hooks/useCommunityNow':{useCommunityNow:()=>({now:123})},
-    '../../lib/auth':{clearTokens:async()=>true,getAuthUser:()=>null,subscribeAuthSession:fn=>{authListener=fn;return()=>{};}},
-    '../../lib/community':{CommunityApiError:ApiError},'../../lib/communityFeedRefresh':{subscribeCommunityPostChanges:fn=>{changeListener=fn;return()=>{};}},
-    '../../lib/myReviews':{appendMyReviews:my.appendMyReviews,getMyReviews:(cursor,signal)=>new Promise((resolve,reject)=>pages.push({cursor,signal,resolve,reject}))},
-    '../../lib/reviews':{subscribeReviews:()=>()=>{}},
+    '../../lib/auth':{clearTokens:async()=>true,getAuthUser:()=>user,subscribeAuthSession:fn=>{authListener=fn;return()=>{};}},
+    '../../lib/community':{CommunityApiError:ApiError},'../../lib/communityFeedRefresh':refresh,
+    '../../lib/myReviews':{appendMyReviews:my.appendMyReviews,getMyReviews:realReads?my.getMyReviews:(cursor,signal)=>new Promise((resolve,reject)=>pages.push({cursor,signal,resolve,reject}))},
+    '../../lib/reviews':{subscribeReviews:fn=>{reviewListener=fn;return()=>{};}},
     '../../theme/tokens':theme,
   }).default;
   const render=()=>tree=h.render(Component),find=type=>nodes(tree).find(n=>n.type===type),texts=()=>nodes(tree).filter(n=>n.type==='Text').map(n=>n.props.children);
   const settle=async()=>{for(let i=0;i<5;i++){await Promise.resolve();render();}};
-  render();return {pages,opened,routes,render,find,texts,settle,auth:()=>{authListener();render();},change:(...args)=>{changeListener(...args);render();},unmount:h.unmount};
+  render();return {pages,opened,routes,refresh,render,find,texts,settle,auth:(next=null)=>{user=next;refresh.clearCommunityLikes();authListener();render();},change:(...args)=>{refresh.publishCommunityPostChange(...args);render();},created:()=>{reviewListener('popup-new','created');render();},unmount:h.unmount};
 }
 test('screen initial loading, empty page, error and retry remain distinct',async()=>{
   const s=screen();assert.equal(s.find('ActivityIndicator').props.accessibilityLabel,'방문 리뷰 불러오는 중');assert.equal(s.pages.length,1);
@@ -125,7 +126,75 @@ test('existing review card maps popup, rating, content, date and signed image UR
 test('in-flight own-review reads keep newer edits and deletions',async()=>{
   const refresh=load('src/lib/communityFeedRefresh.ts',{});let resolve;
   const a=load('src/lib/myReviews.ts',{'../constants/api':{API_BASE_URL:'https://api'},'./auth':{getAuthSession:async()=>({accessToken:'jwt',generation:7})},'./community':{CommunityApiError:ApiError},'./communityDiagnostics':{readCommunityErrorBody:async()=>''},'./communityFeedRefresh':refresh},{fetch:async()=>({ok:true,json:()=>new Promise(r=>resolve=r)})});
-  const pending=a.getMyReviews(null,new AbortController().signal);await Promise.resolve();await Promise.resolve();
+  const pending=a.getMyReviews(null,new AbortController().signal);await new Promise(resolve => setImmediate(resolve));
   refresh.publishCommunityPostChange(2,{rating:5,content:'new',images:[],updatedAt:'now'},'REVIEW');refresh.publishCommunityPostChange(1,null,'REVIEW');
   resolve({items:[review(2),review(1)],nextCursor:null});const page=await pending;assert.equal(page.items.length,1);assert.equal(page.items[0].content,'new');assert.equal(page.items[0].rating,5);
+});
+
+test('mounted own-review list receives like/unlike and comment create/delete counts without GETs or namespace collisions',async()=>{
+  const s=screen();s.pages[0].resolve({items:[review(2),review(1)],nextCursor:null});await s.settle();
+  const data=()=>s.find('FlatList').props.data;
+  s.refresh.publishCommunityLike(2,{liked:true,likeCount:1},true,'REVIEW');s.render();
+  assert.equal(data()[0].liked,true);assert.equal(data()[0].likeCount,1);assert.equal(data()[1].liked,false);
+  s.refresh.publishCommunityLike(2,{liked:true,likeCount:3},false,'REVIEW');s.render();assert.equal(data()[0].likeCount,3);
+  s.refresh.publishCommunityCommentCount(2,2,'REVIEW');s.render();assert.equal(data()[0].commentCount,2);
+  s.refresh.publishCommunityCommentCount(2,1,'REVIEW');s.render();assert.equal(data()[0].commentCount,1);
+  s.refresh.publishCommunityLike(2,{liked:false,likeCount:2},false,'REVIEW');s.render();assert.equal(data()[0].liked,false);assert.equal(data()[0].likeCount,2);
+  const before=data();s.refresh.publishCommunityLike(2,{liked:true,likeCount:99},false,'POST');s.refresh.publishCommunityCommentCount(2,99,'POST');
+  s.refresh.publishCommunityLike(999,{liked:true,likeCount:99},false,'REVIEW');s.refresh.publishCommunityCommentCount(999,99,'REVIEW');
+  s.change(2,null,'POST');s.render();assert.deepEqual(data(),before);assert.equal(s.pages.length,1);
+  s.unmount();s.refresh.publishCommunityLike(2,{liked:true,likeCount:99},false,'REVIEW');s.refresh.publishCommunityCommentCount(2,99,'REVIEW');s.render();assert.deepEqual(data(),before);
+});
+
+test('delayed initial GET cannot overwrite REVIEW reactions; POST with identical ID and other reviews stay isolated',async()=>{
+  const s=screen(true,true);await s.settle();assert.equal(s.pages.length,1);
+  s.refresh.publishCommunityLike(2,{liked:true,likeCount:4},false,'REVIEW');s.refresh.publishCommunityCommentCount(2,3,'REVIEW');
+  s.refresh.publishCommunityLike(1,{liked:true,likeCount:99},false,'POST');s.refresh.publishCommunityCommentCount(1,99,'POST');
+  s.pages[0].resolve({items:[review(2),review(1)],nextCursor:null});await s.settle();
+  const [changed,untouched]=s.find('FlatList').props.data;
+  assert.equal(changed.liked,true);assert.equal(changed.likeCount,4);assert.equal(changed.commentCount,3);assert.deepEqual(untouched,review(1));assert.equal(s.pages.length,1);s.unmount();
+});
+
+test('late replacement GET retains reactions already displayed after events and does not trigger an extra request',async()=>{
+  const s=screen(true,true);await s.settle();s.pages[0].resolve({items:[review(1)],nextCursor:null});await s.settle();
+  s.created();await s.settle();assert.equal(s.pages.length,2);
+  s.refresh.publishCommunityLike(1,{liked:true,likeCount:1},false,'REVIEW');s.refresh.publishCommunityCommentCount(1,2,'REVIEW');s.render();
+  assert.equal(s.find('FlatList').props.data[0].liked,true);assert.equal(s.find('FlatList').props.data[0].commentCount,2);
+  s.pages[1].resolve({items:[review(1)],nextCursor:null});await s.settle();
+  const [item]=s.find('FlatList').props.data;assert.equal(item.liked,true);assert.equal(item.likeCount,1);assert.equal(item.commentCount,2);assert.equal(s.pages.length,2);s.unmount();
+});
+
+test('pagination preserves events for existing and incoming reviews, newer edits and deletion tombstones',async()=>{
+  const s=screen(true,true);await s.settle();s.pages[0].resolve({items:[review(4)],nextCursor:'4'});await s.settle();
+  s.find('FlatList').props.onEndReached();s.find('FlatList').props.onEndReached();await s.settle();assert.equal(s.pages.length,2);
+  s.refresh.publishCommunityLike(4,{liked:true,likeCount:1},false,'REVIEW');s.refresh.publishCommunityCommentCount(4,2,'REVIEW');
+  s.refresh.publishCommunityLike(3,{liked:true,likeCount:5},false,'REVIEW');s.refresh.publishCommunityCommentCount(3,6,'REVIEW');
+  s.change(3,{rating:5,content:'edited',images:[],updatedAt:'now'},'REVIEW');s.change(2,null,'REVIEW');
+  s.pages[1].resolve({items:[review(4),review(3),review(2),review(1)],nextCursor:null});await s.settle();
+  const items=s.find('FlatList').props.data;assert.deepEqual(items.map(r=>r.id),[4,3,1]);
+  assert.deepEqual(items.map(r=>[r.liked,r.likeCount,r.commentCount]),[[true,1,2],[true,5,6],[false,0,0]]);assert.equal(items[1].content,'edited');assert.equal(items[1].rating,5);
+  s.find('FlatList').props.onEndReached();assert.equal(s.pages.length,2);s.unmount();
+});
+
+test('later server reads are authoritative while pending optimistic likes survive a GET',async()=>{
+  const refresh=load('src/lib/communityFeedRefresh.ts',{});
+  refresh.publishCommunityLike(1,{liked:true,likeCount:1},false,'REVIEW');refresh.publishCommunityCommentCount(1,1,'REVIEW');
+  const a=api('jwt',{items:[{...review(1),likeCount:2,commentCount:3}],nextCursor:null},200,refresh);
+  assert.deepEqual((await a.getMyReviews(null,new AbortController().signal)).items[0],{...review(1),likeCount:2,commentCount:3});
+  refresh.publishCommunityLike(1,{liked:true,likeCount:3},true,'REVIEW');
+  const item=(await a.getMyReviews(null,new AbortController().signal)).items[0];assert.equal(item.liked,true);assert.equal(item.likeCount,3);assert.equal(item.commentCount,3);
+});
+
+test('logout and account switch clear reactions and abort old initial/pagination GETs',async()=>{
+  const s=screen(true,true);await s.settle();s.pages[0].resolve({items:[review(2)],nextCursor:'2'});await s.settle();
+  s.find('FlatList').props.onEndReached();await s.settle();
+  s.refresh.publishCommunityLike(1,{liked:true,likeCount:7},false,'REVIEW');s.refresh.publishCommunityCommentCount(1,8,'REVIEW');
+  s.auth();assert.equal(s.pages[1].signal.aborted,true);assert.equal(s.find('FlatList').props.data.length,0);assert.equal(s.routes.at(-1),'/profile/login');
+  s.pages[1].resolve({items:[review(1)],nextCursor:null});await s.settle();assert.equal(s.find('FlatList').props.data.length,0);
+  s.auth({id:2});await s.settle();assert.equal(s.pages.length,3);
+  s.refresh.publishCommunityLike(1,{liked:true,likeCount:9},false,'REVIEW');s.refresh.publishCommunityCommentCount(1,9,'REVIEW');
+  s.auth({id:3});await s.settle();assert.equal(s.pages[2].signal.aborted,true);assert.equal(s.pages.length,4);
+  s.pages[2].resolve({items:[{...review(1),liked:true,likeCount:9,commentCount:9}],nextCursor:null});
+  s.pages[3].resolve({items:[{...review(1),author:{id:3,nickname:'new account',avatarUrl:null}}],nextCursor:null});await s.settle();
+  const [item]=s.find('FlatList').props.data;assert.equal(item.author.id,3);assert.equal(item.liked,false);assert.equal(item.likeCount,0);assert.equal(item.commentCount,0);s.unmount();
 });

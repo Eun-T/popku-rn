@@ -17,7 +17,7 @@ function load(file, mocks) {
   return module.exports.default;
 }
 
-function sheet(insets, edgeToEdge = true) {
+function sheet(insets, edgeToEdge) {
   const slots = [], effects = [], selected = [], timings = [], pans = []; let cursor = 0, tree;
   const react = {
     useRef(initial) { return slots[cursor++] ??= { current: initial }; },
@@ -66,10 +66,11 @@ for (const insets of [{ bottom: 0, left: 0, right: 0 }, { bottom: 34, left: 0, r
   });
 }
 
-test('non-review menu retains its original card geometry', () => {
-  const s = sheet({ bottom: 34, left: 0, right: 0 }, false);
+test('post menu defaults to edge-to-edge with internal bottom safe area', () => {
+  const s = sheet({ bottom: 34, left: 0, right: 0 }, undefined);
   const style = flattenStyle(nodes(s.tree).find(node => node.props?.accessibilityViewIsModal).props.style);
-  assert.equal(style.marginHorizontal, 16); assert.equal(style.marginBottom, 34); assert.equal(style.borderRadius, 24); assert.equal(style.paddingBottom, 8);
+  assert.equal(style.marginHorizontal, 0); assert.equal(style.marginBottom, 0); assert.equal(style.borderRadius, 0); assert.equal(style.paddingBottom, 42);
+  assert.equal(style.borderTopLeftRadius, 24); assert.equal(style.borderTopRightRadius, 24);
   s.unmount();
 });
 

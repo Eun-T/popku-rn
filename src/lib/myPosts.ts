@@ -1,5 +1,5 @@
 import { API_BASE_URL } from '../constants/api';
-import { getAuthSession } from './auth';
+import { authenticatedFetch, getAuthSession } from './auth';
 import { CommunityApiError, type CommunityFeedItem } from './community';
 import { readCommunityErrorBody } from './communityDiagnostics';
 import { beginCommunityRead, mergeCommunityPostChange, mergeCommunityCommentCount } from './communityFeedRefresh';
@@ -14,9 +14,9 @@ export async function getMyPosts(cursor: string | null, signal: AbortSignal): Pr
     if (signal.aborted) throw new Error('Post read aborted');
     if (!accessToken) throw new CommunityApiError(401, undefined, generation);
     const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
-    const response = await fetch(`${API_BASE_URL}/api/users/me/posts${query}`, {
+    const response = await authenticatedFetch(`${API_BASE_URL}/api/users/me/posts${query}`, {
       signal, headers: { Authorization: `Bearer ${accessToken}` },
-    });
+    }, { accessToken, generation });
     if (!response.ok) throw new CommunityApiError(response.status, await readCommunityErrorBody(response), generation);
     const body = await response.json() as Partial<MyPostPage> | null;
     if (signal.aborted) throw new Error('Post read aborted');

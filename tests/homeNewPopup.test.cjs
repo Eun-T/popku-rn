@@ -55,7 +55,7 @@ test('overlay heart stays inside unchanged square image and stops detail tap pro
   const props={width:152,image:{uri:'cover'},period:'26.10.07 - 10.22',title:'Popup',tags:['성수','굿즈'],isFavorite:false,isFavoriteDisabled:false,onToggleFavorite:()=>toggles++,onPress:()=>detail++};
   const card=cardEnv()(props),[frame,pill,title,tags]=card.props.children;
   const [image,heart]=frame.props.children;
-  assert.deepEqual(frame.props.style,{width:152,height:152});assert.equal(image.props.resizeMode,'cover');
+  assert.deepEqual(frame.props.style,{width:152,height:152});assert.equal(image.props.contentFit,'cover');
   assert.deepEqual(image.props.style,[{borderRadius:tokens.radius.radius4},{width:152,height:152}]);
   assert.equal(heart.props.style.position,'absolute');assert.equal(heart.props.style.right,tokens.spacing.space8);assert.equal(heart.props.style.bottom,tokens.spacing.space8);
   assert.equal(heart.props.children.props.children[1].props.size,26);assert.equal(heart.props.children.props.children[1].props.fill,tokens.colors.secondaryText);

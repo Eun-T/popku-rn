@@ -2,7 +2,8 @@ import { getPopupRegionDisplayName, getTagDisplayName } from '../../locales/filt
 import { useMemo, useState } from 'react';
 import { useTheme } from '../../theme/useTheme';
 import { useRouter } from 'expo-router';
-import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View, type ImageSourcePropType } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import type { ImageSource } from 'expo-image';
 
 import { useHomePopups } from '../../hooks/useHomePopups';
 import { usePopupFavorites } from '../../hooks/usePopupFavorites';
@@ -27,7 +28,7 @@ const cardGap = spacing.space12;
 const sidePadding = spacing.space16;
 const nextCardPreview = 30;
 
-function cardImage(url: string | null): ImageSourcePropType {
+function cardImage(url: string | null): ImageSource | number {
   return url ? { uri: url } : placeholderImage;
 }
 
@@ -55,7 +56,7 @@ export default function HomeNewPopupSection({ onPressPopup }: { onPressPopup: (i
     stateText: { ...baseStyles.stateText, color: themeColors.textSecondary },
   }), [themeColors]);
   const [selectedCountry, setSelectedCountry] = useState<Country>('KR');
-  const { status, popups } = useHomePopups('new', selectedCountry);
+  const { status, popups, recoverCover } = useHomePopups('new', selectedCountry);
   const { isFavorite, isFavoriteDisabled, toggleFavorite, favoritesStatus, retryFavorites } = usePopupFavorites();
   const router = useRouter();
   const availablePopups = popups.filter((popup) => popupOperatingStatus(popup.startDate, popup.endDate) !== '종료');
@@ -98,6 +99,9 @@ export default function HomeNewPopupSection({ onPressPopup }: { onPressPopup: (i
             key={popup.publicId}
             width={cardWidth}
             image={cardImage(popup.coverImageUrl)}
+            popup={popup}
+            coverScope={`${selectedCountry}:${resolvedLanguage}`}
+            onRecoverCover={recoverCover}
             isUpcoming={popupOperatingStatus(popup.startDate, popup.endDate) === '오픈 예정'}
             period={formatPopupPeriod(popup.startDate, popup.endDate)}
             title={popup.name}

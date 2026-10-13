@@ -64,9 +64,7 @@ export default function PopupGridCard({
     >
       <View style={styles.posterArea}>
         <Image
-          source={
-            cover.source ?? (item.coverImageUrl ? null : placeholderImage)
-          }
+          source={cover.source ?? placeholderImage}
           contentFit="cover"
           cachePolicy="memory-disk"
           onError={cover.onError}

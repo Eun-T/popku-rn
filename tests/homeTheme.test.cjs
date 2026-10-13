@@ -34,9 +34,9 @@ async function app(state, enabled = true) {
   await language.initialize({read:async()=> 'ko',write:async()=>{},getLanguageTags:()=>['ja-JP']});
   return {...ui,theme,language,calls,opened,toggles,pulse:()=>({starts,stops}),
     mountFile(file,props={}){return ui.mount(()=>ui.load(file).default(props));},
-    mountChild(root,name){return ui.mount(()=>{const n=child(root.tree,name);return n.type(n.props);});},
+    mountChild(root,name){return ui.mount(()=>{const n=child(root.tree,name);return n?n.type(n.props):null;});},
     async mode(value){await theme.setThemePreference(value);ui.renderAll();},os(value){scheme=value;theme.refreshSystemTheme();ui.renderAll();},
-    async settle(){await flush();await flush();}};
+    async settle(){await flush();await flush();ui.renderAll();}};
 }
 
 test('actual Compiler updates full home and preserves country/expanded/banner pages, images, API and navigation',async()=>{
@@ -44,11 +44,11 @@ test('actual Compiler updates full home and preserves country/expanded/banner pa
   await s.settle();
   child(trending.tree,'FilterChips').props.onChange('JP');child(fresh.tree,'FilterChips').props.onChange('JP');await s.settle();
   child(trending.tree,'MoreButton').props.onPress();
-  const pages=s.mount(()=>banner.tree.type(banner.tree.props));
+  const pages=s.mount(()=>typeof banner.tree?.type==='function'?banner.tree.type(banner.tree.props):null);
   nodes(pages.tree).find(n=>n.type==='ScrollView').props.onMomentumScrollEnd({nativeEvent:{contentOffset:{x:390}}});
   const ranking=s.mountChild(trending,'PopupRankingCard'),card=s.mountChild(fresh,'NewPopupCard');
   const filter=s.mountChild(trending,'FilterChips'),more=s.mountChild(trending,'MoreButton');
-  const requestSnapshot=s.calls.slice(),source=nodes(card.tree).find(n=>n.type==='Image').props.source,scroll=()=>nodes(fresh.tree).find(n=>n.type==='ScrollView'),key=scroll().key,slots=screen.slots;
+  const requestSnapshot=s.calls.slice(),source=nodes(card.tree).find(n=>n.type==='ExpoImage').props.source,scroll=()=>nodes(fresh.tree).find(n=>n.type==='ScrollView'),key=scroll().key,slots=screen.slots;
   const light={ranking:flat(ranking.tree),card:flat(card.tree),filter:flat(nodes(filter.tree).find(n=>n.key==='JP'))};
   assert.equal(flat(screen.tree).backgroundColor,'#FFFFFF');assert.equal(light.ranking.backgroundColor,'#FFFFFF');
   assert.equal(light.filter.backgroundColor,'#111827');assert.equal(flat(nodes(more.tree).find(n=>n.type==='Text')).color,'#111827');
@@ -64,15 +64,16 @@ test('actual Compiler updates full home and preserves country/expanded/banner pa
     assert.equal(flat({props:{style:more.tree.props.style({pressed:false})}}).backgroundColor,dark?'#242424':'#F7F8FC');
     assert.equal(flat(pages.tree).backgroundColor,dark?'#242424':'#F8FAFC');
     assert.ok(nodes(pages.tree).filter(n=>n.type==='Text').every(n=>flat(n).color==='#FFFFFF'));
-    assert.deepEqual(nodes(card.tree).find(n=>n.type==='Image').props.source,source);assert.equal(scroll().key,key);assert.equal(screen.slots,slots);
+    assert.deepEqual(nodes(card.tree).find(n=>n.type==='ExpoImage').props.source,source);assert.equal(scroll().key,key);assert.equal(screen.slots,slots);
     assert.equal(child(trending.tree,'FilterChips').props.value,'JP');assert.equal(child(fresh.tree,'FilterChips').props.value,'JP');
     assert.equal(nodes(trending.tree).filter(n=>n.type?.name==='PopupRankingCard').length,8);
     assert.equal(nodes(pages.tree).find(n=>n.props?.accessibilityState?.selected).key,'popup-1');assert.deepEqual(s.calls,requestSnapshot);
     if(!dark){assert.deepEqual(flat(ranking.tree),light.ranking);assert.deepEqual(flat(card.tree),light.card);}
   }
   s.os('light');assert.equal(flat(screen.tree).backgroundColor,'#FFFFFF');s.os('dark');assert.equal(flat(screen.tree).backgroundColor,'#121212');
-  for(const locale of ['ja','ko']) {await s.language.setLanguagePreference(locale);assert.equal(s.theme.getSnapshot().resolvedTheme,'dark');
-    assert.ok(texts(trending.tree).includes(locale==='ja'?'今話題のポップアップ':'지금 뜨는 팝업'));assert.deepEqual(s.calls,requestSnapshot);}
+  for(const locale of ['ja','ko']) {await s.language.setLanguagePreference(locale);await s.settle();assert.equal(s.theme.getSnapshot().resolvedTheme,'dark');
+    assert.ok(texts(trending.tree).includes(locale==='ja'?'今話題のポップアップ':'지금 뜨는 팝업'));
+    assert.deepEqual(s.calls.slice(requestSnapshot.length).map(u=>new URL(u).searchParams.get('languageCode')),['ja','ja','ja']);}
   nodes(ranking.tree).find(n=>n.props?.accessibilityState).props.onPress();assert.equal(s.toggles.at(-1).publicId,'popup-0');
   nodes(ranking.tree).find(n=>n.props?.accessibilityLabel?.includes('서버 원문')).props.onPress();assert.equal(s.opened.at(-1),'popup-0');s.dispose();
 });
@@ -125,8 +126,9 @@ test('disabled actual Compiler home remains light with dark preference/OS, no ne
   for(const mode of ['dark','light','system']) {
     await s.mode(mode);s.os('dark');assert.equal(s.theme.getSnapshot().resolvedTheme,'light');
     assert.equal(flat(screen.tree).backgroundColor,'#FFFFFF');assert.equal(child(trending.tree,'FilterChips').props.themeColors.filterSelectedBg,'#111827');
-    await s.language.setLanguagePreference('ja');await s.language.setLanguagePreference('ko');
-    assert.equal(s.theme.getSnapshot().themePreference,mode);assert.equal(screen.slots,slots);assert.equal(scroll().key,key);assert.deepEqual(s.calls,calls);
+    await s.language.setLanguagePreference('ja');await s.settle();await s.language.setLanguagePreference('ko');await s.settle();
+    assert.equal(s.theme.getSnapshot().themePreference,mode);assert.equal(screen.slots,slots);assert.equal(scroll().key,key);
+    assert.deepEqual(s.calls.slice(calls.length).map(u=>new URL(u).searchParams.get('languageCode')),['ja','ja']);
   }
   s.dispose();
 });

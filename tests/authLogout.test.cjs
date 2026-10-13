@@ -1,3 +1,4 @@
+const { savedToken } = require('./helpers/authStorage.cjs');
 const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
 const { test } = require('node:test');
@@ -23,7 +24,7 @@ function environment() {
   const secureStore = {
     isAvailableAsync: async () => true,
     getItemAsync: async key => {
-      if (key === 'refreshToken' && refreshReadGate) {
+      if (key === 'session.v1' && refreshReadGate) {
         const gate = refreshReadGate; refreshReadGate = undefined;
         await gate;
       }
@@ -38,6 +39,7 @@ function environment() {
     },
   };
   const mocks = {
+    './deviceId': { getDeviceId: async () => 'device' },
     'expo-secure-store': secureStore,
     '../constants/api': { API_BASE_URL: 'https://api.test' },
     './favoriteCache': { clearFavoriteCache: () => caches.favorites++ },
@@ -85,7 +87,7 @@ function observe(env) {
 }
 async function assertSession(env, user, generation) {
   assert.equal(await env.auth.getSavedAccessToken(), user.email);
-  assert.equal(env.storage.get('refreshToken'), `refresh-${user.email}`);
+  assert.equal(savedToken(env.storage, 'refreshToken'), `refresh-${user.email}`);
   assert.deepEqual(env.auth.getAuthUser(), user);
   assert.equal((await env.auth.getAuthSession()).generation, generation);
 }
@@ -95,9 +97,9 @@ test('ordinary login then logout removes both tokens, user and private caches on
   const events = observe(env), caches = { ...env.caches };
   await env.auth.logout();
   assert.equal(await env.auth.getSavedAccessToken(), null);
-  assert.equal(env.storage.get('refreshToken'), undefined);
+  assert.equal(savedToken(env.storage, 'refreshToken'), undefined);
   assert.equal(env.auth.getAuthUser(), null);
-  assert.deepEqual(env.deleted.sort(), ['accessToken', 'refreshToken']);
+  assert.deepEqual(env.deleted.sort(), ['accessToken', 'refreshToken', 'session.v1']);
   assert.deepEqual(events, { user: 1, session: 1 });
   // Invalidation clears caches, then publishing the anonymous identity clears them again.
   assert.deepEqual(env.caches, { favorites: caches.favorites + 2, likes: caches.likes + 2 });
@@ -105,12 +107,13 @@ test('ordinary login then logout removes both tokens, user and private caches on
   assert.equal(request.options.method, 'POST');
   assert.deepEqual(request.options.headers, { 'Content-Type': 'application/json' });
   assert.deepEqual(JSON.parse(request.options.body), {
-    refreshToken: `refresh-${userA.email}`, deviceId: env.auth.DEVICE_ID,
+    refreshToken: `refresh-${userA.email}`, deviceId: await env.auth.getDeviceId(),
   });
 });
 
 test('logout without a refresh token still clears the local session without an HTTP request', async () => {
-  const env = environment(); await env.login(); env.storage.delete('refreshToken');
+  const env = environment(); await env.login(); env.storage.delete('session.v1');
+  env.storage.set('accessToken', userA.email); // Incomplete legacy pair has no refresh credential to revoke.
   await env.auth.logout();
   assert.equal(env.storage.size, 0); assert.equal(env.auth.getAuthUser(), null);
   assert.equal(logoutRequests(env).length, 0);
@@ -126,7 +129,7 @@ for (const failure of ['HTTP 500', 'network rejection']) {
     await assert.rejects(env.auth.logout(), failure === 'HTTP 500'
       ? /서버 로그아웃에 실패했습니다/ : /offline/);
     assert.equal(env.storage.size, 0); assert.equal(env.auth.getAuthUser(), null);
-    assert.deepEqual(env.deleted.sort(), ['accessToken', 'refreshToken']);
+    assert.deepEqual(env.deleted.sort(), ['accessToken', 'refreshToken', 'session.v1']);
   });
 }
 
@@ -187,7 +190,7 @@ test('login starting while logout SecureStore deletion is pending survives the e
   const env = environment(); await env.login();
   const gate = deferred(); env.blockDeletion(gate.promise);
   const loggingOut = env.auth.logout(); await flush();
-  assert.equal(env.deleted.length, 2);
+  assert.equal(env.deleted.length, 3);
   const loggingIn = env.login(userB); await flush();
   gate.resolve(); await Promise.all([loggingOut, loggingIn]);
   const { generation } = await env.auth.getAuthSession();
@@ -201,7 +204,7 @@ test('concurrent same-session logouts share local invalidation and publish anony
   assert.equal(logoutRequests(env).length, 2);
   gate.resolve(response()); await Promise.all([a, b]);
   assert.equal(env.storage.size, 0); assert.equal(env.auth.getAuthUser(), null);
-  assert.deepEqual(env.deleted.sort(), ['accessToken', 'refreshToken']);
+  assert.deepEqual(env.deleted.sort(), ['accessToken', 'refreshToken', 'session.v1']);
   assert.deepEqual(events, { user: 1, session: 1 });
 });
 
@@ -228,7 +231,7 @@ test('current concurrent profile 401 and delayed logout invalidate once and allo
   await Promise.all([env.auth.refreshAuthUser(), env.auth.refreshAuthUser()]);
   gate.resolve(response()); await loggingOut;
   assert.equal(env.storage.size, 0); assert.equal(env.auth.getAuthUser(), null);
-  assert.deepEqual(env.deleted.sort(), ['accessToken', 'refreshToken']);
+  assert.deepEqual(env.deleted.sort(), ['accessToken', 'refreshToken', 'session.v1']);
   assert.deepEqual(events, { user: 1, session: 1 });
   env.respondProfile(undefined); await env.login(userB);
   await assertSession(env, userB, (await env.auth.getAuthSession()).generation);

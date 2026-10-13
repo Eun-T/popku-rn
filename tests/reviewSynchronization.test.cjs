@@ -6,7 +6,7 @@ const { nodes } = require('./helpers/uiTree.cjs');
 const { withUiDependencies } = require('./helpers/uiDependencies.cjs');
 
 function load(file, mocks = {}, globals = {}) {
-  mocks = withUiDependencies(file, mocks);
+  mocks = withUiDependencies(file, mocks, globals.fetch);
   const module = { exports: {} };
   const compiled = ts.transpileModule(readFileSync(file, 'utf8'), { reportDiagnostics: true,
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } });
@@ -195,7 +195,7 @@ function setup(t, initial = []) {
 
 function summary(screen, count, rating) {
   assert.ok(screen.texts().includes(count ? `후기 ${count}개` : '후기'));
-  assert.ok(screen.texts().includes(count ? rating.toFixed(1) : '—'));
+  assert.ok(screen.texts().includes(count ? rating.toFixed(1) : '0.0'));
   assert.ok(nodes(screen.tree).some(node => node.props?.accessibilityLabel === (count
     ? `평균 별점 ${rating.toFixed(1)}점, 방문 리뷰로 이동` : '별점 없음, 방문 리뷰로 이동')));
 }

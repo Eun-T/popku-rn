@@ -1,16 +1,25 @@
-import { Heart } from 'lucide-react-native';
-import { Image, Pressable, StyleSheet, Text, View, type ImageSourcePropType } from 'react-native';
+import { Image, type ImageSource } from "expo-image";
+import { Heart } from "lucide-react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  useHomeCoverImage,
+  type RecoverHomeCover,
+} from "../../hooks/useHomeCoverImage";
+import type { PublicPopup } from "../../lib/popups";
 
-import { colors, radius, spacing, typography } from '../../theme/tokens';
-import { useTranslation } from '../../hooks/useTranslation';
-import { useMemo } from 'react';
-import { useTheme } from '../../theme/useTheme';
+import { useMemo } from "react";
+import { useTranslation } from "../../hooks/useTranslation";
+import { colors, radius, spacing, typography } from "../../theme/tokens";
+import { useTheme } from "../../theme/useTheme";
 
 const favoriteIconSize = 26;
 
 type NewPopupCardProps = {
   width: number;
-  image: ImageSourcePropType;
+  image: ImageSource | number;
+  popup?: PublicPopup;
+  coverScope?: string;
+  onRecoverCover?: RecoverHomeCover;
   period: string;
   isUpcoming?: boolean;
   title: string;
@@ -24,6 +33,9 @@ type NewPopupCardProps = {
 export default function NewPopupCard({
   width,
   image,
+  popup,
+  coverScope,
+  onRecoverCover,
   period,
   isUpcoming = false,
   title,
@@ -35,25 +47,64 @@ export default function NewPopupCard({
 }: NewPopupCardProps) {
   const { t } = useTranslation();
   const { resolvedTheme, themeColors } = useTheme();
-  const styles = useMemo(() => ({ ...baseStyles,
-    card: { ...baseStyles.card, backgroundColor: themeColors.cardBackground },
-    image: resolvedTheme === 'dark' ? { ...baseStyles.image, backgroundColor: themeColors.surface } : baseStyles.image,
-    openingBadge: { ...baseStyles.openingBadge, backgroundColor: themeColors.ongoingBg },
-    openingText: { ...baseStyles.openingText, color: themeColors.ongoingText },
-    upcomingBadge: { ...baseStyles.upcomingBadge, backgroundColor: themeColors.upcomingBg },
-    upcomingText: { ...baseStyles.upcomingText, color: themeColors.upcomingText },
-    title: { ...baseStyles.title, color: themeColors.textPrimary },
-    tag: { ...baseStyles.tag, backgroundColor: themeColors.tagBackground },
-    tagText: { ...baseStyles.tagText, color: themeColors.tagText },
-  }), [themeColors, resolvedTheme]);
+  const cover = useHomeCoverImage(image, popup, onRecoverCover, coverScope);
+  const styles = useMemo(
+    () => ({
+      ...baseStyles,
+      card: { ...baseStyles.card, backgroundColor: themeColors.cardBackground },
+      image:
+        resolvedTheme === "dark"
+          ? { ...baseStyles.image, backgroundColor: themeColors.surface }
+          : baseStyles.image,
+      openingBadge: {
+        ...baseStyles.openingBadge,
+        backgroundColor: themeColors.ongoingBg,
+      },
+      openingText: {
+        ...baseStyles.openingText,
+        color: themeColors.ongoingText,
+      },
+      upcomingBadge: {
+        ...baseStyles.upcomingBadge,
+        backgroundColor: themeColors.upcomingBg,
+      },
+      upcomingText: {
+        ...baseStyles.upcomingText,
+        color: themeColors.upcomingText,
+      },
+      title: { ...baseStyles.title, color: themeColors.textPrimary },
+      tag: { ...baseStyles.tag, backgroundColor: themeColors.tagBackground },
+      tagText: { ...baseStyles.tagText, color: themeColors.tagText },
+    }),
+    [themeColors, resolvedTheme],
+  );
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={t('place.explore.viewDetails', { title })} onPress={onPress} style={[styles.card, { width }]}>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={t("place.explore.viewDetails", { title })}
+      onPress={onPress}
+      style={[styles.card, { width }]}
+    >
       <View style={{ width, height: width }}>
-        <Image source={image} style={[styles.image, { width, height: width }]} resizeMode="cover" />
+        <Image
+          key={cover.imageKey}
+          source={cover.source}
+          style={[styles.image, { width, height: width }]}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          onError={cover.onError}
+          onLoad={cover.onLoad}
+        />
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={t(isFavorite ? 'home.card.removeFavorite' : 'home.card.addFavorite', { title })}
-          accessibilityState={{ selected: isFavorite, disabled: isFavoriteDisabled }}
+          accessibilityLabel={t(
+            isFavorite ? "home.card.removeFavorite" : "home.card.addFavorite",
+            { title },
+          )}
+          accessibilityState={{
+            selected: isFavorite,
+            disabled: isFavoriteDisabled,
+          }}
           disabled={isFavoriteDisabled}
           onPress={(event) => {
             event.stopPropagation();
@@ -82,11 +133,31 @@ export default function NewPopupCard({
             />
           </View>
         </Pressable>
+        {cover.canRetry && (
+          <Pressable
+            testID="home-cover-retry"
+            accessibilityRole="button"
+            accessibilityLabel={t("home.card.retryImage", { title })}
+            accessibilityState={{ disabled: cover.busy }}
+            disabled={cover.busy}
+            onPress={(event) => {
+              event.stopPropagation();
+              cover.retry();
+            }}
+            style={baseStyles.imageRetry}
+          >
+            <Text style={baseStyles.imageRetryText}>
+              {t("home.card.retry")}
+            </Text>
+          </Pressable>
+        )}
       </View>
       <View style={[styles.openingBadge, isUpcoming && styles.upcomingBadge]}>
-        <Text style={[styles.openingText, isUpcoming && styles.upcomingText]}>{period}</Text>
+        <Text style={[styles.openingText, isUpcoming && styles.upcomingText]}>
+          {period}
+        </Text>
       </View>
-      <Text style={styles.title} numberOfLines={2} ellipsizeMode="tail">
+      <Text style={styles.title} numberOfLines={1} ellipsizeMode="tail">
         {title}
       </Text>
       <View style={styles.tags}>
@@ -103,6 +174,16 @@ export default function NewPopupCard({
 }
 
 const baseStyles = StyleSheet.create({
+  imageRetry: {
+    position: "absolute",
+    left: spacing.space8,
+    top: spacing.space8,
+    paddingHorizontal: spacing.space8,
+    paddingVertical: spacing.space6,
+    borderRadius: radius.radius4,
+    backgroundColor: colors.background,
+  },
+  imageRetryText: { ...typography.caption, color: colors.text },
   card: {
     backgroundColor: colors.background,
   },
@@ -133,16 +214,16 @@ const baseStyles = StyleSheet.create({
     left: 0,
   },
   openingBadge: {
-    alignSelf: 'flex-start',
+    alignSelf: "flex-start",
     marginTop: spacing.space8,
-    paddingHorizontal: spacing.space6,
+    paddingHorizontal: spacing.space4,
     paddingVertical: spacing.space2,
     borderRadius: radius.radius4,
     backgroundColor: colors.primaryLight,
   },
   openingText: {
     ...typography.caption,
-    fontWeight: '700',
+    fontWeight: "700",
     color: colors.primaryDark,
   },
   upcomingBadge: {
@@ -152,26 +233,26 @@ const baseStyles = StyleSheet.create({
     color: colors.infoDark,
   },
   title: {
-    marginTop: spacing.space6,
+    marginTop: spacing.space4,
     ...typography.body,
-    fontWeight: '700',
+    fontWeight: "700",
     color: colors.text,
   },
   tags: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexDirection: "row",
+    flexWrap: "wrap",
     gap: spacing.space4,
-    marginTop: spacing.space6,
+    marginTop: spacing.space4,
   },
   tag: {
-    maxWidth: '100%',
-    paddingHorizontal: spacing.space6,
-    paddingVertical: spacing.space4,
+    maxWidth: "100%",
+    paddingHorizontal: spacing.space4,
+    paddingVertical: spacing.space2,
     borderRadius: radius.radius4,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: "#F3F4F6",
   },
   tagText: {
     ...typography.caption,
-    color: '#4B5563',
+    color: "#4B5563",
   },
 });

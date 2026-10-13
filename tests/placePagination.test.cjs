@@ -5,6 +5,14 @@ const ts = require('typescript');
 const jsx = (type, props, key) => ({ type, props, key });
 function load(file, mocks, globals = {}) {
   mocks = require('./helpers/uiDependencies.cjs').withI18nDependencies(file, mocks);
+  if (['src/screens/PlaceScreen.tsx','src/components/place/PlaceWeeklySection.tsx'].includes(file)) {
+    const prefix=file.includes('/screens/')?'../lib/':'../../lib/';
+    const cover=mocks[`${prefix}placeCoverRecovery`]??load('src/lib/placeCoverRecovery.ts',{},globals);
+    mocks[`${prefix}placeCoverRecovery`]=cover;
+    mocks[`${prefix}exploreCoverRecovery`]=load('src/lib/exploreCoverRecovery.ts',{
+      './placeCoverRecovery':cover,'./popups':mocks[`${prefix}popups`],
+    },globals);
+  }
   globals = { __DEV__: false, ...globals };
   const code = ts.transpileModule(readFileSync(file, 'utf8'), { compilerOptions: {
     module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: false,
@@ -28,6 +36,7 @@ function harness() {
         if (!Object.is(value,slots[i].value)) { slots[i].value=value; dirty=true; } }]; },
     useRef(initial) { return slots[cursor++] ??= { current: initial }; },
     useMemo(fn) { cursor++; return fn(); },
+    useCallback(fn) { cursor++; return fn; },
     useEffect(fn,deps) { const i=cursor++, old=slots[i];
       if (!old || !deps.every((value,j)=>Object.is(value,old.deps[j]))) {
         slots[i]={ deps, cleanup: old?.cleanup }; pending.push(()=>{ slots[i].cleanup?.(); slots[i].cleanup=fn(); });
@@ -40,7 +49,7 @@ function screen(Clock=Date, entry={}) {
   const h=harness(), pages=[], endings=[], details=[];
   const native={ FlatList:'FlatList', Pressable:'Pressable', Text:'Text', TextInput:'TextInput', View:'View',
     StyleSheet:{ create:s=>s }, useWindowDimensions:()=>({ width:390 }) };
-  const mocks={ react:h.react, 'react/jsx-runtime':{ jsx,jsxs:jsx }, 'expo-router':{ useScrollToTop(){}, useLocalSearchParams:()=>entry },
+  const mocks={ react:h.react, 'react/jsx-runtime':{ jsx,jsxs:jsx }, 'expo-router':{ useScrollToTop(){}, useLocalSearchParams:()=>entry, useFocusEffect(){} },
     'lucide-react-native':{ Bell:'Bell',Search:'Search',X:'X' }, 'react-native':native,
     'react-native-safe-area-context':{ SafeAreaView:'SafeAreaView',useSafeAreaInsets:()=>({ top:0,bottom:0,left:0,right:0 }) },
     '../theme/tokens':theme, '../constants/placeFilters':filters, '../constants/placeRegionMocks':{ placeRegionPages:[] },
@@ -222,6 +231,102 @@ test('filter reset aborts stale reads; Sheet draft is inert and applying combine
   s.pages[3].resolve({popups:[popup('reset')],nextCursor:null}); await s.settle();
   assert.deepEqual(s.find('FlatList').props.data.map(p=>p.publicId),['reset']); s.unmount();
 });
+test('feature filters share quick/sheet state, reset pagination and discard obsolete pages',async()=>{
+  const s=screen(); s.tab('전체'); const original=s.pages[0];
+  s.find('QuickFilterBar').props.onToggleFeature('preReservation'); s.render();
+  assert.equal(original.signal.aborted,true); assert.equal(s.pages.length,2);
+  assert.equal(s.pages[1].detail.hasReservation,true); assert.equal(s.pages[1].detail.hasBenefits,undefined);
+  s.find('AppliedFilterBar').props.onOpenDetails(); s.render();
+  assert.deepEqual(s.find('PlaceFilterSheet').props.quickFilters.quickFeatures,['preReservation']);
+  s.find('PlaceFilterSheet').props.onToggleFeature('benefit'); s.render();
+  assert.equal(s.pages.length,2);
+  s.find('PlaceFilterSheet').props.onClose(); s.render();
+  assert.equal(s.pages.length,2);
+  s.find('AppliedFilterBar').props.onOpenDetails(); s.render();
+  s.find('PlaceFilterSheet').props.onToggleFeature('benefit'); s.render();
+  s.find('PlaceFilterSheet').props.onApply(); s.render();
+  assert.equal(s.pages.length,3); assert.equal(s.pages[1].signal.aborted,true);
+  assert.equal(s.pages[2].detail.hasReservation,true); assert.equal(s.pages[2].detail.hasBenefits,true);
+  assert.equal(s.pages[2].cursor,null);
+  original.resolve({popups:[popup('old')],nextCursor:null});
+  s.pages[1].resolve({popups:[popup('old-feature')],nextCursor:null});
+  s.pages[2].resolve({popups:[popup('both')],nextCursor:'next'}); await s.settle();
+  assert.deepEqual(s.find('FlatList').props.data.map(p=>p.publicId),['both']);
+  s.find('FlatList').props.onEndReached(); s.find('FlatList').props.onEndReached();
+  assert.equal(s.pages.length,4); assert.deepEqual(s.pages[3].detail,s.pages[2].detail);
+  s.find('AppliedFilterBar').props.onRemove('quickFeatures','preReservation'); s.render();
+  assert.equal(s.pages[3].signal.aborted,true); assert.equal(s.pages[4].cursor,null);
+  assert.equal(s.pages[4].detail.hasReservation,undefined); assert.equal(s.pages[4].detail.hasBenefits,true);
+  s.pages[3].resolve({popups:[popup('old-next')],nextCursor:null});
+  s.pages[4].resolve({popups:[],nextCursor:null}); await s.settle();
+  assert.equal(s.find('FlatList').props.data.length,0);
+  s.find('AppliedFilterBar').props.onReset(); s.render();
+  assert.equal(s.pages[5].detail.hasReservation,undefined); assert.equal(s.pages[5].detail.hasBenefits,undefined);
+  s.pages[5].resolve({popups:[],nextCursor:null}); await s.settle();
+  assert.deepEqual(s.find('QuickFilterBar').props.selectedFilters.quickFeatures,[]); s.unmount();
+});
+
+test('date periods request only applied values; cancel and reset preserve draft semantics',async()=>{
+  const s=screen();s.tab('전체');s.pages[0].resolve({popups:[],nextCursor:null});await s.settle();
+  s.find('QuickFilterBar').props.onOpenDetails();s.render();
+  const range={mode:'custom',startDate:'2026-10-10',endDate:'2026-10-12'};
+  for(const invalid of [
+    {mode:'custom',startDate:'2026-10-10',endDate:null},
+    {mode:'custom',startDate:'2026-10-12',endDate:'2026-10-10'},
+    {mode:'custom',startDate:'2026-02-29',endDate:'2026-10-10'},
+  ]) {
+    s.find('PlaceFilterSheet').props.onDatePeriodChange(invalid);s.render();
+    s.find('PlaceFilterSheet').props.onApply();s.render();
+    assert.equal(s.pages.length,1);assert.equal(s.find('PlaceFilterSheet').props.visible,true);
+    assert.equal(s.find('AppliedFilterBar'),undefined);
+  }
+  s.find('PlaceFilterSheet').props.onDatePeriodChange(range);s.render();
+  assert.equal(s.pages.length,1);
+  s.find('PlaceFilterSheet').props.onApply();s.render();
+  assert.deepEqual(s.find('AppliedFilterBar').props.datePeriod,range);assert.equal(s.pages.length,2);
+  assert.equal(s.pages[1].cursor,null);assert.equal(s.pages[1].detail.operatingFrom,range.startDate);
+  assert.equal(s.pages[1].detail.operatingTo,range.endDate);assert.equal(s.pages[1].detail.visitPeriod,'all');
+  s.find('AppliedFilterBar').props.onOpenDetails();s.render();
+  s.find('PlaceFilterSheet').props.onDatePeriodChange({mode:'today',startDate:'2026-10-10',endDate:'2026-10-10'});s.render();
+  s.find('PlaceFilterSheet').props.onClose();s.render();
+  assert.equal(s.pages.length,2);
+  s.find('AppliedFilterBar').props.onOpenDetails();s.render();
+  assert.deepEqual(s.find('PlaceFilterSheet').props.datePeriod,range);
+  s.find('PlaceFilterSheet').props.onReset();s.render();
+  assert.equal(s.find('PlaceFilterSheet').props.datePeriod.mode,'all');
+  assert.deepEqual(s.find('AppliedFilterBar').props.datePeriod,range);
+  s.find('PlaceFilterSheet').props.onApply();s.render();
+  assert.ok(s.find('QuickFilterBar'));assert.equal(s.pages.length,3);
+  assert.equal(s.pages[1].signal.aborted,true);
+  assert.equal(s.pages[2].detail.operatingFrom,undefined);assert.equal(s.pages[2].detail.operatingTo,undefined);
+  assert.equal(s.pages[2].detail.visitPeriod,'all');s.unmount();
+});
+
+test('custom/seven-day/today changes discard reversed pages and retain the period for pagination',async()=>{
+  const s=screen();s.tab('전체');const original=s.pages[0];
+  const apply=range=>{
+    (s.find('AppliedFilterBar')||s.find('QuickFilterBar')).props.onOpenDetails();s.render();
+    s.find('PlaceFilterSheet').props.onDatePeriodChange(range);s.render();
+    s.find('PlaceFilterSheet').props.onApply();s.render();
+  };
+  apply({mode:'custom',startDate:'2000-10-10',endDate:'2000-10-10'});
+  const custom=s.pages[1];
+  assert.equal(custom.detail.operatingFrom,'2000-10-10');assert.equal(custom.detail.operatingTo,'2000-10-10');
+  apply({mode:'sevenDays',startDate:'2026-12-28',endDate:'2027-01-03'});
+  assert.equal(custom.signal.aborted,true);assert.equal(original.signal.aborted,true);
+  original.resolve({popups:[popup('old-all')],nextCursor:null});
+  custom.resolve({popups:[popup('old-period')],nextCursor:null});await s.settle();
+  assert.equal(s.find('FlatList').props.data.length,0);
+  s.pages[2].resolve({popups:[popup('week')],nextCursor:'next'});await s.settle();
+  s.find('FlatList').props.onEndReached();s.find('FlatList').props.onEndReached();
+  assert.equal(s.pages.length,4);assert.deepEqual(s.pages[3].detail,s.pages[2].detail);
+  assert.equal(s.pages[3].detail.operatingFrom,'2026-12-28');assert.equal(s.pages[3].detail.operatingTo,'2027-01-03');
+  apply({mode:'today',startDate:'2026-10-10',endDate:'2026-10-10'});
+  assert.equal(s.pages[3].signal.aborted,true);assert.equal(s.pages[4].cursor,null);
+  assert.equal(s.pages[4].detail.visitPeriod,'today');assert.equal(s.pages[4].detail.operatingFrom,undefined);
+  assert.equal(s.pages[4].detail.operatingTo,undefined);s.unmount();
+});
+
 test('rapid tab switching does not cancel or duplicate an active first page',async()=>{
   const s=screen(); s.tab('전체'); s.tab('탐색'); s.tab('전체'); assert.equal(s.pages.length,1); assert.equal(s.pages[0].signal.aborted,false);
   s.pages[0].resolve({popups:[popup(1)],nextCursor:null}); await s.settle(); assert.equal(s.find('FlatList').props.data.length,1); s.unmount();
@@ -318,8 +423,34 @@ test('pagination and weekly parameters stay unchanged; Home explicitly requests 
   const url=new URL(calls[0]); assert.equal(url.searchParams.get('limit'),'10'); assert.equal(url.searchParams.get('cursor'),'date|id');
   assert.equal(url.searchParams.get('status'),'ENDED'); assert.equal(url.searchParams.get('regionIds'),'1,2'); assert.equal(url.searchParams.get('visitPeriod'),'weekend');
   await api.getWeeklyPopups('KR','2026-10-05','2026-10-11',signal);
-  assert.equal(calls[1],'https://test/api/popups?weekStart=2026-10-05&weekEnd=2026-10-11&countryCode=KR');
+  assert.equal(calls[1],'https://test/api/popups?weekStart=2026-10-05&weekEnd=2026-10-11&countryCode=KR&languageCode=ko');
   await api.getNewPopups('KR',signal); assert.equal(new URL(calls[2]).searchParams.get('limit'),'8'); assert.equal(new URL(calls[2]).searchParams.get('homeNew'),'true');
+  assert.equal(new URL(calls[2]).searchParams.has('hasReservation'),false);
+  assert.equal(new URL(calls[2]).searchParams.has('hasBenefits'),false);
+  assert.equal(new URL(calls[2]).searchParams.has('operatingFrom'),false);
+  assert.equal(new URL(calls[2]).searchParams.has('operatingTo'),false);
+  for (const language of ['ko','ja']) {
+    await api.getPopupPage('KR',signal,{operatingFrom:'2026-12-28',operatingTo:'2027-01-03',regionIds:[1],tagIds:[3],hasBenefits:true},'date|id',language);
+    const query=new URL(calls.at(-1)).searchParams;
+    assert.equal(query.get('operatingFrom'),'2026-12-28');assert.equal(query.get('operatingTo'),'2027-01-03');
+    assert.equal(query.has('visitPeriod'),false);assert.equal(query.get('cursor'),'date|id');
+    assert.equal(query.get('regionIds'),'1');assert.equal(query.get('tagIds'),'3');assert.equal(query.get('hasBenefits'),'true');
+    await api.getPopupPage('KR',signal,{visitPeriod:'today'},null,language);
+    const todayQuery=new URL(calls.at(-1)).searchParams;
+    assert.equal(todayQuery.get('visitPeriod'),'today');assert.equal(todayQuery.has('operatingFrom'),false);
+    await api.getPopupPage('KR',signal,{},null,language);
+    const allQuery=new URL(calls.at(-1)).searchParams;
+    for(const key of ['visitPeriod','operatingFrom','operatingTo'])assert.equal(allQuery.has(key),false);
+  }
+  for (const flags of [{}, {hasReservation:false,hasBenefits:false}, {hasReservation:true}, {hasBenefits:true}, {hasReservation:true,hasBenefits:true}]) {
+    for (const language of ['ko','ja']) {
+      await api.getPopupPage('KR',signal,flags,null,language);
+      const query=new URL(calls.at(-1)).searchParams;
+      assert.equal(query.get('hasReservation'),flags.hasReservation ? 'true' : null);
+      assert.equal(query.get('hasBenefits'),flags.hasBenefits ? 'true' : null);
+      assert.equal(query.get('languageCode'),language);
+    }
+  }
 });
 test('weekly section requests current local week and each selected week; obsolete response is ignored',async()=>{
   const h=harness(),requests=[];

@@ -1,6 +1,7 @@
 import { API_BASE_URL } from '../constants/api';
 
 export type SignupRequest = {
+  ageConfirmed: boolean;
   email: string;
   password: string;
   nickname: string;

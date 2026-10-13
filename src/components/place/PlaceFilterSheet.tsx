@@ -16,9 +16,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import MoreButton from '../common/MoreButton';
 import RegionFilterGroup from './RegionFilterGroup';
-import { operationStatusFilters, quickFilters, visitPeriodOptions, type PlaceFilterState, type QuickFeatureId, type VisitPeriod, type CountryCode } from '../../constants/placeFilters';
+import PlacePeriodPicker from './PlacePeriodPicker';
+import { emptyDatePeriod, isValidDateRange, type PlaceDatePeriod } from '../../lib/placeDatePeriod';
+import { operationStatusFilters, quickFilters, type PlaceFilterState, type QuickFeatureId, type VisitPeriod, type CountryCode } from '../../constants/placeFilters';
 import type { AppliedPopupFilters, PopupRegionOption, PopupStatus, PopupTagOption } from '../../lib/popups';
-import { t } from '../../locales';
 import { colors, radius, spacing, typography } from '../../theme/tokens';
 
 type FilterOption<T extends string | number> = { id: T; name: string };
@@ -61,6 +62,8 @@ type PlaceFilterSheetProps = {
   onToggleFeature: (feature: QuickFeatureId) => void;
   period: VisitPeriod;
   onPeriodChange: (period: VisitPeriod) => void;
+  datePeriod?: PlaceDatePeriod;
+  onDatePeriodChange?: (period: PlaceDatePeriod) => void;
   country: CountryCode | undefined;
   regions: readonly PopupRegionOption[];
   tags: readonly PopupTagOption[];
@@ -79,8 +82,8 @@ export default function PlaceFilterSheet({
   quickFilters: selectedQuickFilters,
   onToggleCountry,
   onToggleFeature,
-  period,
-  onPeriodChange,
+  datePeriod,
+  onDatePeriodChange,
   country,
   regions,
   tags,
@@ -92,7 +95,7 @@ export default function PlaceFilterSheet({
   onToggleTag,
   onToggleStatus,
 }: PlaceFilterSheetProps) {
-  useTranslation();
+  const { t } = useTranslation();
   const statusOptions: readonly FilterOption<PopupStatus>[] = [
     { id: 'ONGOING', name: t(operationStatusFilters[0].labelKey) },
     { id: 'UPCOMING', name: t(operationStatusFilters[1].labelKey) },
@@ -186,6 +189,9 @@ export default function PlaceFilterSheet({
             style={styles.content}
             contentContainerStyle={styles.contentContainer}
             showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            automaticallyAdjustKeyboardInsets
           >
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>{t('place.filters.quick._label')}</Text>
@@ -228,26 +234,8 @@ export default function PlaceFilterSheet({
             </View>
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>{t('place.detail.basicInfo.period')}</Text>
-              <View style={styles.chipGroup}>
-                {visitPeriodOptions.map((option) => {
-                  const isCustom = option.id === 'custom';
-                  const isSelected = period === option.id;
-                  return (
-                    <Pressable
-                      key={option.id}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected: isSelected, disabled: isCustom }}
-                      disabled={isCustom}
-                      onPress={() => { if (!isCustom) onPeriodChange(option.id); }}
-                      style={[styles.chip, isSelected && styles.selectedChip]}
-                    >
-                      <Text numberOfLines={1} style={[styles.chipText, isSelected && styles.selectedChipText, isCustom && styles.disabledChipText]}>
-                        {t(option.labelKey)}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
+              <PlacePeriodPicker value={datePeriod ?? emptyDatePeriod()} visible={visible}
+                onChange={value => onDatePeriodChange?.(value)} />
             </View>
             {optionsStatus !== 'ready' && (
               <Text style={styles.optionsMessage}>
@@ -261,7 +249,10 @@ export default function PlaceFilterSheet({
               <Text style={styles.resetText}>{t('place.filters.reset')}</Text>
             </Pressable>
             <View style={styles.applyButton}>
-              <MoreButton label={t('place.filters.showPopups')} onPress={onApply} variant="primary" />
+              <MoreButton label={t('place.filters.showPopups')} onPress={() => {
+                if (datePeriod?.mode === 'custom' && !isValidDateRange(datePeriod.startDate, datePeriod.endDate)) return;
+                onApply();
+              }} variant="primary" />
             </View>
           </View>
         </Animated.View>

@@ -5,7 +5,7 @@ const { test } = require('node:test');
 const ts = require('typescript');
 
 function load(file, mocks, globals = {}) {
-  mocks = require('./helpers/uiDependencies.cjs').withI18nDependencies(file, mocks);
+  mocks = require('./helpers/uiDependencies.cjs').withI18nDependencies(file, mocks, globals.fetch);
   const source = readFileSync(path.join(__dirname, '..', file), 'utf8');
   const code = ts.transpileModule(source, { compilerOptions: {
     module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022,
@@ -90,7 +90,7 @@ function screen({ token = null, initialCount = 0, initialFavorited = false, deta
     './favoriteCache': { clearFavoriteCache() {} },
     './communityFeedRefresh': { clearCommunityLikes() {} },
   }, globals);
-  const popups = load('src/lib/popups.ts', { '../constants/api': { API_BASE_URL: 'http://api' }, '../locales': locales }, globals);
+  const popups = load('src/lib/popups.ts', { '../constants/api': { API_BASE_URL: 'http://api' }, '../locales': locales, './auth': auth }, globals);
   const favorites = load('src/lib/favorites.ts', {
     '../constants/api': { API_BASE_URL: 'http://api' }, './auth': auth,
     './favoriteCache': { favoriteCacheGeneration: () => 1, favoriteSessionGeneration: () => 1, saveFavoriteCache: () => {}, updateFavoriteCache: () => {} },
@@ -471,7 +471,7 @@ test('hero preserves square viewport, safe-area controls and sticky-tab threshol
     assert.equal(image.props.uri, 'https://example.com/poster.png');
     assert.equal(image.props.accessibilityLabel, '팝업');
     assert.equal(image.props.topInset, 40, 'foreground receives the existing screen safe-area inset');
-    assert.equal(image.key, 'https://example.com/poster.png', 'URL changes remount image error state');
+    assert.equal(image.key, 'popup-public-id', 'URL renewal keeps the hero mounted; the image hook tracks source errors');
     assert.equal(controls.props.style[1].top, 52);
     const buttons = nodes(controls).filter(node => node.type === 'Pressable');
     assert.equal(buttons.length, 2);

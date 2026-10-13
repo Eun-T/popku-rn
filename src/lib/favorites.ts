@@ -1,5 +1,5 @@
 import { API_BASE_URL } from '../constants/api';
-import { getAuthSession } from './auth';
+import { authenticatedFetch, getAuthSession } from './auth';
 import { favoriteCacheGeneration, favoriteSessionGeneration, saveFavoriteCache, updateFavoriteCache } from './favoriteCache';
 import type { PublicPopup } from './popups';
 
@@ -27,11 +27,11 @@ async function updateFavorite(publicId: string, method: 'POST' | 'DELETE', popup
   const timeout = setTimeout(() => controller.abort(), 12000);
   let response: Response;
   try {
-    response = await fetch(`${API_BASE_URL}/api/popups/${encodeURIComponent(publicId)}/favorite`, {
+    response = await authenticatedFetch(`${API_BASE_URL}/api/popups/${encodeURIComponent(publicId)}/favorite`, {
       method,
       headers: { Authorization: `Bearer ${token}` },
       signal: controller.signal,
-    });
+    }, { accessToken: token, generation });
   } finally {
     clearTimeout(timeout);
   }
@@ -71,9 +71,9 @@ export async function getFavoritePopups(signal?: AbortSignal): Promise<PublicPop
   else signal?.addEventListener('abort', abort, { once: true });
   const timeout = setTimeout(abort, 12000);
   try {
-    const response = await fetch(`${API_BASE_URL}/api/users/me/favorites`, {
+    const response = await authenticatedFetch(`${API_BASE_URL}/api/users/me/favorites`, {
       headers: { Authorization: `Bearer ${token}` }, signal: controller.signal,
-    });
+    }, { accessToken: token, generation: authGeneration });
     if (__DEV__) console.info('[FAVORITE] list response', { status: response.status });
     if (response.status === 401) throw new FavoriteUnauthorizedError(authGeneration);
     if (!response.ok) throw new Error('Favorite list request failed');

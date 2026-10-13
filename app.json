@@ -10,6 +10,7 @@
     "ios": {
       "icon": "./assets/expo.icon",
       "bundleIdentifier": "com.popku.app",
+      "usesAppleSignIn": true,
       "infoPlist": {
         "LSApplicationQueriesSchemes": ["nmap", "comgooglemaps"],
         "NSLocationWhenInUseUsageDescription": "현재 위치 주변의 팝업을 찾기 위해 위치 정보가 필요합니다."
@@ -64,7 +65,8 @@
         }
       ],
       "expo-localization",
-      "./plugins/withMapAppQueries"
+      "./plugins/withMapAppQueries",
+      "expo-apple-authentication"
     ],
     "experiments": {
       "typedRoutes": true,

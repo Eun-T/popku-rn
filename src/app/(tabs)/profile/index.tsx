@@ -1,5 +1,6 @@
 import { BlurTargetView, BlurView } from "expo-blur";
-import { useFocusEffect, useRouter, type Href } from "expo-router";
+import * as Clipboard from 'expo-clipboard';
+import { useRouter, type Href } from "expo-router";
 import {
   ChevronRight,
   Heart,
@@ -8,9 +9,11 @@ import {
   Star,
   type LucideIcon,
 } from "lucide-react-native";
-import { useCallback, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import {
   ActivityIndicator,
+  Alert,
+  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -21,11 +24,15 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import {
   getAuthUser,
+  getAuthStatus,
   refreshAuthUser,
+  subscribeAuthStatus,
   subscribeAuthUser,
 } from "../../../lib/auth";
 import { colors, radius, spacing, typography } from "../../../theme/tokens";
 import { useTranslation } from '../../../hooks/useTranslation';
+
+const SUPPORT_EMAIL = 'popchive.support@gmail.com';
 
 type MenuRowProps = {
   icon?: LucideIcon;
@@ -68,6 +75,8 @@ function MenuRow({
 
 export default function Profile() {
   const { t } = useTranslation();
+  const supportTranslation = useRef(t);
+  useEffect(() => { supportTranslation.current = t; }, [t]);
   const router = useRouter();
   const blurTarget = useRef<View>(null);
   const user = useSyncExternalStore(
@@ -75,33 +84,33 @@ export default function Profile() {
     getAuthUser,
     getAuthUser,
   );
-  const [loading, setLoading] = useState(true);
-  const [restoreFailed, setRestoreFailed] = useState(false);
+  const authStatus = useSyncExternalStore(subscribeAuthStatus, getAuthStatus, getAuthStatus);
+  const loading = authStatus === 'restoring';
+  const restoreFailed = authStatus === 'error';
   const hasEmail = Boolean(user?.email?.trim());
   const onPressSettings = () => router.push("/profile/settings" as Href);
 
-  useFocusEffect(
-    useCallback(() => {
-      let active = true;
-      setLoading(true);
-      setRestoreFailed(false);
+  async function copySupportEmail() {
+    try {
+      if (!await Clipboard.setStringAsync(SUPPORT_EMAIL)) throw new Error('Clipboard unavailable');
+      Alert.alert(supportTranslation.current('profile.emailSupport.copied'), SUPPORT_EMAIL);
+    } catch {
+      Alert.alert(supportTranslation.current('profile.emailSupport.copyFailed'), SUPPORT_EMAIL);
+    }
+  }
 
-      async function restoreSession() {
-        try {
-          await refreshAuthUser(() => active);
-        } catch {
-          if (active) setRestoreFailed(true);
-        } finally {
-          if (active) setLoading(false);
-        }
-      }
-
-      void restoreSession();
-      return () => {
-        active = false;
-      };
-    }, []),
-  );
+  async function handleEmailInquiry() {
+    try {
+      await Linking.openURL(`mailto:${SUPPORT_EMAIL}`);
+    } catch {
+      const translate = supportTranslation.current;
+      Alert.alert(translate('profile.emailInquiry'),
+        translate('profile.emailSupport.openFailed', { email: SUPPORT_EMAIL }), [
+          { text: translate('profile.emailSupport.cancel'), style: 'cancel' },
+          { text: translate('profile.emailSupport.copy'), onPress: () => { void copySupportEmail(); } },
+        ]);
+    }
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -200,6 +209,14 @@ export default function Profile() {
                   accessibilityLabel={t('profile.loadingUser')}
                   color={colors.primary}
                 />
+              ) : restoreFailed ? (
+                <View style={styles.loginForeground}>
+                  <Text style={styles.loginDescription}>{t('profile.userLoadFailed')}</Text>
+                  <Pressable accessibilityRole="button" style={styles.loginButton}
+                    onPress={() => { void refreshAuthUser().catch(() => {}); }}>
+                    <Text style={styles.loginButtonText}>{t('profile.retry')}</Text>
+                  </Pressable>
+                </View>
               ) : (
                 <View style={styles.loginForeground}>
                   <Text style={styles.loginTitle}>
@@ -211,7 +228,7 @@ export default function Profile() {
                   <Pressable
                     accessibilityRole="button"
                     style={styles.loginButton}
-                    onPress={() => router.push({ pathname: "/profile/login", params: { loginOrigin: "profile" } })}
+                    onPress={() => router.push({ pathname: "/login", params: { loginOrigin: "profile" } })}
                   >
                     <Text style={styles.loginButtonText}>{t('profile.login')}</Text>
                   </Pressable>
@@ -220,10 +237,10 @@ export default function Profile() {
             </View>
           )}
         </View>
-        {!loading && !user && restoreFailed && (
-          <Text style={styles.errorText}>
-            {t('profile.userLoadFailed')}
-          </Text>
+        {!loading && user && restoreFailed && (
+          <Pressable accessibilityRole="button" onPress={() => { void refreshAuthUser().catch(() => {}); }}>
+            <Text style={styles.errorText}>{t('profile.userLoadFailed')} {t('profile.retry')}</Text>
+          </Pressable>
         )}
         <View style={styles.sectionDivider} />
         <View style={styles.serviceSection}>
@@ -256,6 +273,15 @@ export default function Profile() {
               <MenuRow
                 label={t('profile.policies')}
                 onPress={() => router.push("/profile/policies" as Href)}
+                showChevron={false}
+              />
+            </View>
+          </View>
+          <View style={styles.serviceGridRow}>
+            <View style={styles.serviceLeftCell}>
+              <MenuRow
+                label={t('profile.emailInquiry')}
+                onPress={() => { void handleEmailInquiry(); }}
                 showChevron={false}
               />
             </View>

@@ -1,5 +1,5 @@
 import { API_BASE_URL } from '../constants/api';
-import { clearTokens, getAuthSession } from './auth';
+import { authenticatedFetch, clearTokens, getAuthSession } from './auth';
 
 export const inquiryTypes = { GENERAL: '일반 문의', BUG: '오류 신고', INFO_CORRECTION: '정보 수정 요청', OTHER: '기타' } as const;
 export type InquiryType = keyof typeof inquiryTypes;
@@ -22,11 +22,11 @@ export function validInquiry(title: string, content: string): boolean {
 async function request(path: string, signal?: AbortSignal, body?: unknown): Promise<unknown> {
   const session=await getAuthSession();
   if (!session.accessToken) throw new InquiryApiError(401);
-  const response=await fetch(`${API_BASE_URL}/api/inquiries${path}`, {
+  const response=await authenticatedFetch(`${API_BASE_URL}/api/inquiries${path}`, {
     method: body===undefined ? 'GET' : 'POST', signal,
     headers: { Authorization: `Bearer ${session.accessToken}`, ...(body===undefined ? {} : { 'Content-Type': 'application/json' }) },
     ...(body===undefined ? {} : { body: JSON.stringify(body) }),
-  });
+  }, session);
   if (response.status===401 && !signal?.aborted) await clearTokens(session.generation);
   if (!response.ok) throw new InquiryApiError(response.status);
   const result: unknown=await response.json();

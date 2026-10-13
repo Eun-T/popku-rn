@@ -20,7 +20,7 @@ import { colors, radius, spacing, typography } from "../../theme/tokens";
 import { formatPopupPeriod } from "./HomeNewPopupSection";
 import { useTheme } from '../../theme/useTheme';
 
-const BANNER_HEIGHT = 380;
+const BANNER_HEIGHT = 400;
 const FOOTER_GRADIENT_TOP = BANNER_HEIGHT * 0.5;
 const POSTER_WIDTH_RATIO = 0.7;
 type Props = { onPressPopup: (id: string) => void };

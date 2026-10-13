@@ -88,6 +88,11 @@ export default function Settings() {
               <Text style={styles.rowLabel}>{accountUiText(t, "닉네임 변경")}</Text>
               <ChevronRight size={20} color={colors.inactiveText} />
             </Pressable>
+            <Pressable accessibilityRole="button" accessibilityLabel={t('moderation.manageBlocks')} disabled={pending}
+              onPress={() => { if (getAuthUser() && !pendingRef.current) router.push('/profile/blocks' as Href); }} style={[styles.row, styles.divider]}>
+              <Text style={styles.rowLabel}>{t('moderation.manageBlocks')}</Text>
+              <ChevronRight size={20} color={colors.inactiveText} />
+            </Pressable>
             {user.provider === 'LOCAL' && <Pressable accessibilityRole="button" accessibilityLabel={accountUiText(t, "비밀번호 변경")} disabled={pending}
               onPress={() => { if (getAuthUser()?.provider === 'LOCAL' && !pendingRef.current) router.push('/profile/password' as Href); }} style={[styles.row, styles.divider]}>
               <Text style={styles.rowLabel}>{accountUiText(t, "비밀번호 변경")}</Text>

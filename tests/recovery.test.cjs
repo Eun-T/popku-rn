@@ -64,6 +64,8 @@ test('auth: profile network failure preserves user, token and logged-in UI; cold
     const env = authEnv(), d = driver();
     if (hydrated) await env.login(); else await env.auth.saveTokens({ accessToken: 'A', refreshToken: 'R' });
     env.response(async () => { throw new TypeError('offline'); });
+    // Restoration now belongs to the root, never to profile focus.
+    await assert.rejects(env.auth.refreshAuthUser(), /offline/);
     const native = Object.fromEntries(['ActivityIndicator', 'Pressable', 'ScrollView', 'Text', 'View'].map(n => [n, n]));
     native.StyleSheet = { create: s => s };
     const Profile = load('src/app/(tabs)/profile/index.tsx', {
@@ -146,7 +148,7 @@ function mapEnv() {
   const d = driver(), calls = [];
   const module = load('src/hooks/useMapPopups.ts', { react: d.react, 'expo-router': { useFocusEffect: d.useFocusEffect },
     '../lib/popups': { getPopupMap(signal) { const wait = deferred(); calls.push({ signal, ...wait }); return wait.promise; } } });
-  return { ...d, calls, render: () => d.render(module.useMapPopups) };
+  return { ...d, calls, render: () => d.render(() => module.useMapPopups('ko')) };
 }
 test('map: failure differs from empty; focus retries only failures and concurrent refreshes dedup', async () => {
   const e = mapEnv(); e.render(); assert.equal(e.calls.length, 1);

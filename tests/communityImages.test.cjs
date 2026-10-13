@@ -17,6 +17,7 @@ function setup() {
   let failPut = false;
   let failCreate;
   let deleteFails = false;
+  let failPresign;
   const renderGates = new Map();
   class ApiError extends Error { constructor(status) { super(); this.status = status; } }
   const source = readFileSync('src/lib/communityImages.ts', 'utf8');
@@ -50,17 +51,21 @@ function setup() {
       async communityRequest(path, method, body) {
         calls.push(['api', path, method, body]);
         if (method === 'DELETE') { if (deleteFails) throw new Error('offline'); return {}; }
+        if (failPresign) throw failPresign;
         return { status: 201, text: async () => JSON.stringify({ uploadToken: 'session', images: Array.from({ length: body.count }, (_, i) => ({
           imageKey: `community/posts/session/${i}.webp`, uploadUrl: `https://s3/${i}?X-Amz-SignedHeaders=content-type%3Bhost`, contentType: 'image/webp', sortOrder: i,
         })) }) };
       },
-      async createCommunityPost(...args) {
-        calls.push(['create', ...args]);
+      async createCommunityPost(category, content, uploadToken, beforeSend) {
+        beforeSend?.();
+        calls.push(['create', category, content, uploadToken]);
         if (failCreate) throw failCreate;
         return { id: 73 };
       },
     },
     './communityDiagnostics': diagnosticsModule.exports,
+    './requestTimeout': require('./helpers/uiDependencies.cjs').loadPure('src/lib/requestTimeout.ts'),
+    './submissionSession': require('./helpers/uiDependencies.cjs').withUiDependencies('src/lib/communityImages.ts')['./submissionSession'],
   };
   const module = { exports: {} };
   new Function('require', 'module', 'exports', code)((name) => mocks[name], module, module.exports);
@@ -68,7 +73,7 @@ function setup() {
     ...module.exports, calls, ApiError,
     setAssets(value) { assets = value; }, setGranted(value) { granted = value; }, setCanceled(value) { canceled = value; },
     setDecoded(value) { decoded = value; }, setFailPut(value) { failPut = value; }, setFailCreate(value) { failCreate = value; },
-    setDeleteFails(value) { deleteFails = value; },
+    setDeleteFails(value) { deleteFails = value; }, setFailPresign(value) { failPresign = value; },
     setRenderGate(uri, promise) { renderGates.set(uri, promise); },
     async fetch(url, options) {
       calls.push(['fetch', url, options]);
@@ -134,8 +139,8 @@ test('SDK 57 reproduces empty Blob Content-Type override; binary uploads preserv
     });
     assert.equal(sdk.nativeCalls.length, count * 2);
     for (let i = 0; i < count; i++) {
-      const local = sdk.nativeCalls[i * 2];
-      const put = sdk.nativeCalls[i * 2 + 1];
+      const local = sdk.nativeCalls[i];
+      const put = sdk.nativeCalls[count + i];
       assert.equal(local.url, `file://${i}`);
       assert.equal(local.init.method, 'GET');
       assert.equal(put.url, `https://s3/${i}?X-Amz-SignedHeaders=content-type%3Bhost`);
@@ -247,6 +252,27 @@ test('PUT failure cancels reservation even if cleanup is offline and never creat
   assert.equal(attempt.current, null);
 });
 
+test('cleanup timeout and HTTP rejection are logged through sanitized diagnostics without throwing', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const env = setup(), oldDev = global.__DEV__, oldConsole = console.error, logs = [];
+  global.__DEV__ = true; console.error = (...args) => logs.push(args);
+  try {
+    let signal;
+    const pending = env.cancelUpload('fixture-cleanup-token', async (_path, _method, _body, currentSignal) => {
+      signal = currentSignal; return new Promise(() => {});
+    }, 'review-image-uploads');
+    t.mock.timers.tick(10_000); await pending;
+    assert.equal(signal.aborted, true); assert.equal(logs[0][1].stage, 'CLEANUP');
+    assert.equal(logs[0][1].errorMessage, 'cleanup request timed out');
+    const rejection = new env.ApiError(500);
+    rejection.responseBody = JSON.stringify({ uploadToken: 'fixture-response-secret', uploadUrl: 'https://fixture-s3/object?signed=value' });
+    await env.cancelUpload('fixture-cleanup-token', async () => { throw rejection; });
+    assert.equal(logs[1][1].status, 500);
+    const serialized = JSON.stringify(logs);
+    for (const value of ['fixture-cleanup-token', 'fixture-response-secret', 'https://fixture-s3']) assert.equal(serialized.includes(value), false);
+  } finally { global.__DEV__ = oldDev; console.error = oldConsole; }
+});
+
 test('S3 failure logs XML, status and one-based image index before cleanup; local read fails at LOCAL_FILE', async () => {
   const env = setup();
   const oldDev = global.__DEV__;
@@ -293,4 +319,68 @@ test('ambiguous commit retains immutable session for idempotent retry; definite 
   await withFetch(env, async () => assert.rejects(env.publishPostWithImages('FREE', 'new', [image()], attempt)));
   assert.equal(attempt.current, null);
   assert.equal(env.calls.at(-1)[2], 'DELETE');
+});
+
+
+test('v2 reads final converted files before presign, binds ordered byte sizes and PUTs the same buffers exactly once', async () => {
+  const env = setup();
+  env.setAssets([image(10), image(20), image(30)]);
+  const converted = await env.selectPostImages([]);
+  const buffers = [new ArrayBuffer(1), new ArrayBuffer(5_242_880), new ArrayBuffer(37)];
+  const reads = [];
+  const originalFetch = env.fetch;
+  env.fetch = async (url, options) => {
+    if (options?.method !== 'PUT') {
+      assert.ok(options.signal instanceof AbortSignal, 'local reads receive the deadline signal');
+      const i = converted.findIndex(entry => entry.uri === url);
+      assert.ok(i >= 0, 'read the converted file URI');
+      assert.equal(env.calls.some(([kind]) => kind === 'api'), false, 'all files precede presign');
+      env.calls.push(['local', url]);
+      return {ok:true, arrayBuffer:async () => {reads.push(i); return buffers[i];}};
+    }
+    return originalFetch(url, options);
+  };
+  await withFetch(env, async () => assert.equal(await env.uploadPostImages(converted), 'session'));
+  const presign = env.calls.find(([kind]) => kind === 'api');
+  assert.deepEqual(presign.slice(1), ['post-image-uploads', 'POST', {
+    version:2, count:3, contentType:'image/webp', sizeBytes:[1, 5_242_880, 37],
+  }]);
+  assert.deepEqual(reads, [0,1,2]);
+  const puts = env.calls.filter(([kind,,,]) => kind === 'fetch');
+  puts.forEach(([,url,init], i) => {
+    assert.equal(init.body, buffers[i]);
+    assert.deepEqual(init.headers, {'Content-Type':'image/webp'});
+    assert.ok(url.startsWith('https://s3/' + i + '?'));
+  });
+});
+
+for (const size of [0, 5_242_881]) test('v2 rejects invalid final size ' + size + ' before any presign, PUT or post commit', async () => {
+  const env = setup();
+  let reads = 0;
+  env.fetch = async () => ({ok:true, arrayBuffer:async () => new ArrayBuffer(++reads === 1 ? 1 : size)});
+  const attempt = {current:null};
+  await withFetch(env, async () => assert.rejects(env.publishPostWithImages('FREE', 'body', [image(1), image(2)], attempt), {reason:'size'}));
+  assert.equal(reads, 2);
+  assert.equal(env.calls.length, 0);
+  assert.equal(attempt.current, null);
+});
+
+for (const failure of [new Error('offline'), 400, 401, 403, 500]) test('v2 presign failure ' + failure + ' never PUTs or falls back to v1', async () => {
+  const env = setup();
+  env.setFailPresign(typeof failure === 'number' ? new env.ApiError(failure) : failure);
+  const attempt = {current:null};
+  await withFetch(env, async () => assert.rejects(env.publishPostWithImages('FREE','body',[image()],attempt)));
+  const requests = env.calls.filter(([kind]) => kind === 'api');
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0][3].version, 2);
+  assert.equal(env.calls.some(([kind,,init]) => kind === 'fetch' && init?.method === 'PUT'), false);
+  assert.equal(env.calls.some(([kind]) => kind === 'create'), false);
+  assert.equal(attempt.current, null);
+});
+
+test('unreadable later file stops before reserving a grant or uploading earlier files', async () => {
+  const env = setup(); let reads = 0;
+  env.fetch = async () => ({ok:++reads === 1, arrayBuffer:async () => new ArrayBuffer(1)});
+  await withFetch(env, async () => assert.rejects(env.uploadPostImages([image(1),image(2)]), /Image file unavailable/));
+  assert.equal(env.calls.length,0);
 });

@@ -1,6 +1,6 @@
 import { useTranslation } from '../../hooks/useTranslation';
 import { useEffect, useState } from 'react';
-import { ChevronDown, ChevronUp } from 'lucide-react-native';
+import { ChevronUp } from 'lucide-react-native';
 import { Pressable, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
 
 import { t } from '../../locales';
@@ -98,7 +98,7 @@ export default function RegionFilterGroup({ options, selected, onToggle }: Regio
           return (
             <View
               key={`more-${count}`}
-              style={[styles.chip, styles.actionChip]}
+              style={styles.chip}
               onLayout={(event) => {
                 const width = measureWidth(event);
                 setMoreWidths((current) => current[count] === width
@@ -107,7 +107,6 @@ export default function RegionFilterGroup({ options, selected, onToggle }: Regio
               }}
             >
               <Text style={styles.chipText}>+{count}</Text>
-              <ChevronDown size={16} color={colors.text} />
             </View>
           );
         })}
@@ -139,12 +138,10 @@ export default function RegionFilterGroup({ options, selected, onToggle }: Regio
                 ? t('place.filters.collapseRegions')
                 : t('place.filters.moreRegions', { count: hiddenCount })}
               onPress={() => setExpanded((current) => !current)}
-              style={[styles.chip, styles.actionChip]}
+              style={[styles.chip, expanded && styles.actionChip]}
             >
               <Text style={styles.chipText}>{expanded ? t('place.filters.collapse') : `+${hiddenCount}`}</Text>
-              {expanded
-                ? <ChevronUp size={16} color={colors.text} />
-                : <ChevronDown size={16} color={colors.text} />}
+              {expanded && <ChevronUp size={16} color={colors.text} />}
             </Pressable>
           )}
         </View>

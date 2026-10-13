@@ -17,6 +17,11 @@ async function app({editing=false,guest=false,transform,failRead=false}={}) {
  const request=async(kind,...args)=>{calls.push([kind,...args]);if(writingFailure)throw writingFailure;return post;};
  const updateNow=()=>{};
  const ui=runtime({
+    'src/hooks/useModerationRevision.ts': { useModerationRevision: () => 0 },
+    'src/lib/moderationState.ts': { isLocallyBlocked: () => false },
+    'src/components/community/ModerationActions.tsx': { default: 'ModerationActions' },
+    'src/components/community/PostActions.tsx': { default: 'PostActions' },
+    'src/components/reviews/ReviewActions.tsx': { default: 'ReviewActions' },
   'react-native':native,'lucide-react-native':Object.fromEntries(['Pencil','Settings','ChevronLeft','ChevronRight','Heart','MessageCircle','MoreHorizontal','Star','UserRound','ImagePlus','X','Trash2'].map(n=>[n,n])),
   'expo-router':{useRouter:()=>router,useLocalSearchParams:()=>editing?{editId:'10',id:'10'}:{id:'10'},
    useNavigation:()=>({dispatch:a=>routes.push(a)}),useScrollToTop(){},useFocusEffect:fn=>ui.react.useEffect(fn,[fn])},
@@ -24,7 +29,9 @@ async function app({editing=false,guest=false,transform,failRead=false}={}) {
   'react-native-safe-area-context':{SafeAreaView:'SafeAreaView',useSafeAreaInsets:()=>({top:40,bottom:20,left:0,right:0})},
   'src/components/navigation/FloatingTabBar.tsx':{FLOATING_TAB_BAR_HEIGHT:60,FLOATING_TAB_BAR_BOTTOM_GAP:12},
   'src/hooks/useCommunityNow.ts':{useCommunityNow:()=>({now:Date.parse('2026-10-09T03:00:00Z'),updateNow})},
-  'src/lib/auth.ts':{getAuthUser:()=>user,subscribeAuthUser:()=>()=>{},subscribeAuthSession:()=>()=>{},getSavedAccessToken:async()=>{
+  'src/lib/auth.ts':{getAuthUser:()=>user,getAuthStatus:()=>user?'authenticated':'anonymous',
+    authSessionGeneration:()=>0,isAuthSessionCurrent:generation=>generation===0,
+    subscribeAuthSessionInvalidation:()=>()=>{},subscribeAuthUser:()=>()=>{},subscribeAuthSession:()=>()=>{},getSavedAccessToken:async()=>{
     if(authFailure)throw new Error('authentication read failed');return guest?null:'token-original';},clearTokens:async()=>false},
   'src/lib/community.ts':{CommunityApiError:ApiError,
    getCommunityFeed:async(...args)=>{calls.push(['feed',...args]);if(failRead)throw new Error('read');return {items:[post],nextCursor:args[2]?null:'next-original'};},

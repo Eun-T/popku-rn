@@ -2,7 +2,8 @@ import { getPopupRegionDisplayName, getTagDisplayName } from '../../locales/filt
 import { useMemo, useState } from "react";
 import { useTheme } from '../../theme/useTheme';
 import { Store } from "lucide-react-native";
-import { Pressable, StyleSheet, Text, View, type ImageSourcePropType } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
+import type { ImageSource } from 'expo-image';
 
 import { useHomePopups } from "../../hooks/useHomePopups";
 import { usePopupFavorites } from "../../hooks/usePopupFavorites";
@@ -24,7 +25,7 @@ type Country = (typeof countries)[number]["value"];
 
 const placeholderImage = require("../../../assets/images/ranking-placeholder.png");
 
-function cardImage(url: string | null): ImageSourcePropType {
+function cardImage(url: string | null): ImageSource | number {
   return url ? { uri: url } : placeholderImage;
 }
 
@@ -44,7 +45,7 @@ export default function HomeTrendingSection({ onPressPopup }: { onPressPopup: (i
     emptyDescription: { ...baseStyles.emptyDescription, color: themeColors.textSecondary },
   }), [themeColors]);
   const [selectedCountry, setSelectedCountry] = useState<Country>("KR");
-  const { status, popups } = useHomePopups("trending", selectedCountry);
+  const { status, popups, recoverCover } = useHomePopups("trending", selectedCountry);
   const [isExpanded, setIsExpanded] = useState(false);
   const { isFavorite, isFavoriteDisabled, toggleFavorite, favoritesStatus, retryFavorites } = usePopupFavorites();
 
@@ -94,6 +95,9 @@ export default function HomeTrendingSection({ onPressPopup }: { onPressPopup: (i
               key={id}
               rank={rank}
               image={cardImage(popup.coverImageUrl)}
+              popup={popup}
+              coverScope={`${selectedCountry}:${resolvedLanguage}`}
+              onRecoverCover={recoverCover}
               title={popup.name}
               period={`${displayDate(popup.startDate)} ~ ${displayDate(popup.endDate)}`}
               tags={[

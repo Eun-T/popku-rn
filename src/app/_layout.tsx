@@ -1,10 +1,13 @@
 import { Stack } from 'expo-router';
+import { useEffect } from 'react';
 
+import { initializeAuth } from '../lib/auth';
 import { colors } from '../theme/tokens';
 import LanguageProvider from '../locales/LanguageProvider';
 import ThemeProvider from '../theme/ThemeProvider';
 
 export default function RootLayout() {
+  useEffect(() => { void initializeAuth(); }, []);
   return (
     <ThemeProvider>
     <LanguageProvider>

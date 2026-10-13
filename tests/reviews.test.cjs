@@ -4,7 +4,7 @@ const { test } = require('node:test');
 const ts = require('typescript');
 
 function load(file, mocks, globals = {}) {
-  mocks = require('./helpers/uiDependencies.cjs').withUiDependencies(file, mocks);
+  mocks = require('./helpers/uiDependencies.cjs').withUiDependencies(file, mocks, globals.fetch);
   mocks = { '../../components/community/CommunityPostMenu': { __esModule: true, default: 'CommunityPostMenu' }, ...mocks };
   const code = ts.transpileModule(readFileSync(file, 'utf8'), { compilerOptions: {
     module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022,
@@ -70,7 +70,10 @@ test('review photo upload reuses binary WebP PUT and binds grant to popup; 1-5 a
     assert.deepEqual(await env.publishReviewWithImages('popup', 5, 'visited', Array.from({ length: count }, (_, i) => image(i)), attempt), { id: 12 });
     const puts = env.calls.filter(call => call.method === 'PUT');
     assert.equal(puts.length, count); assert.ok(puts.every(call => call.headers['Content-Type'] === 'image/webp'));
-    assert.equal(env.calls[0].url, 'https://api/api/popups/popup/review-image-uploads');
+    const presign = env.calls.find(call => call.url.endsWith('review-image-uploads') && call.method === 'POST');
+    assert.equal(presign.url, 'https://api/api/popups/popup/review-image-uploads');
+    assert.equal(presign.headers.Authorization, 'Bearer token');
+    assert.deepEqual(JSON.parse(presign.body), {version:2, count, contentType:'image/webp', sizeBytes:Array(count).fill(2)});
     assert.deepEqual(JSON.parse(env.calls.at(-1).body), { rating: 5, content: 'visited', uploadToken: 'review-token' });
     assert.equal(attempt.current, null);
     await assert.rejects(env.publishReviewWithImages('popup', 5, '', Array.from({ length: 6 }, (_, i) => image(i)), attempt));
@@ -265,7 +268,10 @@ test('write screen requires rating, keeps draft on failure, blocks rapid registr
     '../../lib/popups': { getPopupDetail: async () => ({ publicId: 'popup', name: 'Current Popup' }) },
     '../../lib/auth': { clearTokens: async generation => { clears.push(generation); return false; } }, '../../lib/community': { CommunityApiError: ApiError },
     '../../lib/communityImages': { MAX_POST_IMAGES: 5, selectPostImages: async () => [], ImageSelectionError: class extends Error {} },
-    '../../lib/reviews': { ...env, createReview: (...args) => { writes.push(args); return fail ? Promise.reject(new ApiError(401, '', 4)) : new Promise(done => { resolve = done; }); }, reviewsCreated: id => invalidations.push(id) },
+    '../../lib/reviews': { ...env, createReview: (publicId, rating, content, token, beforeSend) => {
+      beforeSend?.(); assert.equal(token, undefined); writes.push([publicId, rating, content]);
+      return fail ? Promise.reject(new ApiError(401, '', 4)) : new Promise(done => { resolve = done; });
+    }, reviewsCreated: id => invalidations.push(id) },
     '../../locales': require('./helpers/uiDependencies.cjs').loadPure('src/locales/index.ts'), '../../theme/communityColors': { communityColors: {} }, '../../theme/tokens': theme,
   }).default;
   let tree = state.render(Screen); await flush(); tree = state.render(Screen);
@@ -286,7 +292,7 @@ test('write screen requires rating, keeps draft on failure, blocks rapid registr
 
 test('popup review tab empty/error states, authenticated entry lock, pagination and popup-only refresh', async () => {
   const state = hooks(), routes = [], reads = []; let listener, focus, token = null;
-  const item = { id: 1, type: 'REVIEW', category: 'REVIEW' };
+  const item = { id: 1, type: 'REVIEW', category: 'REVIEW', author: { id: 2, nickname: 'Author', avatarUrl: null } };
   let result = { items: [], nextCursor: null };
   const Tab = load('src/components/place/PopupReviews.tsx', {
     react: state.react, 'react/jsx-runtime': runtime, 'react-native': native,
@@ -558,4 +564,51 @@ test('REVIEW delete confirmation cancels, locks duplicates and mutations, then p
     assert.equal(nodes(tree).some(node => node.type === 'CommunityComments'), false);
     assert.equal(env.revisions, 0); state.cleanup();
   }
+});
+
+
+for (const editing of [false,true]) test('review v2 ' + (editing?'edit':'create') + ' preserves exact buffers, ordered sizes, retained IDs and commit token', async () => {
+  const buffers = [new ArrayBuffer(5_242_880), new ArrayBuffer(1), new ArrayBuffer(47)];
+  let reads = 0, presigns = 0;
+  const puts = [];
+  const env = api({fetch:async (url, init) => {
+    if (url.startsWith('file:')) {
+      assert.equal(presigns,0);
+      const i = Number(url.slice(5).split('.')[0]);
+      return {ok:true,arrayBuffer:async () => {reads++; return buffers[i];}};
+    }
+    if (url.endsWith('review-image-uploads') && init.method === 'POST') {
+      presigns++;
+      assert.equal(reads,buffers.length);
+      assert.equal(url,'https://api/api/popups/popup%2Fone/review-image-uploads');
+      assert.deepEqual(JSON.parse(init.body), {version:2,count:3,contentType:'image/webp',sizeBytes:[5_242_880,1,47]});
+      return response({uploadToken:'v2-token', images:buffers.map((_,i)=>({imageKey:i+'.webp',uploadUrl:'https://s3/'+i,contentType:'image/webp',sortOrder:i}))});
+    }
+    if (init.method === 'PUT') {
+      const i = puts.length;
+      assert.equal(init.body,buffers[i]); assert.deepEqual(init.headers,{'Content-Type':'image/webp'});
+      puts.push(url); return response({});
+    }
+    assert.equal(puts.length,3);
+    assert.equal(init.method,editing?'PATCH':'POST');
+    assert.equal(url,editing?'https://api/api/community/reviews/10':'https://api/api/popups/popup%2Fone/reviews');
+    assert.deepEqual(JSON.parse(init.body),editing?{rating:4,content:'body',retainedImageIds:[7],uploadToken:'v2-token'}:{rating:4,content:'body',uploadToken:'v2-token'});
+    return response(editing?{...detailFixture(),id:10,rating:4,content:'body',images:[{id:7,url:'old.webp'}]}:{id:10});
+  }});
+  const attempt = {current:null}, images = buffers.map((_,i)=>image(i));
+  if (editing) await env.updateReviewWithImages(10,'popup/one',4,'body',[7],images,attempt);
+  else await env.publishReviewWithImages('popup/one',4,'body',images,attempt);
+  assert.equal(reads,3); assert.equal(presigns,1); assert.equal(attempt.current,null);
+});
+
+for (const editing of [false,true]) for (const status of [400,401,403,500]) test('review v2 presign rejects ' + status + ' during ' + (editing?'edit':'create') + ' without PUT, commit, cleanup or fallback', async () => {
+  const env = api({fetch:async (url,init)=> url.startsWith('file:')
+    ? {ok:true,arrayBuffer:async()=>new ArrayBuffer(1)} : response({message:'presign failure'},status)});
+  const attempt = {current:null};
+  await assert.rejects(editing?env.updateReviewWithImages(10,'popup',4,'body',[7],[image(0)],attempt)
+    :env.publishReviewWithImages('popup',4,'body',[image(0)],attempt),error=>error.status===status);
+  const remote = env.calls.filter(call=>!call.url.startsWith('file:'));
+  assert.equal(remote.length,1); assert.equal(JSON.parse(remote[0].body).version,2);
+  assert.equal(remote[0].method,'POST'); assert.ok(remote[0].url.endsWith('review-image-uploads'));
+  assert.equal(attempt.current,null);
 });

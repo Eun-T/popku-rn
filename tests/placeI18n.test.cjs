@@ -17,6 +17,12 @@ const input = tree => nodes(tree).find(n=>n.type==='TextInput');
 const tab = (screen,key) => nodes(screen.tree).find(n=>n.type==='Pressable' && n.props.accessibilityRole==='tab' && n.key===key);
 const button = (tree,label) => nodes(tree).find(n=>n.type==='Pressable' && (texts(n)===label || n.props.accessibilityLabel===label));
 const groups = tree => nodes(tree).filter(n=>n.type?.name==='FilterChipGroup');
+function assertContentLanguages(calls,before,languages) {
+  assert.deepEqual(calls.slice(0,before.length),before);
+  const added=calls.slice(before.length).map(url=>new URL(url));
+  assert.ok(added.every(url=>url.pathname==='/api/popups'),'language changes do not reload filter metadata');
+  assert.deepEqual(added.map(url=>url.searchParams.get('languageCode')),languages);
+}
 
 async function app({ fail=false,favoritesError=false,renamedMetadata=false,transform }={}) {
   const calls=[],opened=[],favoriteToggles=[],favoriteRetries=[];
@@ -60,7 +66,7 @@ async function app({ fail=false,favoritesError=false,renamedMetadata=false,trans
   return { ...ui,languageStore,screen,sheet,sheetProps,list,calls,opened,favoriteToggles,favoriteRetries,
     systemLanguage(tag) { systemTags=[tag];languageStore.refreshSystemLanguage(); },
     async settle() { await flush(); await flush(); ui.renderAll(); },
-    async language(value) { await languageStore.setLanguagePreference(value); ui.renderAll(); },
+    async language(value) { await languageStore.setLanguagePreference(value); await flush();await flush();ui.renderAll(); },
     openFilters() {
       const quick=child(screen.tree,'QuickFilterBar'), applied=child(screen.tree,'AppliedFilterBar');
       (quick??applied).props.onOpenDetails(); ui.renderAll();
@@ -73,7 +79,7 @@ async function app({ fail=false,favoritesError=false,renamedMetadata=false,trans
   };
 }
 
-test('compiled retained all-list card tags/regions follow ko-ja-ko/system without changing IDs, filters, data or requests',async()=>{
+test('compiled retained all-list labels follow ko-ja-ko/system with preserved IDs/filters and language-scoped requests',async()=>{
   const file='src/components/place/PopupGridCard.tsx';
   const s=await app({transform:compilerTransform([file,'src/hooks/useTranslation.ts'])});
   tab(s.screen,'전체').props.onPress();await s.settle();s.openFilters();s.pressGroup(0,'KR');s.pressGroup(1,5);
@@ -83,18 +89,20 @@ test('compiled retained all-list card tags/regions follow ko-ja-ko/system withou
   const initialImage=image();
   const unknown=Object.freeze({...data[0],tags:Object.freeze([Object.freeze({id:999,name:'미등록 원문'})])});
   const fallback=s.mount(()=>card.type({...card.props,item:unknown}));
+  const languages=[];
   for(const language of ['ja','ko','system']){
-    await s.languageStore.setLanguagePreference(language);await flush();
+    await s.language(language);languages.push(language==='ko'?'ko':'ja',language==='ko'?'ko':'ja');
     assert.ok(texts(root.tree).includes(language==='ko'?'뷰티':'ビューティー'));
     assert.ok(texts(root.tree).includes(language==='ko'?'성수':'聖水'));
     assert.ok(texts(fallback.tree).includes('미등록 원문'));
     assert.equal(root.slots,slots);assert.deepEqual(nodes(root.tree)[0].props.style,styles);assert.equal(image().cachePolicy,initialImage.cachePolicy);assert.deepEqual(image().source,initialImage.source);
-    assert.equal(s.list().props.data,data);assert.equal(JSON.stringify(data),original);assert.deepEqual(s.sheetProps().filters,draft);assert.deepEqual(s.calls,calls);
+    assert.deepEqual(s.list().props.data,data);assert.equal(JSON.stringify(data),original);assert.deepEqual(s.sheetProps().filters,draft);assertContentLanguages(s.calls,calls,languages);
   }
-  s.systemLanguage('ko-KR');await flush();assert.ok(texts(root.tree).includes('뷰티'));assert.ok(texts(root.tree).includes('성수'));assert.deepEqual(s.calls,calls);
+  s.systemLanguage('ko-KR');await s.settle();assert.ok(texts(root.tree).includes('뷰티'));assert.ok(texts(root.tree).includes('성수'));assertContentLanguages(s.calls,calls,[...languages,'ko','ko']);
+  const afterLanguage=s.calls.slice();
   nodes(root.tree)[0].props.onPress();assert.deepEqual(s.opened,[popup.publicId]);
   const favorite=nodes(root.tree).find(n=>n.props.accessibilityState?.selected===false&&n.props.onPress);favorite.props.onPress({stopPropagation(){}});assert.equal(s.favoriteToggles[0],data[0]);
-  assert.deepEqual(s.calls,calls);s.dispose();
+  assert.deepEqual(s.calls,afterLanguage);s.dispose();
 });
 
 test('actual compiled card translates ongoing/upcoming/ended status and favorite labels while keeping status styles and source content',async()=>{
@@ -104,14 +112,15 @@ test('actual compiled card translates ongoing/upcoming/ended status and favorite
     const item=Object.freeze({...data[0],startDate,endDate});return{key,item,root:s.mount(()=>card.type({...card.props,item}))};
   });
   const nativeStyles=rows.map(({root})=>nodes(root.tree).filter(n=>n.type==='Text').map(n=>n.props.style));
+  const languages=[];
   for(const language of ['ja','ko','system']){
-    await s.languageStore.setLanguagePreference(language);await flush();
+    await s.language(language);languages.push(language==='ko'?'ko':'ja',language==='ko'?'ko':'ja');
     const {resolvedLanguage}=s.languageStore.getSnapshot(),translate=s.load('src/locales/index.ts').translate;
     for(const {key,item,root}of rows){assert.ok(texts(root.tree).includes(translate(resolvedLanguage,'place.all.card.'+key)));assert.ok(texts(root.tree).includes(item.name));
       assert.ok(nodes(root.tree).some(n=>n.props.accessibilityLabel===translate(resolvedLanguage,'place.all.addFavorite')));}
-    assert.deepEqual(rows.map(({root})=>nodes(root.tree).filter(n=>n.type==='Text').map(n=>n.props.style)),nativeStyles);assert.deepEqual(s.calls,calls);assert.equal(s.list().props.data,data);
+    assert.deepEqual(rows.map(({root})=>nodes(root.tree).filter(n=>n.type==='Text').map(n=>n.props.style)),nativeStyles);assertContentLanguages(s.calls,calls,languages);assert.deepEqual(s.list().props.data,data);
   }
-  s.systemLanguage('ko-KR');await flush();for(const {key,root}of rows)assert.ok(texts(root.tree).includes(s.load('src/locales/index.ts').translate('ko','place.all.card.'+key)));assert.deepEqual(s.calls,calls);s.dispose();
+  s.systemLanguage('ko-KR');await s.settle();for(const {key,root}of rows)assert.ok(texts(root.tree).includes(s.load('src/locales/index.ts').translate('ko','place.all.card.'+key)));assertContentLanguages(s.calls,calls,[...languages,'ko','ko']);s.dispose();
 });
 
 test('all keys used by active Place components, static filters and ID labels exist in ko/ja with matching variables', () => {
@@ -137,7 +146,7 @@ test('all keys used by active Place components, static filters and ID labels exi
   ui.dispose();
 });
 
-test('mounted Place/Sheet keep country, multiple region/tag IDs, status and period across ko/ja/system without API calls', async () => {
+test('mounted Place/Sheet keep country, multiple region/tag IDs, status and period across language requests', async () => {
   const s=await app();
   assert.ok(texts(s.screen.tree).includes('플레이스')); assert.equal(input(s.screen.tree).props.placeholder,'팝업을 검색해보세요');
   tab(s.screen,'전체').props.onPress(); await s.settle(); s.openFilters();
@@ -145,7 +154,7 @@ test('mounted Place/Sheet keep country, multiple region/tag IDs, status and peri
   s.sheetProps().onToggleRegion(1); s.sheetProps().onToggleRegion(4); s.renderAll();
   // KR-only sheet groups: quick/tag/status, and KR measured RegionFilterGroup.
   s.pressGroup(1,1); s.pressGroup(1,5); s.pressGroup(2,'ONGOING');
-  button(s.sheet.tree,'이번 주').props.onPress(); s.renderAll();
+  s.sheetProps().onPeriodChange('week'); s.renderAll();
   const draft=s.sheetProps();
   assert.deepEqual(draft.filters,{regionIds:[1,4],tagIds:[1,5],status:'ONGOING'}); assert.equal(draft.period,'week');
   const requests=s.calls.slice(); await s.language('ja');
@@ -157,7 +166,7 @@ test('mounted Place/Sheet keep country, multiple region/tag IDs, status and peri
   const chips=nodes(tagGroup.type(tagGroup.props)).filter(n=>n.type==='Pressable');
   assert.deepEqual(chips.filter(n=>n.props.accessibilityState.selected).map(n=>n.key),[1,5]);
   assert.deepEqual(chips.map(n=>texts(n)),['キャラクター・IP','ゲーム・デジタル','ビューティー']);
-  assert.deepEqual(s.calls,requests); assert.deepEqual(s.sheetProps().filters,draft.filters);
+  assertContentLanguages(s.calls,requests,['ja','ja']); assert.deepEqual(s.sheetProps().filters,draft.filters);
   s.sheetProps().onApply(); await s.settle();
   const request=s.calls.filter(u=>new URL(u).pathname==='/api/popups').at(-1);
   const query=new URL(request).searchParams;
@@ -171,11 +180,12 @@ test('mounted Place/Sheet keep country, multiple region/tag IDs, status and peri
   assert.ok(texts(bar.tree).includes('聖水')); assert.ok(texts(bar.tree).includes('ビューティー'));
   const after=s.calls.slice();
   await s.language('ko'); assert.ok(texts(bar.tree).includes('성수')); assert.ok(texts(bar.tree).includes('뷰티'));
-  await s.language('system'); assert.ok(texts(bar.tree).includes('聖水')); assert.deepEqual(s.calls,after);
+  await s.language('system'); assert.ok(texts(bar.tree).includes('聖水')); assertContentLanguages(s.calls,after,['ko','ko','ja','ja']);
+  const afterLanguage=s.calls.slice();
   const current=child(s.screen.tree,'AppliedFilterBar').props;
   assert.deepEqual(current.detailFilters,draft.filters); assert.deepEqual(current.filters.countries,['KR']);
   tab(s.screen,'탐색').props.onPress(); tab(s.screen,'전체').props.onPress(); await s.settle();
-  assert.deepEqual(s.calls,after); assert.deepEqual(child(s.screen.tree,'AppliedFilterBar').props.detailFilters,draft.filters);
+  assert.deepEqual(s.calls,afterLanguage); assert.deepEqual(child(s.screen.tree,'AppliedFilterBar').props.detailFilters,draft.filters);
   const remove=nodes(bar.tree).find(n=>n.props.accessibilityLabel==='ビューティーのフィルターを解除');
   remove.props.onPress(); await s.settle(); assert.deepEqual(child(s.screen.tree,'AppliedFilterBar').props.detailFilters.tagIds,[1]);
   child(s.screen.tree,'AppliedFilterBar').props.onReset(); await s.settle();
@@ -218,7 +228,7 @@ test('home banner and measured region filter change labels while retaining page/
   const before=s.calls.slice(),bannerKey=root.tree.key;
   await s.language('ja');
   assert.ok(texts(pages.tree).includes('聖水')); assert.ok(texts(pages.tree).includes(popup.name));
-  assert.deepEqual(pages.tree.props.style,style); assert.equal(root.tree.key,bannerKey); assert.deepEqual(s.calls,before);
+  assert.deepEqual(pages.tree.props.style,style); assert.equal(root.tree.key,bannerKey); assertContentLanguages(s.calls,before,['ja']);
   assert.ok(texts(region.tree).includes('聖水')); assert.ok(texts(region.tree).includes('弘大・新村'));
   const selected=nodes(region.tree).find(n=>n.type==='Pressable' && n.props.accessibilityState?.selected);
   assert.equal(selected.key,4); selected.props.onPress();
@@ -265,7 +275,7 @@ test('grid and weekly card labels react with identical props; original content, 
   s.dispose();
 });
 
-test('ending/weekly/error/retry/search UI translates without changing request policy or carousel identity', async () => {
+test('ending/weekly/error/retry/search UI translates with language-scoped requests and unchanged carousel identity', async () => {
   const s=await app({fail:true,favoritesError:true});
   const Ending=s.load('src/components/place/TodayOpeningCarousel.tsx').default;
   const ending=s.mount(()=>Ending({items:[popup],width:358,today:'2026-10-11',loading:false,error:false,onPressPopup:p=>s.opened.push(p.publicId)}));
@@ -280,13 +290,14 @@ test('ending/weekly/error/retry/search UI translates without changing request po
   assert.ok(texts(s.screen.tree).includes('お気に入りを読み込めませんでした。再試行'));
   assert.ok(texts(weekly.tree).includes('今週の注目は？')); assert.ok(texts(weekly.tree).includes('ポップアップを読み込めませんでした。再試行'));
   assert.ok(texts(ending.tree).includes('まもなく終了')); assert.ok(texts(card()).includes('本日終了'));
-  assert.equal(nodes(ending.tree).find(n=>n.type==='FlatList').props.ref,endingRef); assert.deepEqual(s.calls,before);
+  assert.equal(nodes(ending.tree).find(n=>n.type==='FlatList').props.ref,endingRef); assertContentLanguages(s.calls,before,['ja','ja','ja']);
   button(s.screen.tree,'お気に入りを再読み込み').props.onPress(); assert.equal(s.favoriteRetries.length,1);
-  button(s.screen.tree,'再試行').props.onPress(); await s.settle(); assert.equal(s.calls.filter(u=>new URL(u).pathname==='/api/popups').length,before.filter(u=>new URL(u).pathname==='/api/popups').length+1);
+  const beforeRetry=s.calls.filter(u=>new URL(u).pathname==='/api/popups').length;
+  button(s.screen.tree,'再試行').props.onPress(); await s.settle(); assert.equal(s.calls.filter(u=>new URL(u).pathname==='/api/popups').length,beforeRetry+1);
   input(s.screen.tree).props.onChangeText('서버'); s.renderAll();
   button(s.screen.tree,'検索キーワードをクリア').props.onPress(); assert.equal(input(s.screen.tree).props.value,'');
   const beforeReentry=s.calls.slice(); const Screen=s.load('src/screens/PlaceScreen.tsx').default;
   const reentered=s.mount(()=>Screen()); assert.equal(input(reentered.tree).props.placeholder,'ポップアップを検索してみよう');
-  // Re-entry can fetch; language changes on mounted screens did not.
+  // Re-entry and content language changes can fetch; UI-only actions do not.
   assert.ok(s.calls.length>=beforeReentry.length); s.dispose();
 });

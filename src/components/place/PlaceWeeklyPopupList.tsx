@@ -1,9 +1,10 @@
 import { useTranslation } from '../../hooks/useTranslation';
-import { t } from '../../locales';
 import { getPopupRegionDisplayName, getTagDisplayName } from '../../locales/filterLabels';
 import { Ionicons } from "@expo/vector-icons";
 import { Heart } from "lucide-react-native";
-import { Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
+import type { RecoverHomeCover } from '../../hooks/useHomeCoverImage';
+import ExplorePopupPoster from './ExplorePopupPoster';
 
 import type { PublicPopup } from "../../lib/popups";
 import { colors, radius, spacing } from "../../theme/tokens";
@@ -14,9 +15,9 @@ type PlaceWeeklyPopupListProps = {
   isFavorite: (publicId: string) => boolean;
   isFavoriteDisabled: (publicId: string) => boolean;
   onToggleFavorite: (popup: PublicPopup) => void;
+  onRecoverCover?: RecoverHomeCover;
+  coverScope?: string;
 };
-
-const placeholderImage = require("../../../assets/images/ranking-placeholder.png");
 
 function formatDate(value: string): string {
   const [, month, day] = value.split("-");
@@ -33,8 +34,10 @@ export default function PlaceWeeklyPopupList({
   isFavorite,
   isFavoriteDisabled,
   onToggleFavorite,
+  onRecoverCover,
+  coverScope,
 }: PlaceWeeklyPopupListProps) {
-  useTranslation();
+  const { t, resolvedLanguage } = useTranslation();
   const todayString = localDateString(new Date());
 
   return (
@@ -57,15 +60,8 @@ export default function PlaceWeeklyPopupList({
             onPress={() => onPressPopup(popup)}
             style={styles.card}
           >
-            <Image
-              source={
-                popup.coverImageUrl
-                  ? { uri: popup.coverImageUrl }
-                  : placeholderImage
-              }
-              resizeMode="cover"
-              style={styles.poster}
-            />
+            <ExplorePopupPoster popup={popup} onRecoverCover={onRecoverCover}
+              coverScope={coverScope} style={styles.poster} />
 
             <View style={styles.information}>
               <Text
@@ -118,14 +114,14 @@ export default function PlaceWeeklyPopupList({
                     numberOfLines={1}
                     style={[styles.tagText, styles.regionText]}
                   >
-                    {getPopupRegionDisplayName(popup)}
+                    {getPopupRegionDisplayName(popup, resolvedLanguage)}
                   </Text>
                 </View>
 
                 {popup.tags[0] && (
                   <View style={styles.tag}>
                     <Text numberOfLines={1} style={styles.tagText}>
-                      {popup.tags.map((tag) => getTagDisplayName(tag)).join(", ")}
+                      {popup.tags.map((tag) => getTagDisplayName(tag, resolvedLanguage)).join(", ")}
                     </Text>
                   </View>
                 )}

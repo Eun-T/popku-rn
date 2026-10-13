@@ -1,3 +1,4 @@
+import ModerationActions from '../community/ModerationActions';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { MoreHorizontal } from 'lucide-react-native';
@@ -91,7 +92,7 @@ export default function ReviewActions({ review }: Props) {
       ], { cancelable: true, onDismiss: cancel });
     }
   }
-  if (!owned) return null;
+  if (!owned) return <ModerationActions targetType="REVIEW" targetId={review.id} authorId={review.author.id} />;
   return <>
     <Pressable accessibilityRole="button" accessibilityLabel={t('review.menu')} accessibilityState={{ expanded: open, disabled: deleting }}
       disabled={deleting} style={styles.button} onPress={(event: GestureResponderEvent) => {

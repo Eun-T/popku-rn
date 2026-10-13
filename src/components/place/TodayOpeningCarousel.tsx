@@ -7,8 +7,9 @@ import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
 
 import type { PublicPopup } from "../../lib/popups";
-import { t } from "../../locales";
 import { useTranslation } from '../../hooks/useTranslation';
+import type { RecoverHomeCover } from '../../hooks/useHomeCoverImage';
+import ExplorePopupPoster from './ExplorePopupPoster';
 import { colors, radius, spacing, typography } from "../../theme/tokens";
 import SkeletonBlock from "../common/SkeletonBlock";
 
@@ -19,9 +20,9 @@ type TodayOpeningCarouselProps = {
   loading: boolean;
   error: boolean;
   onPressPopup: (popup: PublicPopup) => void;
+  onRecoverCover?: RecoverHomeCover;
+  coverScope?: string;
 };
-
-const placeholderImage = require("../../../assets/images/ranking-placeholder.png");
 
 const CARD_HEIGHT = 280;
 const POSTER_HEIGHT = CARD_HEIGHT * 0.75;
@@ -43,9 +44,15 @@ function imageDiagnostics(publicId: string, layer: "background" | "poster") {
 function PosterBackground({
   source,
   publicId,
+  imageKey,
+  onError,
+  onLoad,
 }: {
   source: ImageSource | number;
   publicId: string;
+  imageKey: string;
+  onError: () => void;
+  onLoad: () => void;
 }) {
   const blurTarget = useRef<View>(null);
   useEffect(() => {
@@ -63,10 +70,14 @@ function PosterBackground({
         style={StyleSheet.absoluteFill}
       >
         <Image
+          key={imageKey}
           source={source}
           contentFit="cover"
+          cachePolicy="memory-disk"
           style={StyleSheet.absoluteFill}
           {...imageDiagnostics(publicId, "background")}
+          onError={event => { imageDiagnostics(publicId, 'background').onError?.(event); onError(); }}
+          onLoad={event => { imageDiagnostics(publicId, 'background').onLoad?.(event); onLoad(); }}
         />
       </BlurTargetView>
       <BlurView
@@ -93,8 +104,10 @@ export default function TodayOpeningCarousel({
   loading,
   error,
   onPressPopup,
+  onRecoverCover,
+  coverScope,
 }: TodayOpeningCarouselProps) {
-  const { resolvedLanguage } = useTranslation();
+  const { t, resolvedLanguage } = useTranslation();
   const listRef = useRef<FlatList<PublicPopup>>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const diagnosticItems = useRef(items);
@@ -127,7 +140,7 @@ export default function TodayOpeningCarousel({
       );
       for (const item of currentItems) {
         if (!item.coverImageUrl) continue;
-        void Image.getCachePathAsync(item.coverImageUrl)
+        void Image.getCachePathAsync(item.coverImageCacheKey ?? item.coverImageUrl)
           .then((path) => {
             console.log("[EndingSoon] URL disk cache", {
               publicId: item.publicId,
@@ -234,23 +247,16 @@ export default function TodayOpeningCarousel({
                   { width, backgroundColor: colors.surface },
                 ]}
               >
-                <PosterBackground
-                  publicId={item.publicId}
-                  source={
-                    item.coverImageUrl
-                      ? { uri: item.coverImageUrl }
-                      : placeholderImage
-                  }
-                />
-                <Image
-                  source={
-                    item.coverImageUrl
-                      ? { uri: item.coverImageUrl }
-                      : placeholderImage
-                  }
+                <ExplorePopupPoster
+                  popup={item}
+                  onRecoverCover={onRecoverCover}
+                  coverScope={coverScope}
                   contentFit="contain"
                   style={[styles.poster, { width: posterWidth }]}
-                  {...imageDiagnostics(item.publicId, "poster")}
+                  imageEvents={imageDiagnostics(item.publicId, "poster")}
+                  renderBackground={cover => <PosterBackground publicId={item.publicId}
+                    source={cover.source} imageKey={cover.imageKey}
+                    onError={cover.onError} onLoad={cover.onLoad} />}
                 />
                 <View pointerEvents="none" style={styles.bottomGradient}>
                   <Svg width="100%" height="100%">

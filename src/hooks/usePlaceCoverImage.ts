@@ -10,11 +10,17 @@ export function usePlaceCoverImage(item: PublicPopup, recover?: RecoverPlaceCove
   const identity = JSON.stringify([item.publicId, item.coverImageUrl, item.coverImageCacheKey, item.coverImageFetchedAt]);
   const latest = useRef({ item, recover, identity });
   const loadedIdentity = useRef<string | null>(null);
+  const mounted = useRef(false);
   latest.current = { item, recover, identity };
   const [checked, setChecked] = useState<{ identity: string; source: ImageSource | null } | null>(null);
   const remote: ImageSource | null = item.coverImageUrl
     ? { uri: item.coverImageUrl, ...(item.coverImageCacheKey ? { cacheKey: item.coverImageCacheKey } : {}) } : null;
   const needsCheck = !!recover && !!remote && isCoverUrlStale(item) && loadedIdentity.current !== identity;
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   useEffect(() => {
     if (!needsCheck) return;
@@ -38,19 +44,29 @@ export function usePlaceCoverImage(item: PublicPopup, recover?: RecoverPlaceCove
     return () => { cancelled = true; };
   }, [identity, needsCheck]);
 
+  const source = checked?.identity === identity ? checked.source : needsCheck ? null : remote;
+  const sourceKey = JSON.stringify(source);
+  const latestSourceKey = useRef(sourceKey);
+  latestSourceKey.current = sourceKey;
   return {
-    source: checked?.identity === identity ? checked.source : needsCheck ? null : remote,
-    onLoad: () => { loadedIdentity.current = identity; },
+    source,
+    onLoad: () => {
+      if (mounted.current && latest.current.identity === identity && latestSourceKey.current === sourceKey && source) {
+        loadedIdentity.current = identity;
+      }
+    },
     onError: () => {
+      if (!mounted.current || latest.current.identity !== identity || latestSourceKey.current !== sourceKey || !source) return;
       const current = latest.current;
+      setChecked({ identity: current.identity, source: null });
       // Error text/status alone cannot identify an expired S3 signature.
       if (!current.recover || !isCoverUrlStale(current.item)) return;
       void current.recover(current.item).then(detail => {
-        if (latest.current.identity !== current.identity || !detail) return;
+        if (!mounted.current || latest.current.identity !== current.identity || !detail) return;
         setChecked({ identity: current.identity, source: detail.coverImageUrl ? {
           uri: detail.coverImageUrl, ...(detail.coverImageCacheKey ? { cacheKey: detail.coverImageCacheKey } : {}),
         } : null });
-      });
+      }).catch(() => { /* Keep the placeholder if a caller's recovery rejects. */ });
     },
   };
 }

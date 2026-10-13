@@ -11,6 +11,8 @@ import { markCommunityFeedChanged, publishCommunityPostChange } from '../../lib/
 import { clearTokens } from '../../lib/auth';
 import { draftLoginHref } from '../../lib/loginReturn';
 import { logCommunityError } from '../../lib/communityDiagnostics';
+import { throwIfRequestAborted } from '../../lib/requestTimeout';
+import { assertSubmissionOwner, captureSubmissionOwner, isSubmissionAuthCleared, isSubmissionOwnerCurrent, watchSubmissionSession, type SubmissionOwner } from '../../lib/submissionSession';
 import { ImageSelectionError, MAX_POST_IMAGES, publishPostWithImages, updatePostWithImages, selectPostImages, type ImageEditAttempt, type ImagePostAttempt, type PostImage } from '../../lib/communityImages';
 import { communityColors } from '../../theme/communityColors';
 import { colors, radius, spacing, typography } from '../../theme/tokens';
@@ -35,6 +37,7 @@ export default function CommunityWriteScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState(false);
   const submittingRef = useRef(false);
+  const submissionRef = useRef<AbortController | null>(null);
   const [images, setImages] = useState<DraftImage[]>([]);
   const [selectingImages, setSelectingImages] = useState(false);
   const [imageError, setImageError] = useState<string | null>(null);
@@ -83,7 +86,13 @@ export default function CommunityWriteScreen() {
 
   useEffect(() => {
     mountedRef.current = true;
-    return () => { mountedRef.current = false; };
+    return () => {
+      mountedRef.current = false;
+      const submission = submissionRef.current;
+      submissionRef.current = null;
+      submittingRef.current = false;
+      submission?.abort();
+    };
   }, []);
 
   usePreventRemove(hasChanges || submitting || selectingImages || (pendingConfirmation && !authenticationRequired), ({ data }) => {
@@ -137,26 +146,44 @@ export default function CommunityWriteScreen() {
   }
 
   async function handleRegister() {
-    if (!content.trim() || loadingEdit || editLoadError || submittingRef.current || selectingRef.current || !imagesReady) return;
+    if (!mountedRef.current || !content.trim() || loadingEdit || editLoadError || submittingRef.current || selectingRef.current || !imagesReady) return;
     submittingRef.current = true;
+    const submission = new AbortController();
+    submissionRef.current = submission;
+    let owner: SubmissionOwner | undefined;
+    let stopWatching = () => {};
+    const isCurrent = () => mountedRef.current && submissionRef.current === submission && (!owner || isSubmissionOwnerCurrent(owner));
+    const beforeSend = (generation?: number) => { if (owner) assertSubmissionOwner(owner, generation); throwIfRequestAborted(submission.signal); };
     allowLeaveRef.current = false;
     setSubmitting(true);
     setSubmitError(false);
+    setImageError(null);
     try {
+      owner = captureSubmissionOwner();
+      stopWatching = watchSubmissionSession(owner, submission, () => {
+        if (!mountedRef.current || submissionRef.current !== submission) return;
+        submissionRef.current = null;
+        submittingRef.current = false;
+        if (imageAttemptRef.current) imageAttemptRef.current.authRequired = true;
+        if (editAttemptRef.current) editAttemptRef.current.authRequired = true;
+        setSubmitting(false); setSubmitError(true);
+        setPendingConfirmation(imageAttemptRef.current !== null || editAttemptRef.current !== null);
+      });
       if (editing) {
         const retained = images.flatMap((item) => item.retainedId ? [item.retainedId] : []);
         const added = images.flatMap((item) => item.image ? [item.image] : []);
         const post = added.length || editAttemptRef.current
-          ? await updatePostWithImages(postId, content, retained, added, editAttemptRef)
-          : await updateCommunityPost(postId, content, retained);
-        publishCommunityPostChange(post.id, { content: post.content, images: post.images,
+          ? await updatePostWithImages(postId, content, retained, added, editAttemptRef, submission.signal, owner)
+          : await updateCommunityPost(postId, content, retained, undefined, beforeSend);
+        if (isSubmissionOwnerCurrent(owner)) publishCommunityPostChange(post.id, { content: post.content, images: post.images,
           updatedAt: post.updatedAt, imageIds: post.imageIds });
       } else {
         if (images.length || imageAttemptRef.current) await publishPostWithImages(category, content,
-          images.flatMap((item) => item.image ? [item.image] : []), imageAttemptRef);
-        else await createCommunityPost(category, content);
-        markCommunityFeedChanged();
+          images.flatMap((item) => item.image ? [item.image] : []), imageAttemptRef, submission.signal, owner);
+        else await createCommunityPost(category, content, undefined, beforeSend);
+        if (isSubmissionOwnerCurrent(owner)) markCommunityFeedChanged();
       }
+      if (!isCurrent()) return;
       allowLeaveRef.current = true;
       confirmingLeave.current = false;
       if (mountedRef.current) {
@@ -167,16 +194,23 @@ export default function CommunityWriteScreen() {
       logCommunityError('REGISTER', {
         ...(error instanceof CommunityApiError ? { status: error.status, responseBody: error.responseBody } : {}),
       }, error);
-      setSubmitError(true);
+      if (!isCurrent()) return;
+      if (error instanceof ImageSelectionError && error.reason === 'size') setImageError('community.imageError.size');
+      else setSubmitError(true);
       setPendingConfirmation(imageAttemptRef.current !== null || editAttemptRef.current !== null);
       if (error instanceof CommunityApiError && error.status === 401) {
         // Keep the mounted draft. A prior unknown commit retains its immutable token, but authentication must not trap navigation.
         const invalidated = await clearTokens(error.authGeneration).catch(() => true);
-        if (invalidated !== false && mountedRef.current) router.push(draftLoginHref(navigation));
+        if (invalidated !== false && mountedRef.current && owner && isSubmissionAuthCleared(owner)
+          && (!submissionRef.current || submissionRef.current === submission)) router.push(draftLoginHref(navigation));
       }
     } finally {
-      submittingRef.current = false;
-      setSubmitting(false);
+      stopWatching();
+      if (submissionRef.current === submission) {
+        submissionRef.current = null;
+        submittingRef.current = false;
+        if (mountedRef.current) setSubmitting(false);
+      }
     }
   }
 

@@ -71,7 +71,8 @@ function screen(mapRequest = async () => [popup, popupB], options = {}) {
   const slots = []; let cursor = 0, dirty = true, tree; const effects = [];
   const timers = new Map(); let timerId = 0, tokens = 0;
   let routeParams = {};
-  let focusEffect;
+  let focused = true;
+  const focusEffects = new Map();
   const calls = { popup: [], autocomplete: [], resolve: [], camera: [], sheetTiming: [], sheetCancellations: [], map: 0, renders: 0 };
   const same = (a, b) => a && b && a.length === b.length && a.every((v, i) => Object.is(v, b[i]));
   const hooks = {
@@ -107,6 +108,11 @@ function screen(mapRequest = async () => [popup, popupB], options = {}) {
     const d = deferred(); calls[kind].push({ input, signal, ...d }); return d.promise;
   };
   hooks.useCallback = (fn, deps) => hooks.useMemo(() => fn, deps);
+  const useFocusEffect = (fn) => hooks.useEffect(() => {
+    const entry = { fn, cleanup: focused ? fn() : undefined };
+    focusEffects.set(fn, entry);
+    return () => { entry.cleanup?.(); focusEffects.delete(fn); };
+  }, [fn]);
   const translation = options.realI18n ? {
     '../hooks/useTranslation': load('src/hooks/useTranslation.ts', {
       react: hooks,
@@ -114,8 +120,8 @@ function screen(mapRequest = async () => [popup, popupB], options = {}) {
     }),
   } : {};
   const mapData = load('src/hooks/useMapPopups.ts', {
-    react: hooks, 'expo-router': { useFocusEffect(fn) { focusEffect = fn; } },
-    '../lib/popups': { getPopupMap: (signal) => { calls.map++; return mapRequest(signal); } },
+    react: hooks, 'expo-router': { useFocusEffect },
+    '../lib/popups': { getPopupMap: (signal, languageCode) => { calls.map++; return mapRequest(signal, languageCode); } },
   });
   const Screen = load('src/screens/MapScreen.native.tsx', {
     ...translation,
@@ -136,6 +142,7 @@ function screen(mapRequest = async () => [popup, popupB], options = {}) {
     'expo-location': options.location ?? { getForegroundPermissionsAsync: async () => ({ granted: false }) },
     'expo-modules-core': { uuid: { v4: () => `token-${++tokens}` } },
     'expo-router': {
+      useFocusEffect,
       useRouter: () => ({ setParams: (params) => { routeParams = { ...routeParams, ...params }; dirty = true; } }),
       useLocalSearchParams: () => routeParams,
     }, 'lucide-react-native': {},
@@ -143,8 +150,9 @@ function screen(mapRequest = async () => [popup, popupB], options = {}) {
     'react-native-safe-area-context': { useSafeAreaInsets: () => ({ top: 40, bottom: 20 }) },
     'react-native-svg': { default: 'Svg', Circle: 'Circle', Path: 'Path' },
     'supercluster': { default: options.Supercluster ?? class { load() {} getClusters() { return []; } } },
-    '../lib/popups': { getPopupMap: async () => [popup, popupB], searchPopups: (q, s) => request('popup', q, s) },
+    '../lib/popups': { searchPopups: (q, s, languageCode) => { const promise=request('popup', q, s);calls.popup.at(-1).languageCode=languageCode;return promise; } },
     '../lib/placeSearch': {
+      GOOGLE_PLACES_SEARCH_ENABLED: options.placesEnabled ?? true,
       autocompletePlaces: (q, s) => request('autocomplete', q, s),
       resolvePlace: (q, s) => request('resolve', q, s),
     },
@@ -175,7 +183,7 @@ function screen(mapRequest = async () => [popup, popupB], options = {}) {
       effects.splice(0).forEach((effect) => effect());
     }
   }
-  async function settle() { await Promise.resolve(); await Promise.resolve(); flush(); }
+  async function settle() { for(let i=0;i<4;i++){await Promise.resolve();await Promise.resolve();flush();} }
   flush();
   return {
     calls, find, flush, settle,
@@ -183,7 +191,8 @@ function screen(mapRequest = async () => [popup, popupB], options = {}) {
     findButton(label) { return nodes(tree).find(node => node.type === 'Pressable' && text(node) === label); },
     markers() { return nodes(tree).filter((node) => node.type === 'Marker'); },
     clusters() { return nodes(tree).filter((node) => typeof node.type === 'function' && node.type.name === 'ClusterMapMarker'); },
-    reenter() { focusEffect(); flush(); },
+    reenter() { focused = true; focusEffects.forEach(entry => { entry.cleanup?.(); entry.cleanup = entry.fn(); }); flush(); },
+    blur() { focused = false; focusEffects.forEach(entry => { entry.cleanup?.(); entry.cleanup = undefined; }); flush(); },
     focus() { find('TextInput').props.onFocus(); flush(); },
     query(q) { find('TextInput').props.onChangeText(q); flush(); },
     clear() { nodes(tree).find((n) => n.props?.accessibilityLabel === '검색어 지우기').props.onPress(); flush(); },
@@ -202,7 +211,7 @@ function screen(mapRequest = async () => [popup, popupB], options = {}) {
   };
 }
 
-test('real language subscription keeps selected map marker, category, camera and F06 index on ko/ja/system', async () => {
+test('real language subscription refreshes map titles and keeps selection, category and camera on ko/ja/system', async () => {
   const { languageStore } = require('./helpers/uiDependencies.cjs').loadPure('src/locales/languageStore.ts');
   await languageStore.initialize({ read: async () => 'ko', write: async () => {}, getLanguageTags: () => ['ja-JP'] });
   let indexes = 0;
@@ -213,17 +222,19 @@ test('real language subscription keeps selected map marker, category, camera and
   try {
     await s.settle(); s.tag('캐릭터/IP'); s.markers()[0].props.onPress(); s.flush();
     const map = s.find('MapView'), marker = s.markers()[0];
-    const before = { requests: s.calls.map, camera: s.calls.camera.slice(), timing: s.calls.sheetTiming.slice(), indexes };
+    const before = { camera: s.calls.camera.slice(), timing: s.calls.sheetTiming.slice() };
+    let requests=s.calls.map;
     for (const [preference, label, placeholder] of [['ja','キャラクター・IP','場所やポップアップを検索'],
       ['ko','캐릭터/IP','장소나 팝업을 검색해보세요'], ['system','キャラクター・IP','場所やポップアップを検索']]) {
       await languageStore.setLanguagePreference(preference); await s.settle();
       assert.equal(s.find('TextInput').props.placeholder, placeholder); assert.equal(s.tagSelected(label), true);
       assert.equal(s.findButton(label).key,'캐릭터/IP');
       assert.equal(s.find('Preview').props.popup, local);
-      assert.equal(s.markers()[0].key, marker.key); assert.deepEqual(s.markers()[0].props.coordinate, marker.props.coordinate);
+      assert.equal(s.markers()[0].key,`${local.id}-true-${preference==='ko'?'ko':'ja'}`); assert.deepEqual(s.markers()[0].props.coordinate, marker.props.coordinate);
       assert.equal(s.find('MapView').props.ref, map.props.ref); assert.equal(s.find('MapView').key, map.key);
       assert.deepEqual(s.find('MapView').props.initialRegion, map.props.initialRegion);
-      assert.deepEqual({ requests: s.calls.map, camera: s.calls.camera, timing: s.calls.sheetTiming, indexes }, before);
+      assert.equal(s.calls.map,++requests);
+      assert.deepEqual({ camera: s.calls.camera, timing: s.calls.sheetTiming }, before);
     }
   } finally { s.dispose(); await languageStore.setLanguagePreference('ko'); }
 });
@@ -239,7 +250,7 @@ test('open map sheet and existing query/debounce requests survive a display lang
     const sheet = s.find('ListSheet'), animations = s.calls.sheetTiming.length;
     await languageStore.setLanguagePreference('ja'); await s.settle();
     assert.ok(s.findButton('地図に戻る'));
-    assert.equal(s.find('ListSheet').props.popups, sheet.props.popups);
+    assert.deepEqual(s.find('ListSheet').props.popups, sheet.props.popups);
     assert.equal(s.calls.sheetTiming.length, animations);
     // Close using the actual translated UI callback, then exercise search state.
     s.findButton('地図に戻る').props.onPress();
@@ -294,9 +305,10 @@ test('expanded screen culls 970 offscreen markers; regional list remains exact b
 test('marker touch/style/anchor/key persist outside bounds; map press closes preview and removes the pin', async () => {
   const local = { ...popup, ...initial };
   const s = screen(async () => [local, popupB]); await s.settle();
+  s.complete({ ...initial, latitudeDelta: 0.007, longitudeDelta: 0.007 });
   s.markers()[0].props.onPress(); s.flush();
   assert.equal(s.find('Preview').props.popup.id, local.id);
-  assert.equal(s.markers()[0].key, `${local.id}-true`);
+  assert.equal(s.markers()[0].key, `${local.id}-true-ko`);
   assert.equal(s.markers()[0].props.zIndex, 1);
   assert.equal(s.markers()[0].props.tracksViewChanges, false);
   const markerLayout = nodes(s.markers()[0]).find(n => n.type === 'View' && n.props.onLayout);
@@ -309,6 +321,83 @@ test('marker touch/style/anchor/key persist outside bounds; map press closes pre
   s.find('MapView').props.onPress({ nativeEvent: { action: 'press' } }); s.flush();
   assert.equal(s.find('Preview'), undefined);
   assert.equal(s.markers().length, 1); s.dispose();
+});
+
+test('popup labels use independent show/hide thresholds with a stable marker key and appearance', async () => {
+  const local = { ...popup, ...initial };
+  const s = screen(async () => [local]);
+  try {
+    await s.settle();
+    const before = s.markers()[0];
+    const icon = nodes(before).find(n => n.type === 'MaterialIcons').props;
+    const wrapper = nodes(before).find(n => n.type === 'View' && n.props.style?.width === 24).props.style;
+    for (const [delta, visible] of [[0.025,false],[0.0151,false],[0.015,true],[0.0151,true],[0.0179,true],[0.018,false],[0.0179,false],[0.015,true]]) {
+      s.complete({ ...initial, latitudeDelta: delta, longitudeDelta: delta });
+      const marker = s.markers()[0];
+      assert.equal(nodes(marker).filter(n => n.type === 'Text').length, visible ? 1 : 0);
+      if (visible) assert.ok(text(marker).includes(local.name));
+      assert.equal(marker.key, before.key); assert.deepEqual(marker.props.coordinate, before.props.coordinate);
+      assert.deepEqual(nodes(marker).find(n => n.type === 'MaterialIcons').props, icon);
+      assert.deepEqual(nodes(marker).find(n => n.type === 'View' && n.props.style?.width === 24).props.style, wrapper);
+      assert.equal(marker.props.tracksViewChanges, false);
+    }
+    assert.deepEqual(s.calls.camera, []); assert.equal(s.calls.map, 1);
+  } finally { s.dispose(); }
+});
+
+test('continuous zoom does not toggle labels until completion or issue a camera command', async () => {
+  const s = screen(async () => [{ ...popup, ...initial }]);
+  try {
+    await s.settle(); const map = s.find('MapView');
+    const close = { ...initial, latitudeDelta: 0.007, longitudeDelta: 0.007 };
+    map.props.onRegionChangeStart(close, { isGesture: true }); map.props.onRegionChange(close, { isGesture: true }); s.flush();
+    assert.equal(nodes(s.markers()[0]).filter(n => n.type === 'Text').length, 0);
+    s.complete(close, true); assert.equal(nodes(s.markers()[0]).filter(n => n.type === 'Text').length, 1);
+    assert.equal(s.find('MapView').props.ref, map.props.ref);
+    assert.equal(s.find('MapView').props.initialRegion, map.props.initialRegion);
+    assert.deepEqual(s.calls.camera, []);
+  } finally { s.dispose(); }
+});
+
+test('label layouts redraw the stable snapshot and retain separate real heights for normal and selected markers', async () => {
+  const local = { ...popup, ...initial }; const s = screen(async () => [local]); let redraws = 0;
+  const close = { ...initial, latitudeDelta: 0.007, longitudeDelta: 0.007 };
+  const layout = height => {
+    const marker = s.markers()[0]; marker.props.ref({ redraw() { redraws++; } });
+    nodes(marker).find(n => n.type === 'View' && n.props.onLayout).props.onLayout({ nativeEvent: { layout: { height } } }); s.flush();
+  };
+  try {
+    await s.settle(); const normalKey = s.markers()[0].key;
+    assert.equal(s.markers()[0].props.anchor.y, 40/52);
+    layout(52); const renders = s.calls.renders; layout(52); assert.equal(s.calls.renders, renders);
+    s.complete(close); assert.equal(s.markers()[0].key, normalKey);
+    assert.equal(s.markers()[0].props.anchor.y, 0.5); layout(70); assert.equal(s.markers()[0].props.anchor.y, 40/70);
+    const labelStyle = nodes(s.markers()[0]).find(n => n.type === 'Text').props.style;
+    assert.equal(labelStyle.lineHeight, undefined); assert.equal(labelStyle.height, undefined); assert.equal(labelStyle.textShadowRadius, undefined);
+    s.markers()[0].props.onPress(); s.flush(); const selectedKey = s.markers()[0].key;
+    assert.equal(s.find('Preview').props.popup.id, local.id); assert.ok(nodes(s.markers()[0]).some(n => n.type === 'Path'));
+    layout(74); assert.equal(s.markers()[0].props.anchor.y, 40/74);
+    s.complete({ ...initial, latitudeDelta: 0.018 }); assert.equal(s.markers()[0].key, selectedKey);
+    assert.equal(s.markers()[0].props.anchor.y, 40/52); layout(52);
+    assert.equal(s.find('Preview').props.popup.id, local.id);
+    s.complete(close); assert.equal(s.markers()[0].key, selectedKey); assert.equal(s.markers()[0].props.anchor.y, 40/74);
+    layout(78); assert.equal(s.markers()[0].props.anchor.y, 40/78);
+    s.find('MapView').props.onPress({ nativeEvent: { action: 'press' } }); s.flush();
+    assert.equal(s.markers()[0].key, normalKey); assert.equal(s.markers()[0].props.anchor.y, 40/70);
+    assert.equal(s.find('Preview'), undefined); assert.equal(redraws, 6); assert.deepEqual(s.calls.camera, []);
+    s.markers()[0].props.ref(null); layout(70); // Reattach remains safe after native ref cleanup.
+  } finally { s.dispose(); }
+});
+
+test('stale icon-only layout cannot overwrite a newly visible label height', async () => {
+  const s = screen(async () => [{ ...popup, ...initial }]);
+  try {
+    await s.settle(); const oldLayout = nodes(s.markers()[0]).find(n => n.type === 'View' && n.props.onLayout).props.onLayout;
+    s.complete({ ...initial, latitudeDelta: 0.007, longitudeDelta: 0.007 });
+    nodes(s.markers()[0]).find(n => n.type === 'View' && n.props.onLayout).props.onLayout({ nativeEvent: { layout: { height: 75 } } }); s.flush();
+    oldLayout({ nativeEvent: { layout: { height: 52 } } }); s.flush();
+    assert.equal(s.markers()[0].props.anchor.y, 40/75);
+  } finally { s.dispose(); }
 });
 
 test('tag exclusions clear a pinned selection and preview', async () => {
@@ -377,12 +466,12 @@ test('completion changes marker bounds; continuous drag does not recalculate; re
   assert.equal(s.find('MapView').props.children, originalChildren);
   const japan = { ...initial, latitude: popupB.latitude, longitude: popupB.longitude };
   s.complete(japan, true); assert.equal(s.markers().length, 1);
-  assert.equal(s.markers()[0].key, `${popupB.id}-false`);
+  assert.equal(s.markers()[0].key, `${popupB.id}-false-ko`);
   const afterMove = s.calls.renders, children = s.find('MapView').props.children;
   s.complete({ ...japan }); s.reenter();
   assert.equal(s.calls.renders, afterMove); assert.equal(s.find('MapView').props.children, children);
   assert.equal(s.calls.map, 1);
-  s.complete(initial, true); assert.equal(s.markers()[0].key, `${local.id}-false`); s.dispose();
+  s.complete(initial, true); assert.equal(s.markers()[0].key, `${local.id}-false-ko`); s.dispose();
 });
 
 test('late initial native bounds cannot overwrite a completed move', async () => {
@@ -390,7 +479,7 @@ test('late initial native bounds cannot overwrite a completed move', async () =>
   const s = screen(undefined, { getMapBoundaries: () => readyBounds.promise }); await s.settle(); s.ready();
   s.complete({ ...initial, latitude: popupB.latitude, longitude: popupB.longitude });
   readyBounds.resolve({ northEast: { latitude: 37.55, longitude: 127.06 }, southWest: { latitude: 37.53, longitude: 127.04 } });
-  await s.settle(); assert.equal(s.markers()[0].key, `${popupB.id}-false`);
+  await s.settle(); assert.equal(s.markers()[0].key, `${popupB.id}-false-ko`);
   assert.equal(s.calls.map, 1); s.dispose();
 });
 
@@ -478,9 +567,172 @@ test('location move keeps its existing camera and request policy and updates mar
   position.resolve({ coords: { latitude: popupB.latitude, longitude: popupB.longitude } });
   await moving; await s.settle();
   assert.equal(s.calls.camera.length, 1); assert.equal(s.calls.camera[0].latitudeDelta, initial.latitudeDelta);
-  s.complete(s.calls.camera[0]); assert.equal(s.markers()[0].key, `${popupB.id}-false`);
+  s.complete(s.calls.camera[0]); assert.equal(s.markers()[0].key, `${popupB.id}-false-ko`);
   assert.equal(s.calls.map, 1); s.dispose();
 });
+
+const draggedRegion = { ...initial, latitude: initial.latitude + 0.006, longitude: initial.longitude + 0.006 };
+function dragCamera(s) {
+  s.find('MapView').props.onRegionChangeStart(draggedRegion, { isGesture: true });
+  s.find('MapView').props.onRegionChange(draggedRegion, { isGesture: true });
+  s.find('MapView').props.onPanDrag();
+  s.complete(draggedRegion, true);
+}
+function locationButton(s) {
+  s.find('AnimatedView').props.onLayout({ nativeEvent: { layout: { height: 60 } } });
+  s.flush();
+  return s.findByLabel('현재 위치로 이동');
+}
+
+for (const origin of ['search', 'detail']) {
+  test(`${origin} popup refresh cannot move the camera after a drag with search closed`, async () => {
+    const refresh = deferred(); let requests = 0;
+    const s = screen(() => ++requests === 1 ? Promise.resolve([]) : refresh.promise);
+    try {
+      await s.settle(); s.ready();
+      if (origin === 'search') { s.focus(); s.query('산리오'); s.overlay().onSelect(popupB); s.flush(); }
+      else s.enterFromDetail(popupB.id);
+      assert.equal(s.overlay(), undefined); assert.equal(s.calls.map, 2);
+      dragCamera(s);
+      refresh.resolve([popupB]); await s.settle();
+      assert.deepEqual(s.calls.camera, []); assert.equal(s.find('Preview'), undefined);
+    } finally { s.dispose(); }
+  });
+}
+
+test('gesture start alone invalidates a pending popup before continuous drag events', async () => {
+  const refresh = deferred(); let requests = 0;
+  const s = screen(() => ++requests === 1 ? Promise.resolve([]) : refresh.promise);
+  try {
+    await s.settle(); s.ready(); s.enterFromDetail(popupB.id);
+    s.find('MapView').props.onRegionChangeStart(draggedRegion, { isGesture: true });
+    refresh.resolve([popupB]); await s.settle(); assert.deepEqual(s.calls.camera, []);
+  } finally { s.dispose(); }
+});
+
+test('programmatic camera events do not invalidate the newest popup refresh', async () => {
+  const refresh = deferred(); let requests = 0;
+  const s = screen(() => ++requests === 1 ? Promise.resolve([]) : refresh.promise);
+  try {
+    await s.settle(); s.ready(); s.enterFromDetail(popupB.id);
+    s.find('MapView').props.onRegionChangeStart(initial, { isGesture: false });
+    s.find('MapView').props.onRegionChange(initial, { isGesture: false }); s.complete(initial);
+    refresh.resolve([popupB]); await s.settle();
+    assert.equal(s.calls.camera.length, 1); assert.equal(s.calls.camera[0].longitude, popupB.longitude);
+    s.complete(s.calls.camera[0]); assert.equal(s.find('Preview').props.popup.id, popupB.id);
+  } finally { s.dispose(); }
+});
+
+test('ordinary drag produces no camera command or controlled camera props', async () => {
+  const s = screen();
+  try {
+    await s.settle(); dragCamera(s);
+    assert.deepEqual(s.calls.camera, []);
+    assert.equal(s.find('MapView').props.region, undefined); assert.equal(s.find('MapView').props.camera, undefined);
+  } finally { s.dispose(); }
+});
+
+test('latest different place selection supersedes a pending resolve', async () => {
+  const s = screen();
+  try {
+    s.focus(); s.query('서울');
+    const first = s.overlay().onSelectPlace(suggestion); s.flush();
+    const second = s.overlay().onSelectPlace({ ...suggestion, placeId: 'tokyo' }); s.flush();
+    assert.equal(s.calls.resolve.length, 2); assert.equal(s.calls.resolve[0].signal.aborted, true);
+    const tokyo = { ...resolved, placeId: 'tokyo', latitude: popupB.latitude, longitude: popupB.longitude, viewport: null };
+    s.calls.resolve[1].resolve(tokyo); await second; await s.settle();
+    s.calls.resolve[0].resolve(resolved); await first; await s.settle();
+    assert.equal(s.calls.camera.length, 1); assert.equal(s.calls.camera[0].longitude, popupB.longitude);
+  } finally { s.dispose(); }
+});
+
+test('drag cancels place resolve; selecting again starts a valid new camera request', async () => {
+  const s = screen();
+  try {
+    s.focus(); s.query('서울'); const first = s.overlay().onSelectPlace(suggestion); s.flush();
+    dragCamera(s); assert.equal(s.calls.resolve[0].signal.aborted, true);
+    s.calls.resolve[0].resolve(resolved); await first; await s.settle(); assert.deepEqual(s.calls.camera, []);
+    s.focus(); const second = s.overlay().onSelectPlace(suggestion);
+    s.calls.resolve[1].resolve(resolved); await second; await s.settle(); assert.equal(s.calls.camera.length, 1);
+  } finally { s.dispose(); }
+});
+
+for (const stage of ['permission', 'permissionRequest', 'position']) {
+  test(`drag invalidates location at the ${stage} await`, async () => {
+    const waiting = deferred(); let positions = 0;
+    const s = screen(undefined, { location: {
+      Accuracy: { Balanced: 'balanced' },
+      getForegroundPermissionsAsync: () => stage === 'permission' ? waiting.promise : Promise.resolve({ granted: stage !== 'permissionRequest', canAskAgain: true }),
+      requestForegroundPermissionsAsync: () => waiting.promise,
+      getCurrentPositionAsync: () => { positions++; return stage === 'position' ? waiting.promise : Promise.resolve({ coords: popupB }); },
+    } });
+    try {
+      await s.settle(); const moving = locationButton(s).props.onPress(); await s.settle();
+      dragCamera(s); waiting.resolve(stage === 'position' ? { coords: popupB } : { granted: true });
+      await moving; await s.settle(); assert.deepEqual(s.calls.camera, []);
+      assert.equal(positions, stage === 'position' ? 1 : 0);
+      assert.equal(locationButton(s).props.disabled, false);
+    } finally { s.dispose(); }
+  });
+}
+
+test('a fresh location request survives stale completion and retains its loading lock', async () => {
+  const positions = [];
+  const s = screen(undefined, { location: {
+    Accuracy: { Balanced: 'balanced' }, getForegroundPermissionsAsync: async () => ({ granted: true }),
+    getCurrentPositionAsync: () => { const wait = deferred(); positions.push(wait); return wait.promise; },
+  } });
+  try {
+    await s.settle(); const first = locationButton(s).props.onPress(); await s.settle(); dragCamera(s);
+    const second = locationButton(s).props.onPress(); await s.settle(); assert.equal(positions.length, 2);
+    positions[0].resolve({ coords: popup }); await first; await s.settle();
+    assert.deepEqual(s.calls.camera, []); assert.equal(locationButton(s).props.disabled, true);
+    positions[1].resolve({ coords: popupB }); await second; await s.settle();
+    assert.equal(s.calls.camera.length, 1); assert.equal(s.calls.camera[0].longitude, popupB.longitude);
+    assert.equal(locationButton(s).props.disabled, false);
+  } finally { s.dispose(); }
+});
+
+test('a popup search supersedes an older location request', async () => {
+  const position = deferred();
+  const s = screen(undefined, { location: {
+    Accuracy: { Balanced: 'balanced' }, getForegroundPermissionsAsync: async () => ({ granted: true }),
+    getCurrentPositionAsync: () => position.promise,
+  } });
+  try {
+    await s.settle(); const moving = locationButton(s).props.onPress(); await s.settle();
+    s.focus(); s.query('산리오'); s.overlay().onSelect(popupB); s.flush();
+    position.resolve({ coords: popup }); await moving; await s.settle();
+    assert.equal(s.calls.camera.length, 1); assert.equal(s.calls.camera[0].longitude, popupB.longitude);
+  } finally { s.dispose(); }
+});
+
+for (const exit of ['blur', 'unmount']) {
+  for (const kind of ['popup', 'place', 'location']) {
+    test(`${exit} invalidates pending ${kind} camera results`, async () => {
+      const wait = deferred(); let requests = 0;
+      const s = screen(kind === 'popup' ? () => ++requests === 1 ? Promise.resolve([]) : wait.promise : undefined, { location: {
+        Accuracy: { Balanced: 'balanced' }, getForegroundPermissionsAsync: async () => ({ granted: true }),
+        getCurrentPositionAsync: () => wait.promise,
+      } });
+      try {
+        await s.settle(); s.ready(); let moving;
+        if (kind === 'popup') s.enterFromDetail(popupB.id);
+        else if (kind === 'place') { s.focus(); s.query('서울'); moving = s.overlay().onSelectPlace(suggestion); }
+        else moving = locationButton(s).props.onPress();
+        await s.settle();
+        if (exit === 'blur') s.blur(); else s.dispose();
+        if (exit === 'blur') s.reenter(); // Retained tab refs must not revive the older request.
+        if (kind === 'place') s.calls.resolve[0].resolve(resolved);
+        else wait.resolve(kind === 'popup' ? [popupB] : { coords: popupB });
+        await moving; await s.settle(); assert.deepEqual(s.calls.camera, []);
+        if (exit === 'blur' && kind === 'popup') {
+          s.focus(); s.query('산리오'); s.overlay().onSelect(popupB); s.flush(); assert.equal(s.calls.camera.length, 1);
+        }
+      } finally { s.dispose(); }
+    });
+  }
+}
 
 test('viewport controls area; absent/invalid viewport falls back; bad coordinates rejected', () => {
   const region = camera.placeCameraRegion(resolved);
@@ -520,6 +772,22 @@ test('viewport with only one narrow axis expands only that axis; missing viewpor
     latitude: place.latitude, longitude: place.longitude,
     latitudeDelta: 0.020, longitudeDelta: 0.020,
   });
+});
+
+test('release flag blocks Places scheduling and resolution while popup search and Google Maps remain available', async () => {
+  const s = screen(undefined, { placesEnabled: false });
+  try {
+    s.focus(); s.query('서울'); s.debounce();
+    assert.equal(s.calls.autocomplete.length, 0);
+    assert.equal(s.calls.popup.length, 1);
+    s.calls.popup[0].resolve([popup]); await s.settle();
+    assert.equal(s.overlay().places.status, 'hidden');
+    assert.equal(s.overlay().search.results[0].id, popup.id);
+    await s.overlay().onSelectPlace(suggestion); await s.settle();
+    assert.equal(s.calls.resolve.length, 0);
+    assert.equal(s.find('MapView').props.provider, 'google');
+    assert.equal(s.calls.camera.length, 0);
+  } finally { s.dispose(); }
 });
 
 test('parallel 300ms search: Korean/Japanese input, no requests under two characters, no typing camera move', async () => {

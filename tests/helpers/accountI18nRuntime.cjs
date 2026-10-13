@@ -1,6 +1,6 @@
 const {runtime,nodes,texts,flush}=require('./i18nRuntime.cjs');
 const files=['src/app/(tabs)/profile/login.tsx','src/app/(tabs)/profile/signup.tsx','src/components/profile/AccountSettingsScreen.tsx','src/app/profile/settings.tsx','src/app/profile/withdrawal.tsx','src/app/profile/inquiries/write.tsx'];
-async function app(transform,realLayouts=false){
+async function app(transform,realLayouts=false,overrides={}){
  const calls=[],alerts=[],routes=[],listeners=new Set(),user={id:7,nickname:'原文',provider:'LOCAL'};
  const router={push:x=>routes.push(x),replace:x=>routes.push(x),dismissTo:x=>routes.push(x),back:()=>routes.push('back'),canGoBack:()=>true},navigation={dispatch:x=>routes.push(x)};
  const native=Object.fromEntries(['View','Text','TextInput','Pressable','ScrollView','FlatList','KeyboardAvoidingView','ActivityIndicator'].map(x=>[x,x]));
@@ -14,6 +14,8 @@ async function app(transform,realLayouts=false){
    logout:async()=>{calls.push(['logout']);throw new Error('offline');},withdrawAccount:async()=>{calls.push(['withdraw']);throw new Error('offline');},clearTokens:async()=>{throw new Error('unexpected session mutation');},login:async(...x)=>{calls.push(['login',...x]);throw new Error('server raw error');}},
   'src/hooks/useLoginAttempt.ts':{useLoginAttempt:()=>({begin:()=>({}),fail:async()=>true,active:()=>true,release(){},valid:()=>true})},
   'src/lib/googleAuth.ts':{getGoogleSignupToken:()=>null,clearGoogleSignup(){},GoogleAuthApiError:class extends Error{}},
+  'expo-apple-authentication':{},'expo-image':{Image:'ExpoImage'},'expo-font':{useFonts:()=>[true]},
+  'src/lib/appleAuth.ts':{isAppleAuthenticationAvailable:async()=>false,getAppleSignupToken:()=>null,clearAppleSignup(){}},
   'src/lib/emailVerification.ts':{EmailVerificationApiError:class extends Error{},checkEmailAvailability:async()=>true,sendEmailVerification:async email=>{calls.push(['send',email]);},verifyEmailCode:async(...x)=>{calls.push(['verify',...x]);return 'raw-proof';}},
   'src/lib/signup.ts':{SignupApiError:class extends Error{}},'src/lib/nicknameAvailability.ts':{checkNicknameAvailability:async()=>true},
   'src/lib/accountSettings.ts':{AccountSettingsError:class extends Error{},accountSettingsErrorMessage:()=> '저장하지 못했어요. 네트워크 연결을 확인하고 다시 시도해 주세요.',changeMyPassword:async(...x)=>{calls.push(['password',...x]);throw new Error('offline');}},
@@ -27,6 +29,7 @@ async function app(transform,realLayouts=false){
    getNotice:async(...x)=>{calls.push(['notice-detail',...x]);return{id:1,category:'UPDATE',title:'회원가입',content:'로그인',publishedAt:'2026-10-09'};}},
   'src/components/navigation/FloatingTabBar.tsx':{FLOATING_TAB_BAR_BOTTOM_GAP:12,FLOATING_TAB_BAR_HEIGHT:60},
   ...(!realLayouts?{'src/components/profile/InquiryLayout.tsx':{__esModule:true,default:'Layout',inquiryStyles:{}}}:{}),
+  ...overrides,
  },{transform});
  const {languageStore}=ui.load('src/locales/languageStore.ts');let tags=['ja-JP'];
  await languageStore.initialize({read:async()=> 'ko',write:async()=>{},getLanguageTags:()=>tags});

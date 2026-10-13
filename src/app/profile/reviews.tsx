@@ -10,7 +10,7 @@ import { usePopupNavigation } from '../../hooks/usePopupNavigation';
 import { useCommunityNow } from '../../hooks/useCommunityNow';
 import { clearTokens, getAuthUser, subscribeAuthSession } from '../../lib/auth';
 import { CommunityApiError } from '../../lib/community';
-import { subscribeCommunityPostChanges } from '../../lib/communityFeedRefresh';
+import { subscribeCommunityCommentCounts, subscribeCommunityLikes, subscribeCommunityPostChanges } from '../../lib/communityFeedRefresh';
 import { appendMyReviews, getMyReviews, type MyReview } from '../../lib/myReviews';
 import { subscribeReviews } from '../../lib/reviews';
 import { colors, spacing, typography } from '../../theme/tokens';
@@ -86,6 +86,15 @@ export default function MyReviews() {
     if (type !== 'REVIEW') return;
     setItems(current => current.flatMap(item => item.id !== id ? [item] : patch
       ? [{ ...item, ...patch, rating: patch.rating ?? item.rating }] : []));
+  }), []);
+  useEffect(() => subscribeCommunityLikes((id, state, type) => {
+    if (!state) { setItems(current => current.map(item => ({ ...item, liked: false }))); return; }
+    if (type !== 'REVIEW') return;
+    setItems(current => current.map(item => item.id === id ? { ...item, ...state } : item));
+  }), []);
+  useEffect(() => subscribeCommunityCommentCounts((id, count, type) => {
+    if (type !== 'REVIEW') return;
+    setItems(current => current.map(item => item.id === id ? { ...item, commentCount: count } : item));
   }), []);
   useEffect(() => subscribeReviews((_publicId, kind) => {
     if (kind !== 'created') return;

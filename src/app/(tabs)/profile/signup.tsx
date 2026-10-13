@@ -1,16 +1,18 @@
 import { useTranslation } from '../../../hooks/useTranslation';
 import { accountUiKey, accountUiText } from '../../../locales/accountUi';
 import { useEffect, useRef, useState } from 'react';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
+import { usePreventRemove } from 'expo-router/react-navigation';
 import { Check, ChevronLeft, ChevronRight } from 'lucide-react-native';
 import { Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { checkEmailAvailability, EmailVerificationApiError, sendEmailVerification, verifyEmailCode } from '../../../lib/emailVerification';
-import { authSessionGeneration, DEVICE_ID } from '../../../lib/auth';
+import { authSessionGeneration, getDeviceId } from '../../../lib/auth';
 import { useLoginAttempt } from '../../../hooks/useLoginAttempt';
 import { completedSignupHref, loginHref, parseLoginReturn } from '../../../lib/loginReturn';
 import { clearGoogleSignup, completeGoogleSignup, getGoogleSignupToken, GoogleAuthApiError } from '../../../lib/googleAuth';
+import { clearAppleSignup, completeAppleSignup, getAppleSignupToken, appleSignupErrorMessage } from '../../../lib/appleAuth';
 import { checkNicknameAvailability } from '../../../lib/nicknameAvailability';
 import { normalizeNickname, isValidNickname, isValidPassword } from '../../../lib/accountPolicy';
 import { registerUser, SignupApiError, type SignupRequest } from '../../../lib/signup';
@@ -21,7 +23,7 @@ const RESEND_COOLDOWN_SECONDS = 60;
 type SignupStep = 'emailPassword' | 'nickname' | 'terms';
 type VerificationStage = 'email' | 'code' | 'verified';
 type PendingOperation = 'send' | 'resend' | 'verify' | null;
-type ConsentKind = 'terms' | 'privacy' | 'marketing';
+type ConsentKind = 'terms' | 'privacy';
 type ConsentRowProps = {
   label: string;
   checked: boolean;
@@ -125,13 +127,16 @@ function googleJoinErrorMessage(error: unknown): string {
 export default function SignUpEmail() {
   const { t } = useTranslation();
   const router = useRouter();
-  const params = useLocalSearchParams<{ mode?: string; intent?: string; publicId?: string; resumeKey?: string }>();
+  const navigation = useNavigation();
+  const params = useLocalSearchParams<{ mode?: string; intent?: string; publicId?: string; resumeKey?: string; loginOrigin?: string }>();
   const { mode } = params;
   const target = parseLoginReturn(params);
   const scope = JSON.stringify(target);
   const authentication = useLoginAttempt(scope);
   const isGoogle = mode === 'google';
-  const [signupStep, setSignupStep] = useState<SignupStep>(isGoogle ? 'nickname' : 'emailPassword');
+  const isApple = mode === 'apple';
+  const isSocial = isGoogle || isApple;
+  const [signupStep, setSignupStep] = useState<SignupStep>(isSocial ? 'nickname' : 'emailPassword');
   const [email, setEmail] = useState('');
   const [verificationStage, setVerificationStage] = useState<VerificationStage>('email');
   const [signupProof, setSignupProof] = useState<string | null>(null);
@@ -149,7 +154,7 @@ export default function SignUpEmail() {
   const [confirmedNickname, setConfirmedNickname] = useState<string | null>(null);
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [privacyAccepted, setPrivacyAccepted] = useState(false);
-  const [marketingAccepted, setMarketingAccepted] = useState(false);
+  const [ageConfirmed, setAgeConfirmed] = useState(false);
   const [joining, setJoining] = useState(false);
   const [joinError, setJoinError] = useState('');
   const [pending, setPending] = useState<PendingOperation>(null);
@@ -157,6 +162,7 @@ export default function SignUpEmail() {
   const requestVersionRef = useRef(0);
   const nicknameRequestRef = useRef<AbortController | null>(null);
   const joiningRef = useRef(false);
+  const allowLeaveRef = useRef(false);
   const scrollViewRef = useRef<ScrollView>(null);
   const canReceiveCode = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
   const canVerify = /^\d{6}$/.test(code);
@@ -169,21 +175,28 @@ export default function SignUpEmail() {
   const normalizedNickname = normalizeNickname(nickname);
   const nicknameIsValid = isValidNickname(normalizedNickname);
   const canContinueNickname = signupStep === 'nickname' && nicknameIsValid;
-  const allAccepted = termsAccepted && privacyAccepted && marketingAccepted;
+  const allAccepted = termsAccepted && privacyAccepted;
   const signupDraft = {
     email: email.trim(),
     password,
     nickname: confirmedNickname,
     termsAccepted,
     privacyAccepted,
-    marketingAccepted,
   };
   const canJoin = signupStep === 'terms'
     && signupDraft.nickname !== null
     && signupDraft.termsAccepted
     && signupDraft.privacyAccepted
-    && (isGoogle || signupProof !== null);
+    && ageConfirmed
+    && (isSocial || signupProof !== null);
   const remainingTime = String(Math.floor(secondsLeft / 60)).padStart(2, '0') + ':' + String(secondsLeft % 60).padStart(2, '0');
+
+  // Native back/swipe follows the same step transitions as the header button.
+  // Completion and expiry may leave from any step using the original action.
+  usePreventRemove(joining || signupStep === 'terms' || (signupStep === 'nickname' && !isSocial), ({ data }) => {
+    if (allowLeaveRef.current) navigation.dispatch(data.action);
+    else handleBack();
+  });
 
   useEffect(() => {
     if (verificationStage !== 'code' || secondsLeft === 0) return;
@@ -203,14 +216,22 @@ export default function SignUpEmail() {
 
   useEffect(() => {
     if (isGoogle && !getGoogleSignupToken()) {
-      if (target) router.dismissTo(loginHref(target));
-      else router.replace('/profile/login');
+      allowLeaveRef.current = true;
+      router.dismissTo(loginHref(target, params.loginOrigin));
     }
-  }, [isGoogle, router, scope]);
+  }, [isGoogle, router, scope, params.loginOrigin]);
+
+  useEffect(() => {
+    if (isApple && !getAppleSignupToken()) {
+      allowLeaveRef.current = true;
+      router.dismissTo(loginHref(target, params.loginOrigin));
+    }
+  }, [isApple, router, scope, params.loginOrigin]);
 
   useEffect(() => () => {
     if (isGoogle) clearGoogleSignup();
-  }, [isGoogle]);
+    if (isApple) clearAppleSignup();
+  }, [isGoogle, isApple]);
 
   function cancelNicknameCheck() {
     nicknameRequestRef.current?.abort();
@@ -233,9 +254,11 @@ export default function SignUpEmail() {
       return;
     }
     if (signupStep === 'nickname') {
-      if (isGoogle) {
-        clearGoogleSignup();
-        router.dismissTo(target ? loginHref(target) : '/profile/login');
+      if (isSocial) {
+        if (isApple) clearAppleSignup();
+        else clearGoogleSignup();
+        if (router.canGoBack()) router.back();
+        else router.replace(loginHref(target, params.loginOrigin));
         return;
       }
       Keyboard.dismiss();
@@ -246,7 +269,7 @@ export default function SignUpEmail() {
       return;
     }
     if (router.canGoBack()) router.back();
-    else router.replace(target ? loginHref(target) : '/profile/login');
+    else router.replace(loginHref(target, params.loginOrigin));
   }
 
   function handlePasswordNext() {
@@ -288,37 +311,40 @@ export default function SignUpEmail() {
     const nextValue = !allAccepted;
     setTermsAccepted(nextValue);
     setPrivacyAccepted(nextValue);
-    setMarketingAccepted(nextValue);
   }
 
-  function handleConsentDetails(_kind: ConsentKind) {
-    // The relevant terms document screen will be connected here.
+  function handleConsentDetails(kind: ConsentKind) {
+    if (kind === 'terms') router.push('/profile/policies/terms');
+    else if (kind === 'privacy') router.push('/profile/policies/privacy');
   }
 
   async function handleJoin() {
     if (!canJoin || joiningRef.current || signupDraft.nickname === null) return;
-    const attempt = isGoogle ? authentication.begin() : null;
-    if (isGoogle && !attempt) return;
+    const attempt = isSocial ? authentication.begin() : null;
+    if (isSocial && !attempt) return;
     joiningRef.current = true;
     setJoining(true);
     setJoinError('');
     const consents = {
       termsOfService: signupDraft.termsAccepted,
       privacyPolicy: signupDraft.privacyAccepted,
-      marketing: signupDraft.marketingAccepted,
+      marketing: false,
     };
     try {
-      if (isGoogle) {
-        const signupToken = getGoogleSignupToken();
+      if (isSocial) {
+        const signupToken = isApple ? getAppleSignupToken() : getGoogleSignupToken();
         if (!signupToken) {
-          setJoinError(accountUiKey('Google 가입 시간이 만료됐어요. 다시 로그인해 주세요.'));
+          setJoinError(accountUiKey(isApple ? 'Apple 가입 시간이 만료됐어요. 다시 로그인해 주세요.'
+            : 'Google 가입 시간이 만료됐어요. 다시 로그인해 주세요.'));
           return;
         }
-        const tokens = await completeGoogleSignup({ signupToken, nickname: signupDraft.nickname, consents, deviceId: DEVICE_ID });
+        const request = { signupToken, nickname: signupDraft.nickname, ageConfirmed, consents, deviceId: await getDeviceId() };
+        const tokens = await (isApple ? completeAppleSignup(request) : completeGoogleSignup(request));
         if (!await authentication.authenticate(attempt!, tokens) || !authentication.complete(attempt!)) return;
       } else {
         if (!signupProof) return;
         const request: SignupRequest = {
+          ageConfirmed,
           email: signupDraft.email,
           password: signupDraft.password,
           nickname: signupDraft.nickname,
@@ -330,7 +356,7 @@ export default function SignUpEmail() {
       }
     } catch (error) {
       if (attempt && !await authentication.fail(attempt)) return;
-      if (!isGoogle && error instanceof SignupApiError && error.status === 403) {
+      if (!isSocial && error instanceof SignupApiError && error.status === 403) {
         setSignupProof(null);
         setVerificationStage('email');
         setCode('');
@@ -338,7 +364,8 @@ export default function SignUpEmail() {
         setSignupStep('emailPassword');
         return;
       }
-      setJoinError(accountUiKey(isGoogle ? googleJoinErrorMessage(error) : joinErrorMessage(error)));
+      setJoinError(accountUiKey(isApple ? appleSignupErrorMessage(error)
+        : isGoogle ? googleJoinErrorMessage(error) : joinErrorMessage(error)));
       return;
     } finally {
       if (!attempt || authentication.active(attempt)) {
@@ -354,12 +381,13 @@ export default function SignUpEmail() {
     setNickname('');
     setConfirmedNickname(null);
     Keyboard.dismiss();
-    if (isGoogle) {
-      clearGoogleSignup();
-      if (target) router.dismissTo(completedSignupHref(target, authSessionGeneration()));
-      else router.replace('/(tabs)');
+    allowLeaveRef.current = true;
+    if (isSocial) {
+      if (isApple) clearAppleSignup();
+      else clearGoogleSignup();
+      router.dismissTo(completedSignupHref(target, authSessionGeneration(), params.loginOrigin));
     } else {
-      router.dismissTo(target ? loginHref(target) : '/profile/login');
+      router.dismissTo(loginHref(target, params.loginOrigin));
     }
   }
 
@@ -636,12 +664,18 @@ export default function SignUpEmail() {
                     onToggle={() => setPrivacyAccepted((value) => !value)}
                     onOpenDetails={() => handleConsentDetails('privacy')}
                   />
-                  <ConsentRow
-                    label={accountUiText(t, "[선택] 마케팅 정보 수신 동의")}
-                    checked={marketingAccepted}
-                    onToggle={() => setMarketingAccepted((value) => !value)}
-                    onOpenDetails={() => handleConsentDetails('marketing')}
-                  />
+                  <Pressable
+                    style={styles.consentRow}
+                    accessibilityRole="checkbox"
+                    accessibilityLabel={accountUiText(t, "[필수] 만 14세 이상입니다.")}
+                    accessibilityState={{ checked: ageConfirmed }}
+                    onPress={() => setAgeConfirmed((value) => !value)}
+                  >
+                    <View style={styles.consentCheckboxTouch}>
+                      <ConsentMark checked={ageConfirmed} />
+                    </View>
+                    <Text style={styles.consentLabel}>{accountUiText(t, "[필수] 만 14세 이상입니다.")}</Text>
+                  </Pressable>
                 </View>
                 <Pressable
                   style={[styles.submit, styles.joinButton, (!canJoin || joining) && styles.disabled]}

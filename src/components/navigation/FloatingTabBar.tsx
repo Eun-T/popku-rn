@@ -8,8 +8,9 @@ import { usePathname } from "expo-router";
 import type { BottomTabBarProps } from "expo-router/tabs";
 import {
   LayoutGrid,
+  MapPin,
   MessageCircle,
-  UserRound,
+  User,
   type LucideIcon,
 } from "lucide-react-native";
 import {
@@ -30,30 +31,26 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Svg, { Circle, Path } from "react-native-svg";
 
 import { radius, spacing } from "../../theme/tokens";
-import {
-  HouseFilledIcon,
-  MapPinnedFilledIcon,
-  UserRoundFilledIcon,
-} from "../icons/FilledTabIcons";
+import { HouseFilledIcon } from "../icons/FilledTabIcons";
 import { HouseIcon } from "../icons/HouseIcon";
-import { MapPinnedIcon } from "../icons/MapPinnedIcon";
 
 const icons: Record<string, LucideIcon> = {
   index: HouseIcon,
   places: LayoutGrid,
-  map: MapPinnedIcon,
+  map: MapPin,
   community: MessageCircle,
-  profile: UserRound,
+  profile: User,
 };
 
 const filledIcons: Record<string, LucideIcon> = {
   index: HouseFilledIcon,
   places: LayoutGrid,
-  map: MapPinnedFilledIcon,
+  map: MapPin,
   community: MessageCircle,
-  profile: UserRoundFilledIcon,
+  profile: User,
 };
 
 export const FLOATING_TAB_BAR_HEIGHT = 60;
@@ -102,7 +99,24 @@ function TabIcon({
     <Animated.View
       style={[styles.iconBackground, { left: offsetX, transform: [{ scale }] }]}
     >
-      <Icon size={24} color="#000000" fill={fill} />
+      {isSelected && Icon === MapPin ? (
+        <Svg width={24} height={24} viewBox="0 0 24 24">
+          <Path
+            d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0Z M15 10a3 3 0 1 0-6 0a3 3 0 1 0 6 0Z"
+            fill={fill}
+            stroke="none"
+            fillRule="evenodd"
+          />
+        </Svg>
+      ) : Icon === User ? (
+        <Svg width={24} height={24} viewBox="0 0 24 24" fill={fill}
+          stroke="#000000" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+          <Path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2Z" />
+          <Circle cx={12} cy={7} r={4} />
+        </Svg>
+      ) : (
+        <Icon size={24} color="#000000" fill={fill} />
+      )}
     </Animated.View>
   );
 }
@@ -409,7 +423,7 @@ export default function FloatingTabBar({
               : icons[route.name];
             const fill =
               isSelected &&
-              (route.name === "places" || route.name === "community")
+              (route.name === "places" || route.name === "community" || route.name === "map" || route.name === "profile")
                 ? "#000000"
                 : "none";
             const label = descriptors[route.key].options.title ?? route.name;

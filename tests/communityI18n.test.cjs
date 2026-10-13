@@ -138,3 +138,20 @@ test('Compiler cache assertions remain strict for feed/card/author/hook; legacy 
  for(const file of [files[0],files[3],files[4],files[6],files[8]])assert.ok(!bailouts.has(file),file);
  for(const [file,events]of bailouts)for(const e of events.filter(e=>e.kind==='CompileError'))assert.match(e.detail.reason,/TryStatement with a finalizer|Cannot access refs during render|UpdateExpression to variables captured within lambdas/,file);
 });
+
+
+for(const editing of [false,true]) test('prepared community size error translates while mounted and preserves draft/order in ' + (editing?'edit':'create'), async()=>{
+ const s=await app({editing,transform}),Screen=s.load(files[2]).default,root=s.mount(()=>Screen());await s.settle();
+ input(root).props.onChangeText('size error draft 原文');
+ button(s,root,'community.attachImage').props.onPress();await s.settle();
+ const SelectionError=s.load('src/lib/communityImages.ts').ImageSelectionError;
+ s.failWrite(new SelectionError('size'));
+ button(s,root,editing?'community.edit.save':'community.register').props.onPress();await s.settle();
+ const order=images(root),requests=s.calls.slice();
+ for(const lang of ['ko','ja','ko','system']){await s.language(lang);
+  assert.ok(texts(root.tree).includes(s.t('community.imageError.size')));
+  assert.equal(input(root).props.value,'size error draft 原文');assert.deepEqual(images(root),order);assert.deepEqual(s.calls,requests);
+ }
+ for(const tag of ['ko-KR','ja-JP']){await s.systemLanguage(tag);assert.ok(texts(root.tree).includes(s.t('community.imageError.size')));assert.deepEqual(s.calls,requests);}
+ assert.deepEqual(s.routes,[]);s.dispose();
+});

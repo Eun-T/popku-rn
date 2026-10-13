@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const { savedToken } = require('./helpers/authStorage.cjs');
 const { readFileSync } = require('node:fs');
 const { test } = require('node:test');
 const ts = require('typescript');
@@ -91,6 +92,7 @@ function screen(env, file = 'withdrawal') {
     'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' },
     'expo-router': { useRouter: () => router, useFocusEffect() {} },
     'expo-blur': { BlurTargetView: 'BlurTargetView', BlurView: 'BlurView' },
+    'expo-clipboard': { setStringAsync: async () => true },
     'lucide-react-native': { ChevronLeft: 'ChevronLeft', ChevronRight: 'ChevronRight', Settings: 'Settings', Heart: 'Heart', Star: 'Star', MessageSquare: 'MessageSquare' },
     'react-native': { ActivityIndicator: 'ActivityIndicator', Pressable: 'Pressable', ScrollView: 'ScrollView',
       Text: 'Text', View: 'View', StyleSheet: { create: styles => styles }, Alert: { alert: (...args) => alerts.push(args) } },
@@ -152,7 +154,7 @@ test('confirmed 204 removes both tokens, resets user/session, and navigates only
   assert.equal(env.requests.length, 1); assert.equal(view.navigation.length, 0);
   assert.equal(view.button('로그인 정보 정리').disabled, true);
   gate.resolve(); await flush();
-  assert.equal(env.storage.size, 0); assert.deepEqual(env.deleted.sort(), ['accessToken', 'refreshToken']);
+  assert.equal(env.storage.size, 0); assert.deepEqual(env.deleted.sort(), ['accessToken', 'refreshToken', 'session.v1']);
   assert.equal(env.auth.getAuthUser(), null); assert.ok(userEvents > 0); assert.ok(sessionEvents > 0);
   assert.ok(env.cacheClears.includes('favorites')); assert.ok(env.cacheClears.includes('likes'));
   assert.deepEqual(view.navigation, [['dismissTo', '/profile']]);
@@ -214,7 +216,7 @@ test('late withdrawal success cannot erase a different, newer login', async () =
   await env.auth.saveTokens({ accessToken: 'access-B', refreshToken: 'refresh-B' });
   env.auth.setAuthUser({ email: 'b@example.com', nickname: '새 사용자' });
   reply.resolve(noContent); await flush();
-  assert.equal(env.storage.get('accessToken'), 'access-B'); assert.equal(env.storage.get('refreshToken'), 'refresh-B');
+  assert.equal(savedToken(env.storage, 'accessToken'), 'access-B'); assert.equal(savedToken(env.storage, 'refreshToken'), 'refresh-B');
   assert.equal(env.auth.getAuthUser().email, 'b@example.com');
 });
 

@@ -6,6 +6,8 @@ import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { clearTokens } from '../../lib/auth';
+import { throwIfRequestAborted } from '../../lib/requestTimeout';
+import { assertSubmissionOwner, captureSubmissionOwner, isSubmissionAuthCleared, isSubmissionOwnerCurrent, watchSubmissionSession, type SubmissionOwner } from '../../lib/submissionSession';
 import { draftLoginHref } from '../../lib/loginReturn';
 import { CommunityApiError } from '../../lib/community';
 import { ImageSelectionError, MAX_POST_IMAGES, selectPostImages, type PostImage } from '../../lib/communityImages';
@@ -32,6 +34,7 @@ export default function ReviewWriteScreen() {
   const attempt = useRef<ReviewAttempt | null>(null);
   const editAttempt = useRef<ReviewEditAttempt | null>(null);
   const busy = useRef(false); const selectingRef = useRef(false); const allowLeave = useRef(false); const mounted = useRef(true);
+  const submissionRef = useRef<AbortController | null>(null);
   const originalDraft = useRef<{ rating: number; content: string; imageIds: number[] } | null>(null);
   const confirmingLeave = useRef(false);
   const validPopup = typeof publicId === 'string' && publicId.length > 0;
@@ -46,7 +49,16 @@ export default function ReviewWriteScreen() {
   const authenticationRequired = attempt.current?.authRequired || editAttempt.current?.authRequired;
   const removalLocked = () => busy.current || selectingRef.current
     || !!(attempt.current && !attempt.current.authRequired) || !!(editAttempt.current && !editAttempt.current.authRequired);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      const submission = submissionRef.current;
+      submissionRef.current = null;
+      busy.current = false;
+      submission?.abort();
+    };
+  }, []);
   useEffect(() => {
     const controller = new AbortController(); setTitle(null); setLoadError(false);
     if (editing) {
@@ -95,19 +107,37 @@ export default function ReviewWriteScreen() {
     finally { selectingRef.current = false; if (mounted.current) setSelecting(false); }
   }
   async function register() {
-    if (!validPopup || !canRegister || busy.current || selectingRef.current) return;
-    busy.current = true; allowLeave.current = false; setSubmitting(true); setError(null);
+    if (!mounted.current || !validPopup || !canRegister || busy.current || selectingRef.current) return;
+    busy.current = true;
+    const submission = new AbortController();
+    submissionRef.current = submission;
+    let owner: SubmissionOwner | undefined;
+    let stopWatching = () => {};
+    const isCurrent = () => mounted.current && submissionRef.current === submission && (!owner || isSubmissionOwnerCurrent(owner));
+    const beforeSend = (generation?: number) => { if (owner) assertSubmissionOwner(owner, generation); throwIfRequestAborted(submission.signal); };
+    allowLeave.current = false; setSubmitting(true); setError(null);
     try {
+      owner = captureSubmissionOwner();
+      stopWatching = watchSubmissionSession(owner, submission, () => {
+        if (!mounted.current || submissionRef.current !== submission) return;
+        submissionRef.current = null; busy.current = false;
+        if (attempt.current) attempt.current.authRequired = true;
+        if (editAttempt.current) editAttempt.current.authRequired = true;
+        setSubmitting(false); setError(editing ? 'review.write.editFailed' : 'review.write.createFailed');
+        setPending(attempt.current !== null || editAttempt.current !== null);
+      });
       const newImages = images.filter((image): image is PostImage & { kind: 'new' } => image.kind === 'new');
       if (editing) {
         const retained = images.flatMap(image => image.kind === 'existing' ? [image.id] : []);
         const review = newImages.length || editAttempt.current
-          ? await updateReviewWithImages(reviewId, publicId!, rating, content, retained, newImages, editAttempt)
-          : await updateReview(reviewId, rating, content, retained);
-        reviewUpdated(review);
-      } else if (images.length || attempt.current) await publishReviewWithImages(publicId!, rating, content, newImages, attempt);
-      else await createReview(publicId!, rating, content);
-      if (!editing) reviewsCreated(publicId!); allowLeave.current = true;
+          ? await updateReviewWithImages(reviewId, publicId!, rating, content, retained, newImages, editAttempt, submission.signal, owner)
+          : await updateReview(reviewId, rating, content, retained, undefined, beforeSend);
+        if (isSubmissionOwnerCurrent(owner)) reviewUpdated(review);
+      } else if (images.length || attempt.current) await publishReviewWithImages(publicId!, rating, content, newImages, attempt, submission.signal, owner);
+      else await createReview(publicId!, rating, content, undefined, beforeSend);
+      if (!editing && isSubmissionOwnerCurrent(owner)) reviewsCreated(publicId!);
+      if (!isCurrent()) return;
+      allowLeave.current = true;
       confirmingLeave.current = false;
       if (mounted.current) {
         if (router.canGoBack()) router.back();
@@ -115,15 +145,24 @@ export default function ReviewWriteScreen() {
         else router.replace({ pathname: '/places/[id]', params: { id: publicId!, tab: 'reviews' } });
       }
     } catch (failure) {
-      if (!mounted.current) return;
+      if (!isCurrent()) return;
       setPending(attempt.current !== null || editAttempt.current !== null);
-      setError(!editing && failure instanceof CommunityApiError && failure.status === 409
+      setError(failure instanceof ImageSelectionError && failure.reason === 'size' ? 'community.imageError.size'
+        : !editing && failure instanceof CommunityApiError && failure.status === 409
         ? 'review.write.duplicate' : editing ? 'review.write.editFailed' : 'review.write.createFailed');
       if (failure instanceof CommunityApiError && failure.status === 401) {
         const invalidated = await clearTokens(failure.authGeneration).catch(() => true);
-        if (invalidated !== false && mounted.current) router.push(draftLoginHref(navigation));
+        if (invalidated !== false && mounted.current && owner && isSubmissionAuthCleared(owner)
+          && (!submissionRef.current || submissionRef.current === submission)) router.push(draftLoginHref(navigation));
       }
-    } finally { busy.current = false; if (mounted.current) setSubmitting(false); }
+    } finally {
+      stopWatching();
+      if (submissionRef.current === submission) {
+        submissionRef.current = null;
+        busy.current = false;
+        if (mounted.current) setSubmitting(false);
+      }
+    }
   }
   return <SafeAreaView edges={['top', 'bottom']} style={styles.container}>
     <KeyboardAvoidingView style={styles.layout} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>

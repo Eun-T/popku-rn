@@ -1,5 +1,6 @@
 import { getRegionDisplayName, getTagDisplayName } from '../../locales/filterLabels';
 import { useTranslation } from '../../hooks/useTranslation';
+import type { PlaceDatePeriod } from '../../lib/placeDatePeriod';
 import { ChevronDown, RotateCcw, X } from 'lucide-react-native';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
@@ -11,7 +12,6 @@ import {
   type PlaceFilterState,
 } from '../../constants/placeFilters';
 import type { AppliedPopupFilters, PopupRegionOption, PopupTagOption } from '../../lib/popups';
-import { t } from '../../locales';
 import { colors, radius, spacing, typography } from '../../theme/tokens';
 
 type FilterGroup = 'countries' | 'quickFeatures' | 'regionIds' | 'tagIds' | 'status' | 'period' | 'openingWeek';
@@ -26,6 +26,7 @@ type AppliedFilterBarProps = {
   filters: PlaceFilterState;
   detailFilters: AppliedPopupFilters;
   period: VisitPeriod;
+  datePeriod?: PlaceDatePeriod;
   regions: readonly PopupRegionOption[];
   tags: readonly PopupTagOption[];
   onRemove: (group: FilterGroup, id: string | number) => void;
@@ -33,9 +34,11 @@ type AppliedFilterBarProps = {
   onOpenDetails: () => void;
 };
 
-export default function AppliedFilterBar({ filters, detailFilters, period, regions, tags, onRemove, onReset, onOpenDetails }: AppliedFilterBarProps) {
-  useTranslation();
+export default function AppliedFilterBar({ filters, detailFilters, period, datePeriod, regions, tags, onRemove, onReset, onOpenDetails }: AppliedFilterBarProps) {
+  const { t } = useTranslation();
   const chips: AppliedFilter[] = [
+    ...(datePeriod && datePeriod.mode !== 'all' ? [{ group: 'period' as const, id: 'datePeriod',
+      label: `${datePeriod.startDate?.replaceAll('-', '.')} ~ ${datePeriod.endDate?.replaceAll('-', '.')}` }] : []),
     ...(detailFilters.openingFrom && detailFilters.openingTo
       ? [{ group: 'openingWeek' as const, id: 'openingWeek', label: t('place.all.openingWeek') }] : []),
     ...quickFilters

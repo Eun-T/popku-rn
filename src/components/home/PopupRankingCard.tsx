@@ -1,5 +1,8 @@
 import { Heart } from 'lucide-react-native';
-import { Image, Pressable, StyleSheet, Text, View, type ImageSourcePropType } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, type ImageSource } from 'expo-image';
+import { useHomeCoverImage, type RecoverHomeCover } from '../../hooks/useHomeCoverImage';
+import type { PublicPopup } from '../../lib/popups';
 
 import { colors, radius, spacing, typography } from '../../theme/tokens';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -8,7 +11,10 @@ import { useTheme } from '../../theme/useTheme';
 
 type PopupRankingCardProps = {
   rank: number;
-  image: ImageSourcePropType;
+  image: ImageSource | number;
+  popup?: PublicPopup;
+  coverScope?: string;
+  onRecoverCover?: RecoverHomeCover;
   title: string;
   period: string;
   tags: readonly string[];
@@ -21,6 +27,9 @@ type PopupRankingCardProps = {
 export default function PopupRankingCard({
   rank,
   image,
+  popup,
+  coverScope,
+  onRecoverCover,
   title,
   period,
   tags,
@@ -31,6 +40,7 @@ export default function PopupRankingCard({
 }: PopupRankingCardProps) {
   const { t } = useTranslation();
   const { resolvedTheme, themeColors } = useTheme();
+  const cover = useHomeCoverImage(image, popup, onRecoverCover, coverScope);
   const styles = useMemo(() => ({ ...baseStyles,
     card: { ...baseStyles.card, backgroundColor: themeColors.cardBackground, borderBottomColor: themeColors.border },
     imageFrame: resolvedTheme === 'dark' ? { ...baseStyles.imageFrame, backgroundColor: themeColors.surface } : baseStyles.imageFrame,
@@ -44,10 +54,16 @@ export default function PopupRankingCard({
     <View style={styles.card}>
       <Pressable accessibilityRole="button" accessibilityLabel={t('place.explore.viewDetails', { title })} onPress={onPress} style={styles.detailButton}>
         <View style={styles.imageFrame}>
-          <Image source={image} style={styles.image} resizeMode="cover" />
+          <Image key={cover.imageKey} source={cover.source} style={styles.image} contentFit="cover"
+            cachePolicy="memory-disk" onError={cover.onError} onLoad={cover.onLoad} />
           <View style={styles.rankBadge}>
             <Text style={styles.rankText}>{rank}</Text>
           </View>
+          {cover.canRetry && <Pressable testID="home-cover-retry" accessibilityRole="button"
+            accessibilityLabel={t('home.card.retryImage', { title })} accessibilityState={{ disabled: cover.busy }}
+            disabled={cover.busy} onPress={event => { event.stopPropagation(); cover.retry(); }} style={baseStyles.imageRetry}>
+            <Text style={baseStyles.imageRetryText}>{t('home.card.retry')}</Text>
+          </Pressable>}
         </View>
         <View style={styles.content}>
           <Text style={styles.title} numberOfLines={1} ellipsizeMode="tail">
@@ -84,6 +100,12 @@ export default function PopupRankingCard({
 }
 
 const baseStyles = StyleSheet.create({
+  imageRetry: {
+    position: 'absolute', left: spacing.space8, top: spacing.space8,
+    paddingHorizontal: spacing.space8, paddingVertical: spacing.space6,
+    borderRadius: radius.radius4, backgroundColor: colors.background,
+  },
+  imageRetryText: { ...typography.caption, color: colors.text },
   card: {
     flexDirection: 'row',
     alignItems: 'center',

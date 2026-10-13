@@ -50,5 +50,6 @@ test('empty/error/guest profile states translate without changing request counts
   for(const lang of ['ja','ko']){await s.language(lang);assert.ok(texts(root.tree).includes(s.t(key)));assert.ok(!texts(root.tree).includes(s.t(index===1?'profile.posts.empty':index===2?'profile.reviews.empty':'profile.favorites.empty')));assert.deepEqual(s.calls,calls);}
   button(s,root,'profile.retry').props.onPress();await s.settle();assert.equal(s.calls.filter(c=>c[0]===['','posts','reviews','favorites'][index]).length,2);s.dispose();}
  const s=await app({guest:true,fail:true}),Screen=s.load(files[0]).default,root=s.mount(()=>Screen());await s.settle();
- for(const lang of ['ja','ko']){await s.language(lang);assert.ok(texts(root.tree).includes(s.t('profile.loginTitle')));assert.ok(texts(root.tree).includes(s.t('profile.userLoadFailed')));}button(s,root,'profile.login').props.onPress();assert.deepEqual(s.routes,[{pathname:'/profile/login',params:{loginOrigin:'profile'}}]);s.dispose();
+ for(const lang of ['ja','ko']){await s.language(lang);assert.ok(!texts(root.tree).includes(s.t('profile.loginTitle')));assert.ok(texts(root.tree).includes(s.t('profile.userLoadFailed')));assert.ok(texts(root.tree).includes(s.t('profile.retry')));}
+ button(s,root,'profile.retry').props.onPress();await s.settle();assert.deepEqual(s.calls,[['restore']]);assert.deepEqual(s.routes,[]);s.dispose();
 });

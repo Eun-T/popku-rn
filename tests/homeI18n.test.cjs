@@ -22,6 +22,7 @@ function runtime() {
   const owners = [];
   const same = (a, b) => a && b && a.length === b.length && a.every((value, i) => Object.is(value, b[i]));
   const react = {
+    useRef(value) { return current.slots[cursor++] ??= { current: value }; },
     useState(initial) {
       const owner = current, slot = cursor++;
       owner.slots[slot] ??= { value: typeof initial === 'function' ? initial() : initial };
@@ -73,14 +74,14 @@ function loader(overrides) {
     const source = ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: {
       module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true,
     } }).outputText;
-    new Function('require', 'module', 'exports', 'Date', source)(name => {
+    new Function('require', 'module', 'exports', 'Date', 'setTimeout', 'clearTimeout', source)(name => {
       if (name in overrides) return overrides[name];
       assert.ok(name.startsWith('.'), `Missing dependency: ${name}`);
       let relative = path.posix.normalize(path.posix.join(path.posix.dirname(file), name));
       if (!path.posix.extname(relative)) relative += fs.existsSync(`${relative}.ts`) ? '.ts'
         : fs.existsSync(`${relative}.tsx`) ? '.tsx' : '/index.ts';
       return load(relative);
-    }, module, module.exports, Clock);
+    }, module, module.exports, Clock, () => 1, () => {});
     cache.set(file, module.exports); return module.exports;
   }
   return load;
@@ -100,6 +101,7 @@ async function home({ popups = Array.from({ length: 8 }, (_, i) => popup(i)), fa
     return popups;
   };
   const load = loader({ react: ui.react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': native,
+    'expo-image': { Image: 'ExpoImage' },
     'lucide-react-native': { Store: 'Store', Heart: 'Heart' },
     'expo-router': { useRouter: () => ({ push: value => routes.push(value) }) },
     'src/lib/popups.ts': { currentWeekRange: () => ({ openingFrom: '2026-10-05', openingTo: '2026-10-11' }),
@@ -145,7 +147,7 @@ test('home region/category labels update by verified IDs without changing origin
 });
 const lookup = (dictionary, key) => key.split('.').reduce((node, part) => node?.[part], dictionary);
 
-test('all 18 used home keys exist in ko/ja with matching placeholders and no new duplicate text keys', () => {
+test('all 20 used home keys exist in ko/ja with matching placeholders and no new duplicate text keys', () => {
   const keys = new Set();
   for (const file of files) {
     const ast = ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -155,8 +157,8 @@ test('all 18 used home keys exist in ko/ja with matching placeholders and no new
     }
     visit(ast);
   }
-  assert.equal(keys.size, 18);
-  assert.equal([...keys].filter(key => key.startsWith('home.')).length, 14);
+  assert.equal(keys.size, 20);
+  assert.equal([...keys].filter(key => key.startsWith('home.')).length, 16);
   const ko = JSON.parse(fs.readFileSync('src/locales/ko.json', 'utf8'));
   const ja = JSON.parse(fs.readFileSync('src/locales/ja.json', 'utf8'));
   const placeholders = message => [...message.matchAll(/\{(\w+)\}/g)].map(match => match[1]).sort();
@@ -164,7 +166,7 @@ test('all 18 used home keys exist in ko/ja with matching placeholders and no new
     for (const resource of [ko, ja]) assert.ok(typeof lookup(resource, key) === 'string' && lookup(resource, key).trim(), key);
     assert.deepEqual(placeholders(lookup(ko, key)), placeholders(lookup(ja, key)), key);
   }
-  assert.equal(new Set([...keys].map(key => lookup(ko, key))).size, 18);
+  assert.equal(new Set([...keys].map(key => lookup(ko, key))).size, 20);
 });
 
 test('Korean UI preserves original text and the expanded ranking/country state survives live ko/ja/system switching', async () => {
@@ -239,7 +241,9 @@ test('both retained cards translate accessibility labels while preserving server
     const presses = () => nodes(card.tree).filter(node => node.type === 'Pressable');
     assert.equal(presses()[0].props.accessibilityLabel, `${props.title} 상세 보기`);
     assert.equal(presses()[1].props.accessibilityLabel, `${props.title} 찜 취소`);
-    const imagesBefore = nodes(card.tree).filter(node => node.type === 'Image').map(node => node.props);
+    const imageProps = () => nodes(card.tree).filter(node => node.type === 'ExpoImage')
+      .map(({ props: { source, style, contentFit, cachePolicy } }) => ({ source, style, contentFit, cachePolicy }));
+    const imagesBefore = imageProps();
     const stylesBefore = nodes(card.tree).map(node => node.props.style);
     const renderBefore = card.count;
     await env.languageStore.setLanguagePreference('ja');
@@ -247,7 +251,7 @@ test('both retained cards translate accessibility labels while preserving server
     assert.equal(presses()[0].props.accessibilityLabel, `${props.title}の詳細を見る`);
     assert.equal(presses()[1].props.accessibilityLabel, `${props.title}のお気に入りを解除`);
     assert.deepEqual(presses()[1].props.accessibilityState, { selected: true, disabled: false });
-    assert.deepEqual(nodes(card.tree).filter(node => node.type === 'Image').map(node => node.props), imagesBefore);
+    assert.deepEqual(imageProps(), imagesBefore);
     assert.deepEqual(nodes(card.tree).map(node => node.props.style), stylesBefore);
     assert.ok(text(card.tree).includes(props.title));
     assert.ok(text(card.tree).flat().includes('서버 태그'));

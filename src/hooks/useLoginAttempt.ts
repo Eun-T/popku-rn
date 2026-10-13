@@ -1,8 +1,8 @@
 import { useCallback, useRef } from 'react';
 import { useFocusEffect } from 'expo-router';
-import { authSessionGeneration, clearTokens, getCurrentUser, saveTokens, setAuthUser } from '../lib/auth';
+import { authSessionGeneration, authSessionRevision, clearTokens, getCurrentUser, saveTokens, setAuthUser } from '../lib/auth';
 
-type Attempt = { generation: number; saving: boolean; completed: boolean };
+type Attempt = { generation: number; revision: number; saving: boolean; completed: boolean };
 type Tokens = Parameters<typeof saveTokens>[0];
 
 // Guard the existing token/profile sequence with screen lifetime and the same
@@ -20,11 +20,12 @@ export function useLoginAttempt(scope: string) {
     };
   }, [scope]));
   const active = (attempt: Attempt) => focused.current && current.current === attempt;
-  const valid = (attempt: Attempt) => active(attempt) && attempt.generation === authSessionGeneration();
+  const valid = (attempt: Attempt) => active(attempt) && attempt.generation === authSessionGeneration()
+    && attempt.revision === authSessionRevision();
   return {
     begin(): Attempt | null {
       if (!focused.current || current.current) return null;
-      const attempt = { generation: authSessionGeneration(), saving: false, completed: false };
+      const attempt = { generation: authSessionGeneration(), revision: authSessionRevision(), saving: false, completed: false };
       current.current = attempt;
       return attempt;
     },
@@ -34,6 +35,7 @@ export function useLoginAttempt(scope: string) {
       if (!valid(attempt)) return false;
       const saving = saveTokens(tokens);
       attempt.generation = authSessionGeneration();
+      attempt.revision = authSessionRevision();
       attempt.saving = true;
       await saving;
       if (!valid(attempt)) return false;

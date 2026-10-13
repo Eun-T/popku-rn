@@ -11,6 +11,7 @@ const list=tree=>nodes(tree).find(n=>n.type==='FlatList');
 const popup=Object.freeze({placeId:1,publicId:'original-id',name:'서버 공식 팝업명',countryCode:'KR',regionId:1,regionName:'성수',
   tags:Object.freeze([{id:5,name:'뷰티'}]),startDate:'2026-10-08',endDate:'2026-10-31',coverImageUrl:null,coverImageCacheKey:null});
 const unknown=Object.freeze({...popup,placeId:2,publicId:'unknown-id',regionId:null,regionName:'서버 장소 원문'});
+const japaneseTitle='プリングルズ グッズポップアップストア';
 
 async function app() {
   const calls=[],opened=[],timers=new Map(); let timerId=0;
@@ -33,20 +34,21 @@ async function app() {
     'src/constants/api.ts':{API_BASE_URL:'https://test'},
     setTimeout:(fn,delay)=>{timers.set(++timerId,{fn,delay});return timerId;},clearTimeout:id=>timers.delete(id),
     fetch:async url=> {
-      calls.push(url); const pathname=new URL(url).pathname;
-      const data=pathname==='/api/main-banners' ? {popups:[popup,unknown]}
+      calls.push(url); const request=new URL(url),pathname=request.pathname;
+      const localizedPopup={...popup,name:request.searchParams.get('languageCode')==='ja'?japaneseTitle:popup.name};
+      const data=pathname==='/api/main-banners' ? {popups:[localizedPopup,unknown]}
         :pathname==='/api/regions' ? [{id:1,name:'성수'},{id:4,name:'홍대·신촌'}]
         :pathname==='/api/tags' ? [{id:1,name:'캐릭터/IP'},{id:5,name:'뷰티'}]
-        :{popups:Array.from({length:8},(_,i)=>({...popup,publicId:`popup-${i}`})),nextCursor:null};
+        :{popups:Array.from({length:8},(_,i)=>({...localizedPopup,publicId:`popup-${i}`})),nextCursor:null};
       return {ok:true,json:async()=>data};
     },
   },{transform});
   const {languageStore}=ui.load('src/locales/languageStore.ts');
   await languageStore.initialize({read:async()=> 'ko',write:async()=>{},getLanguageTags:()=>['ja-JP']});
-  return {...ui,languageStore,calls,opened,timers,async settle(){await flush();await flush();},async language(value){await languageStore.setLanguagePreference(value);await flush();}};
+  return {...ui,languageStore,calls,opened,timers,async settle(){await flush();await flush();ui.renderAll();},async language(value){await languageStore.setLanguagePreference(value);await flush();await flush();ui.renderAll();}};
 }
 
-test('compiler-cached mounted trending/new headers update ko/ja/system while expanded/country/carousel/API state stays',async()=>{
+test('compiler-cached trending/new content updates ko/ja/system while expanded/country/carousel state stays',async()=>{
   const s=await app(),Trending=s.load('src/components/home/HomeTrendingSection.tsx').default,
     New=s.load('src/components/home/HomeNewPopupSection.tsx').default,props={onPressPopup:id=>s.opened.push(id)};
   const trending=s.mount(()=>Trending(props)),fresh=s.mount(()=>New(props));await s.settle();
@@ -63,28 +65,32 @@ test('compiler-cached mounted trending/new headers update ko/ja/system while exp
     }
     assert.equal(nodes(trending.tree).filter(n=>n.type?.name==='PopupRankingCard').length,8);
     assert.equal(child(trending.tree,'MoreButton').props.label,locale.translate(language,'place.filters.collapse'));
-    assert.equal(carousel().key,key);assert.deepEqual(carousel().props.style,style);assert.deepEqual(s.calls,requests);
-    assert.equal(child(trending.tree,'PopupRankingCard').props.title,popup.name);
+    assert.equal(carousel().key,key);assert.deepEqual(carousel().props.style,style);
+    assert.deepEqual(s.calls.slice(requests.length).map(u=>[new URL(u).searchParams.get('countryCode'),new URL(u).searchParams.get('languageCode')]),[['JP','ja'],['JP','ja']]);
+    assert.equal(child(trending.tree,'PopupRankingCard').props.title,language==='ja'?japaneseTitle:popup.name);
+    assert.equal(child(fresh.tree,'NewPopupCard').props.title,language==='ja'?japaneseTitle:popup.name);
   }
   s.dispose();
 });
 
-test('compiled banner page keeps stable API data/page/ref/key but resolves numeric region for every live language',async()=>{
+test('compiled banner renders server-translated titles and fallback with unchanged image metadata/order/key',async()=>{
   const s=await app(),Banner=s.load('src/components/home/HomeBanner.tsx').default,props={onPressPopup:id=>s.opened.push(id)};
   const root=s.mount(()=>Banner(props));await s.settle();
-  const pages=s.mount(()=>root.tree.type(root.tree.props)),pageKey=root.tree.key;
+  const pages=s.mount(()=>typeof root.tree?.type==='function'?root.tree.type(root.tree.props):null),pageKey=root.tree.key;
   const scroll=()=>nodes(pages.tree).find(n=>n.type==='ScrollView');
   scroll().props.onMomentumScrollEnd({nativeEvent:{contentOffset:{x:390}}});
   const data=root.tree.props.popups,requests=s.calls.slice(),snapshot=JSON.stringify(data);
   for(const [preference,region]of [['ja','聖水'],['ko','성수'],['system','聖水']]) {
     await s.language(preference);
-    assert.ok(texts(pages.tree).includes(region));assert.ok(texts(pages.tree).includes(unknown.regionName));assert.ok(texts(pages.tree).includes(popup.name));
-    assert.equal(root.tree.key,pageKey);assert.equal(root.tree.props.popups,data);assert.deepEqual(s.calls,requests);
+    assert.ok(texts(pages.tree).includes(region));assert.ok(texts(pages.tree).includes(unknown.regionName));assert.ok(texts(pages.tree).includes(preference==='ko'?popup.name:japaneseTitle));
+    assert.equal(root.tree.key,pageKey);
+    assert.deepEqual(root.tree.props.popups.map(({name,...metadata})=>metadata),data.map(({name,...metadata})=>metadata));
+    assert.deepEqual(s.calls.slice(requests.length).map(u=>new URL(u).searchParams.get('languageCode')),['ja']);
     assert.deepEqual(nodes(pages.tree).filter(n=>n.props?.accessibilityState).map(n=>n.props.accessibilityState.selected),[false,true]);
     assert.equal(JSON.stringify(data),snapshot);
   }
   nodes(pages.tree).find(n=>n.type==='Pressable').props.onPress();assert.deepEqual(s.opened,[popup.publicId]);
-  assert.ok(s.calls.filter(u=>u.includes('/main-banners')).every(u=>new URL(u).searchParams.get('languageCode')==='ko'));s.dispose();
+  assert.deepEqual(s.calls.filter(u=>u.includes('/main-banners')).map(u=>new URL(u).searchParams.get('languageCode')),['ko','ja']);s.dispose();
 });
 
 test('compiled region/interest headers and cached region pages update while hidden tab, page and selected IDs persist',async()=>{
@@ -118,7 +124,7 @@ test('compiled region/interest headers and cached region pages update while hidd
   nodes(interest.tree).find(n=>n.type==='Pressable').props.onPress();assert.deepEqual(s.opened,['seongsu','animeCharacter']);s.dispose();
 });
 
-test('retained actual Place explore sections translate across tab return without changing applied multi-filter requests',async()=>{
+test('retained Place sections translate and refetch content language without changing applied filters or refetching on tab return',async()=>{
   const s=await app(),Screen=s.load('src/screens/PlaceScreen.tsx').default;
   const screen=s.mount(()=>Screen());await s.settle();
   const region=s.mount(()=>{const n=child(screen.tree,'PlaceRegionSection');return n.type(n.props);});
@@ -135,8 +141,14 @@ test('retained actual Place explore sections translate across tab return without
     assert.ok(texts(interest.tree).includes(locale.translate(language,'place.explore.interests')));
     assert.ok(texts(interest.tree).includes(locale.translate(language,'place.explore.interestsDescription')));
     assert.equal(JSON.stringify(sheet().filters),draft);assert.deepEqual(child(screen.tree,'AppliedFilterBar').props.detailFilters,filters.detailFilters);
-    assert.deepEqual(child(screen.tree,'AppliedFilterBar').props.filters,filters.filters);assert.deepEqual(s.calls,requests);
-    pressTab('탐색');pressTab('전체');await s.settle();assert.deepEqual(s.calls,requests);
+    assert.deepEqual(child(screen.tree,'AppliedFilterBar').props.filters,filters.filters);
+    const contentCalls=s.calls.slice(requests.length).map(u=>new URL(u));
+    assert.equal(contentCalls.length,language==='ja'?2:4);
+    for(const request of contentCalls){assert.equal(request.searchParams.get('countryCode'),'KR');}
+    const pageRequest=contentCalls.filter(u=>u.searchParams.has('limit')).at(-1);
+    assert.equal(pageRequest.searchParams.get('languageCode'),language);
+    assert.equal(pageRequest.searchParams.get('regionIds'),'1,4');assert.equal(pageRequest.searchParams.get('tagIds'),'1,5');
+    const beforeTabs=s.calls.slice();pressTab('탐색');pressTab('전체');await s.settle();assert.deepEqual(s.calls,beforeTabs);
   }
   const query=new URL(requests.filter(u=>new URL(u).pathname==='/api/popups').at(-1)).searchParams;
   assert.equal(query.get('countryCode'),'KR');assert.equal(query.get('regionIds'),'1,4');assert.equal(query.get('tagIds'),'1,5');s.dispose();

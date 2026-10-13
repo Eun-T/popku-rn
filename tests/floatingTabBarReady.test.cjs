@@ -34,7 +34,8 @@ function app(platform = 'ios') {
     'expo-router': { usePathname: () => '/' },
     'expo-blur': { BlurView: 'BlurView' },
     'expo-glass-effect': { GlassView: 'GlassView', isLiquidGlassAvailable: () => true, isGlassEffectAPIAvailable: () => true },
-    'lucide-react-native': { LayoutGrid: 'Icon', MessageCircle: 'Icon', UserRound: 'Icon' },
+    'lucide-react-native': { LayoutGrid: 'LayoutGrid', MapPin: 'MapPin', MessageCircle: 'Icon', User: 'User' },
+    'react-native-svg': { __esModule: true, default: 'Svg', Path: 'Path', Circle: 'Circle' },
     '../icons/FilledTabIcons': { HouseFilledIcon: 'Icon', MapPinnedFilledIcon: 'Icon', UserRoundFilledIcon: 'Icon' },
     '../icons/HouseIcon': { HouseIcon: 'Icon' }, '../icons/MapPinnedIcon': { MapPinnedIcon: 'Icon' },
     fetch: () => assert.fail('theme/layout readiness must not request data'),
@@ -82,6 +83,62 @@ for (const platform of ['ios', 'android']) test(`${platform}: Compiler-processed
   assert.deepEqual(s.animations, []);
   assert.deepEqual(s.navigationCalls, []);
   if (s.bailouts.length) console.log('FloatingTabBar Compiler optimization skipped: existing refs during render; transformed component readiness updates verified');
+  s.dispose();
+});
+
+for (const platform of ['ios', 'android']) test(`${platform}: grid, closed single user and map keep 24dp sizing and selection styles`, () => {
+  const s = app(platform);
+  s.ready();
+  const icon = index => nodes(s.tabs()[index]).find(node => node.props?.Icon);
+  assert.equal(icon(1).props.Icon, 'LayoutGrid');
+  assert.equal(icon(2).props.Icon, 'MapPin');
+  assert.equal(icon(4).props.Icon, 'User');
+  for (const index of [1, 2, 4]) {
+    s.tabs()[index].props.onPress();
+    const component = icon(index);
+    assert.equal(component.props.fill, '#000000');
+    const mounted = s.mount(() => component.type(component.props));
+    if (index === 1) {
+      const grid=nodes(mounted.tree).find(node=>node.type==='LayoutGrid');
+      assert.equal(grid.props.size,24);assert.equal(grid.props.color,'#000000');
+      assert.equal(grid.props.fill,'#000000');
+      assert.equal(nodes(mounted.tree).some(node=>node.type==='Svg'),false);
+    } else if (index === 2) {
+      const svg=nodes(mounted.tree).find(node=>node.type==='Svg');
+      assert.equal(svg.props.width,24);assert.equal(svg.props.height,24);
+      assert.equal(svg.props.viewBox,'0 0 24 24');
+      const paths=nodes(mounted.tree).filter(node=>node.type==='Path');
+      assert.equal(paths.length,1);
+      assert.equal(paths[0].props.fillRule,'evenodd');assert.equal(paths[0].props.fill,'#000000');
+      assert.equal(paths[0].props.stroke,'none');
+      const original=require('node:fs').readFileSync('node_modules/lucide-react-native/dist/cjs/icons/map-pin.js','utf8').match(/d: "([^"]+)"/)[1];
+      assert.equal(paths[0].props.d,original+'Z M15 10a3 3 0 1 0-6 0a3 3 0 1 0 6 0Z');
+      assert.equal(nodes(mounted.tree).some(node=>node.type==='Circle'||node.type==='Rect'),false);
+    } else {
+      const rendered = nodes(mounted.tree).find(node => node.type === 'Svg');
+      assert.equal(rendered.props.width, 24);assert.equal(rendered.props.height,24);
+      assert.equal(rendered.props.stroke, '#000000');assert.equal(rendered.props.strokeWidth,2);
+      assert.equal(rendered.props.fill, '#000000');
+      assert.equal(rendered.props.strokeLinecap,'round');assert.equal(rendered.props.strokeLinejoin,'round');
+      assert.deepEqual(nodes(mounted.tree).filter(n=>n.type==='Path').map(n=>n.props.d),[
+        'M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2Z']);
+      const heads=nodes(mounted.tree).filter(n=>n.type==='Circle');
+      assert.equal(heads.length,1);assert.deepEqual(heads[0].props,{cx:12,cy:7,r:4});
+    }
+  }
+  assert.equal(icon(1).props.fill, 'none');
+  const unselectedGrid=icon(1), gridTree=s.mount(()=>unselectedGrid.type(unselectedGrid.props));
+  const grid=nodes(gridTree.tree).find(node=>node.type==='LayoutGrid');
+  assert.equal(grid.props.size,24);assert.equal(grid.props.fill,'none');
+  assert.equal(icon(2).props.fill, 'none');
+  const unselected=icon(2), rendered=s.mount(()=>unselected.type(unselected.props));
+  const pin=nodes(rendered.tree).find(node=>node.type==='MapPin');
+  assert.equal(pin.props.size,24);assert.equal(pin.props.fill,'none');assert.equal(pin.props.color,'#000000');
+  s.tabs()[0].props.onPress();
+  const profile=icon(4), unselectedProfile=s.mount(()=>profile.type(profile.props));
+  const profileSvg=nodes(unselectedProfile.tree).find(node=>node.type==='Svg');
+  assert.equal(profileSvg.props.fill,'none');assert.equal(profileSvg.props.strokeWidth,2);
+  assert.equal(nodes(unselectedProfile.tree).filter(n=>n.type==='Path')[0].props.d,'M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2Z');
   s.dispose();
 });
 

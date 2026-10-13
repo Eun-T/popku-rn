@@ -1,4 +1,6 @@
+import { assertModerationRead, captureModerationRead } from './moderationState';
 import { API_BASE_URL } from '../constants/api';
+import { authenticatedFetch, authSessionGeneration } from './auth';
 import { CommunityApiError, publicCommunityRequest, type CommunityFeedItem } from './community';
 import { readCommunityErrorBody } from './communityDiagnostics';
 import { beginCommunityRead, mergeCommunityCommentCount, mergeCommunityCommentDeletions, type CommunityLikeType } from './communityFeedRefresh';
@@ -13,6 +15,7 @@ export type CommunityComment = {
   parentCommentId: number | null;
   replyToUser: { id: number; nickname: string } | null;
   isOwner: boolean;
+  isBlocked?: boolean;
 };
 export type CommentTarget = { commentId: number; parentCommentId: number; replyToUserId: number; nickname: string };
 type CommentPage = { items: CommunityComment[]; commentCount: number };
@@ -22,6 +25,7 @@ function validComment(value: unknown): value is CommunityComment {
   if (!value || typeof value !== 'object') return false;
   const item = value as Partial<CommunityComment>;
   return Number.isSafeInteger(item.id) && (item.id ?? 0) > 0 && typeof item.content === 'string' && typeof item.isOwner === 'boolean'
+    && (item.isBlocked === undefined || typeof item.isBlocked === 'boolean')
     && typeof item.createdAt === 'string' && typeof item.updatedAt === 'string'
     && !!item.author && Number.isSafeInteger(item.author.id) && item.author.id > 0 && typeof item.author.nickname === 'string'
     && (item.author.avatarUrl === null || typeof item.author.avatarUrl === 'string')
@@ -32,6 +36,7 @@ function validComment(value: unknown): value is CommunityComment {
 function validCount(value: unknown): value is number { return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0; }
 
 export async function getCommunityComments(postId: number, signal: AbortSignal, type: CommunityLikeType = 'POST'): Promise<CommentPage> {
+  const read = captureModerationRead();
   const { version, finish } = beginCommunityRead(signal);
   try {
     const response = await publicCommunityRequest(`${type === 'REVIEW' ? 'reviews' : 'posts'}/${postId}/comments`, signal);
@@ -41,6 +46,7 @@ export async function getCommunityComments(postId: number, signal: AbortSignal, 
       || !body.items.every(validComment) || !('commentCount' in body) || !validCount(body.commentCount)) {
       throw new Error('Invalid community comments response');
     }
+    assertModerationRead(read);
     if (signal.aborted) throw new Error('Community read aborted');
     const merged = mergeCommunityCommentCount({ id: postId, type, commentCount: body.commentCount }, version);
     return { items: mergeCommunityCommentDeletions(postId, body.items, version, type), commentCount: merged.commentCount };
@@ -49,10 +55,10 @@ export async function getCommunityComments(postId: number, signal: AbortSignal, 
 
 export async function createCommunityComment(postId: number, content: string, target: CommentTarget | null, token: string,
   type: CommunityLikeType = 'POST', generation?: number): Promise<CreatedComment> {
-  const response = await fetch(`${API_BASE_URL}/api/community/${type === 'REVIEW' ? 'reviews' : 'posts'}/${postId}/comments`, {
+  const response = await authenticatedFetch(`${API_BASE_URL}/api/community/${type === 'REVIEW' ? 'reviews' : 'posts'}/${postId}/comments`, {
     method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ content, ...(target ? { parentCommentId: target.parentCommentId, replyToUserId: target.replyToUserId } : {}) }),
-  });
+  }, { accessToken: token, generation: generation ?? authSessionGeneration() });
   if (!response.ok) throw new CommunityApiError(response.status, await readCommunityErrorBody(response), generation);
   const body: unknown = await response.json();
   if (!body || typeof body !== 'object' || !('item' in body) || !validComment(body.item)
@@ -62,9 +68,9 @@ export async function createCommunityComment(postId: number, content: string, ta
 
 export async function deleteCommunityComment(postId: number, commentId: number, token: string,
   type: CommunityLikeType = 'POST', generation?: number): Promise<{ commentCount: number }> {
-  const response = await fetch(`${API_BASE_URL}/api/community/${type === 'REVIEW' ? 'reviews' : 'posts'}/${postId}/comments/${commentId}`, {
+  const response = await authenticatedFetch(`${API_BASE_URL}/api/community/${type === 'REVIEW' ? 'reviews' : 'posts'}/${postId}/comments/${commentId}`, {
     method: 'DELETE', headers: { Authorization: `Bearer ${token}` },
-  });
+  }, { accessToken: token, generation: generation ?? authSessionGeneration() });
   if (!response.ok) throw new CommunityApiError(response.status, await readCommunityErrorBody(response), generation);
   const body: unknown = await response.json();
   if (!body || typeof body !== 'object' || !('commentCount' in body) || !validCount(body.commentCount))

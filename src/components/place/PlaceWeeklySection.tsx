@@ -13,6 +13,8 @@ import {
 import { getWeeklyPopups, type PublicPopup } from "../../lib/popups";
 import { colors, radius, spacing, typography } from "../../theme/tokens";
 import PlaceWeeklyPopupList from "./PlaceWeeklyPopupList";
+import { mergeExploreCovers, recoverExploreCover } from '../../lib/exploreCoverRecovery';
+import { mergeRecoveredCover } from '../../lib/placeCoverRecovery';
 
 function startOfWeek(date: Date): Date {
   const start = new Date(
@@ -75,10 +77,28 @@ export default function PlaceWeeklySection({
   weekEnd.setDate(weekEnd.getDate() + 6);
   const weekStartString = dateString(selectedWeek);
   const weekEndString = dateString(weekEnd);
-  const weekKey = `${country ?? "ALL"}|${weekStartString}|${weekEndString}`;
+  const selectionKey = `${country ?? "ALL"}|${weekStartString}|${weekEndString}`;
+  const weekKey = `${selectionKey}|${resolvedLanguage}`;
   const cache = useRef(new Map<string, WeekCacheEntry>());
+  const request = useRef<AbortController | null>(null);
   const latestWeekKey = useRef(weekKey);
   latestWeekKey.current = weekKey;
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+  const recoverCover = async (original: PublicPopup, manual?: boolean) => {
+    if (!mounted.current || latestWeekKey.current !== weekKey) return null;
+    const result = await recoverExploreCover(original, country, resolvedLanguage, manual);
+    if (!mounted.current || latestWeekKey.current !== weekKey || !result) return null;
+    const entry = cache.current.get(weekKey);
+    if (entry) cache.current.set(weekKey, { ...entry,
+      popups: mergeRecoveredCover(entry.popups, original, result.detail, result.fetchedAt) });
+    setState(current => current.key === weekKey ? { ...current,
+      popups: mergeRecoveredCover(current.popups, original, result.detail, result.fetchedAt) } : current);
+    return result;
+  };
   const contentHeight = useRef(INITIAL_CONTENT_HEIGHT);
   const [state, setState] = useState<WeekState>({
     key: "",
@@ -99,7 +119,7 @@ export default function PlaceWeeklySection({
     state.key === weekKey ? state.popups : (freshCached?.popups ?? []);
   const pageCount = Math.ceil(popups.length / PAGE_SIZE);
   const pageIndex =
-    pageState.key === weekKey
+    pageState.key === selectionKey
       ? Math.min(pageState.index, Math.max(0, pageCount - 1))
       : 0;
   const pages = Array.from({ length: pageCount }, (_, index) =>
@@ -118,26 +138,33 @@ export default function PlaceWeeklySection({
     });
   }, [weekKey, isActive, carouselWidth, pageStride, status]);
 
+  useEffect(() => () => {
+    request.current?.abort();
+    request.current = null;
+  }, [weekKey]);
+
   useEffect(() => {
     if (!isActive) return;
     const entry = cache.current.get(weekKey);
     if (entry && Date.now() - entry.fetchedAt < WEEK_CACHE_FRESH_MS) {
       setState({ key: weekKey, status: "ready", popups: entry.popups });
       setPageState((current) =>
-        current.key === weekKey ? current : { key: weekKey, index: 0 },
+        current.key === selectionKey ? current : { key: selectionKey, index: 0 },
       );
       return;
     }
+    if (request.current) return;
     const controller = new AbortController();
+    request.current = controller;
     // Start time is conservative: network latency does not extend URL freshness.
     const fetchedAt = Date.now();
     setState({ key: weekKey, status: "loading", popups: [] });
-    setPageState({ key: weekKey, index: 0 });
-    getWeeklyPopups(country, weekStartString, weekEndString, controller.signal)
+    setPageState(current => current.key === selectionKey ? current : { key: selectionKey, index: 0 });
+    getWeeklyPopups(country, weekStartString, weekEndString, controller.signal, resolvedLanguage)
       .then((items) => {
         if (controller.signal.aborted || latestWeekKey.current !== weekKey)
           return;
-        const popups = items.slice(0, 9);
+        const popups = mergeExploreCovers(items.slice(0, 9), country, resolvedLanguage, fetchedAt);
         cache.current.set(weekKey, { popups, fetchedAt });
         setState({ key: weekKey, status: "ready", popups });
       })
@@ -145,8 +172,7 @@ export default function PlaceWeeklySection({
         if (!controller.signal.aborted && latestWeekKey.current === weekKey) {
           setState({ key: weekKey, status: "error", popups: [] });
         }
-      });
-    return () => controller.abort();
+      }).finally(() => { if (request.current === controller) request.current = null; });
   }, [weekKey, isActive, retry]);
   const [viewportWidth, setViewportWidth] = useState(0);
   const offset = useRef(new Animated.Value(0)).current;
@@ -301,7 +327,7 @@ export default function PlaceWeeklySection({
             >
               {carouselWidth > 0 && (
                 <FlatList
-                  key={weekKey}
+                  key={selectionKey}
                   ref={popupListRef}
                   data={pages}
                   extraData={resolvedLanguage}
@@ -337,9 +363,9 @@ export default function PlaceWeeklySection({
                       ),
                     );
                     setPageState((current) =>
-                      current.key === weekKey && current.index === index
+                      current.key === selectionKey && current.index === index
                         ? current
-                        : { key: weekKey, index },
+                        : { key: selectionKey, index },
                     );
                   }}
                   renderItem={({ item }) => (
@@ -349,6 +375,8 @@ export default function PlaceWeeklySection({
                       }}
                     >
                       <PlaceWeeklyPopupList
+                        onRecoverCover={recoverCover}
+                        coverScope={weekKey}
                         popups={item}
                         onPressPopup={onPressPopup}
                         isFavorite={isFavorite}

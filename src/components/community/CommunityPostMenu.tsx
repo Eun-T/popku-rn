@@ -1,16 +1,17 @@
 import { useTranslation } from '../../hooks/useTranslation';
-import { Pencil, Trash2 } from 'lucide-react-native';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Modal, PanResponder, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Flag, Pencil, Trash2, UserRoundX } from 'lucide-react-native';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Animated, KeyboardAvoidingView, Modal, PanResponder, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { communityColors } from '../../theme/communityColors';
 import { radius, spacing } from '../../theme/tokens';
 
-type Props = { onSelect: (index: number) => void; showEdit?: boolean; showDelete?: boolean; edgeToEdge?: boolean };
+type Props = { onSelect: (index: number) => void; showEdit?: boolean; showDelete?: boolean; edgeToEdge?: boolean;
+  showModeration?: boolean; content?: (dismiss: (index: number) => void) => ReactNode };
 const DESTRUCTIVE_RED = '#DC2626';
 
-export default function CommunityPostMenu({ onSelect, showEdit = true, showDelete = true, edgeToEdge = false }: Props) {
+export default function CommunityPostMenu({ onSelect, showEdit = true, showDelete = true, edgeToEdge = true, showModeration = false, content }: Props) {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const [presented, setPresented] = useState(true);
@@ -50,6 +51,7 @@ export default function CommunityPostMenu({ onSelect, showEdit = true, showDelet
   }), [dismiss, translateY]);
   useEffect(() => () => { translateY.stopAnimation(); opacity.stopAnimation(); }, [opacity, translateY]);
 
+  const Container = content ? KeyboardAvoidingView : View;
   return (
     <Modal visible={presented} transparent animationType="none" statusBarTranslucent navigationBarTranslucent
       onRequestClose={() => dismiss(0)} onDismiss={complete}
@@ -57,12 +59,12 @@ export default function CommunityPostMenu({ onSelect, showEdit = true, showDelet
         Animated.timing(translateY, { toValue: 0, duration: 200, useNativeDriver: true }),
         Animated.timing(opacity, { toValue: 1, duration: 200, useNativeDriver: true }),
       ]).start()}>
-      <View style={styles.modal}>
+      <Container style={styles.modal} {...(content ? { behavior: Platform.OS === 'ios' ? 'padding' as const : 'height' as const } : {})}>
         <Animated.View style={[styles.backdrop, { opacity }]}>
           <Pressable accessibilityRole="button" accessibilityLabel={t('community.cancel')}
             onPress={() => dismiss(0)} style={StyleSheet.absoluteFill} />
         </Animated.View>
-        <Animated.View accessibilityViewIsModal style={[styles.sheet, edgeToEdge && styles.edgeSheet,
+        <Animated.View accessibilityViewIsModal style={[styles.sheet, edgeToEdge && styles.edgeSheet, content && { maxHeight: '90%' },
           edgeToEdge ? { paddingBottom: insets.bottom + spacing.space8,
             paddingLeft: insets.left + spacing.space20, paddingRight: insets.right + spacing.space20 }
             : { marginBottom: Math.max(insets.bottom, spacing.space16) },
@@ -79,8 +81,18 @@ export default function CommunityPostMenu({ onSelect, showEdit = true, showDelet
             <Trash2 size={22} color={DESTRUCTIVE_RED} />
             <Text style={[styles.label, styles.destructive]}>{t('community.delete.action')}</Text>
           </Pressable>}
+          {showModeration && <>
+            <Pressable accessibilityRole="button" onPress={() => dismiss(3)} style={styles.row}>
+              <Flag size={22} color={communityColors.text} /><Text style={styles.label}>{t('moderation.report')}</Text>
+            </Pressable>
+            <View style={styles.divider} />
+            <Pressable accessibilityRole="button" onPress={() => dismiss(4)} style={styles.row}>
+              <UserRoundX size={22} color={DESTRUCTIVE_RED} /><Text style={[styles.label, styles.destructive]}>{t('moderation.block')}</Text>
+            </Pressable>
+          </>}
+          {content?.(dismiss)}
         </Animated.View>
-      </View>
+      </Container>
     </Modal>
   );
 }

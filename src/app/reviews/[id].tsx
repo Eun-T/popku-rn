@@ -1,3 +1,6 @@
+import ModerationActions from '../../components/community/ModerationActions';
+import { useModerationRevision } from '../../hooks/useModerationRevision';
+import { isLocallyBlocked } from '../../lib/moderationState';
 import { useTranslation } from '../../hooks/useTranslation';
 import {
   useFocusEffect,
@@ -50,6 +53,7 @@ import { colors, spacing, typography } from "../../theme/tokens";
 
 export default function ReviewDetailScreen() {
   const { t } = useTranslation();
+  const moderation = useModerationRevision();
   // An in-flight mutation may finish after a language switch.
   const translation = useRef(t);
   useEffect(() => { translation.current = t; }, [t]);
@@ -146,7 +150,7 @@ export default function ReviewDetailScreen() {
         if (!request.signal.aborted) setLoading(false);
       });
     return () => request.abort();
-  }, [id, retry]);
+  }, [id, retry, moderation]);
   const padding = {
     paddingLeft: insets.left + spacing.space16,
     paddingRight: insets.right + spacing.space16,
@@ -275,7 +279,7 @@ export default function ReviewDetailScreen() {
             <MoreHorizontal size={22} color={communityColors.text} />
           </Pressable>
         ) : (
-          <View style={styles.headerAction} />
+          <View style={styles.headerAction}>{review && !isLocallyBlocked(review.author.id) && <ModerationActions targetType="REVIEW" targetId={review.id} authorId={review.author.id} iconSize={22} />}</View>
         )}
       </View>
       {loading ? (
@@ -302,7 +306,7 @@ export default function ReviewDetailScreen() {
             </Pressable>
           )}
         </View>
-      ) : review ? (
+      ) : review && !isLocallyBlocked(review.author.id) ? (
         <ScrollView>
           <View style={[styles.content, padding]}>
             <View style={styles.authorRow}>

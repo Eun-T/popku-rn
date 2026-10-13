@@ -20,7 +20,7 @@ const filters = load('src/constants/placeFilters.ts');
 const nodes = tree => !tree || typeof tree !== 'object' ? [] : Array.isArray(tree) ? tree.flatMap(nodes)
   : [tree, ...nodes(tree.props?.children), ...nodes(tree.props?.ListHeaderComponent)];
 
-test('interactive chips share primary-text selection colors and custom stays disabled', () => {
+test('interactive chips retain selection colors and Sheet delegates date selection to its picker', () => {
   const native = { View: 'View', Text: 'Text', Pressable: 'Pressable', ScrollView: 'ScrollView', Modal: 'Modal',
     StyleSheet: { create: s => s }, useWindowDimensions: () => ({ height: 844 }),
     Animated: { Value: class {}, View: 'AnimatedView' }, PanResponder: { create: () => ({ panHandlers: {} }) } };
@@ -34,9 +34,22 @@ test('interactive chips share primary-text selection colors and custom stays dis
   const Common = load('src/components/common/FilterChips.tsx', mocks).default;
   const Quick = load('src/components/place/QuickFilterBar.tsx', mocks).default;
   const Sheet = load('src/components/place/PlaceFilterSheet.tsx', mocks).default;
-  const sheet = Sheet({ visible: true, filters: { regionIds: [1], tagIds: [], status: undefined }, quickFilters: filters.createEmptyPlaceFilters(), period: 'week',
+  let applies=0;
+  const sheetProps = { visible: true, filters: { regionIds: [1], tagIds: [], status: undefined }, quickFilters: filters.createEmptyPlaceFilters(), period: 'week',
     regions: [{ id: 1, name: 'Seoul', countryCode: 'KR' }, { id: 2, name: 'Tokyo', countryCode: 'JP' }],
-    tags: [], optionsStatus: 'ready', onPeriodChange() {} });
+    tags: [], optionsStatus: 'ready', onPeriodChange() {}, onApply(){applies++;} };
+  const sheet = Sheet(sheetProps);
+  for(const datePeriod of [
+    {mode:'custom',startDate:'2026-10-10',endDate:null},
+    {mode:'custom',startDate:'2026-10-12',endDate:'2026-10-10'},
+    {mode:'custom',startDate:'2026-02-29',endDate:'2026-03-01'},
+  ]) {
+    const invalid=Sheet({...sheetProps,datePeriod});
+    nodes(invalid).find(n=>n.type==='Button').props.onPress();
+    assert.equal(applies,0);
+  }
+  nodes(Sheet({...sheetProps,datePeriod:{mode:'custom',startDate:'2026-10-10',endDate:'2026-10-10'}}))
+    .find(n=>n.type==='Button').props.onPress();assert.equal(applies,1);
   const group = nodes(sheet).find(n => typeof n.type === 'function' && n.props.options[0]?.id === 2);
   const trees = [Common({ options: [{ value: 'KR', label: 'KR' }, { value: 'JP', label: 'JP' }], value: 'KR', onChange() {} }),
     Quick({ selectedFilters: { countries: ['KR'], quickFeatures: ['preReservation'] }, onToggleCountry() {}, onToggleFeature() {} }),
@@ -59,8 +72,8 @@ test('interactive chips share primary-text selection colors and custom stays dis
       assert.equal(text.color, selected ? '#FFFFFF' : '#111827');
     }
   }
-  const custom = nodes(sheet).find(n => n.type === 'Pressable' && n.props.disabled);
-  assert.equal(custom.props.accessibilityState.disabled, true);
+  const picker = nodes(sheet).find(n => n.type === 'PlacePeriodPicker');
+  assert.equal(picker.props.value.mode, 'all');
   assert.equal(theme.colors.primary, '#22C55E');
   assert.equal(theme.colors.inactiveText, '#9CA3AF');
   assert.equal(theme.colors.inactiveTabText, '#B8BEC8');
@@ -147,6 +160,7 @@ test('Sheet period draft applies, reopens, cancels, resets and removes with sear
       }];
     },
     useRef(value) { return slots[cursor++] ??= { current: value }; },
+    useCallback(fn) { cursor++; return fn; },
     useEffect(fn, deps) {
       const index = cursor++, previous = slots[index];
       if (!previous || !deps.every((value, i) => Object.is(value, previous.deps[i]))) {
@@ -157,7 +171,7 @@ test('Sheet period draft applies, reopens, cancels, resets and removes with sear
   };
   const mocks = {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx },
-    'expo-router': { useScrollToTop() {}, useLocalSearchParams: () => ({}) },
+    'expo-router': { useScrollToTop() {}, useLocalSearchParams: () => ({}), useFocusEffect() {} },
     'lucide-react-native': { Bell: 'Bell', Search: 'Search', X: 'X' },
     'react-native': { FlatList: 'FlatList', Pressable: 'Pressable', Text: 'Text', TextInput: 'TextInput', View: 'View',
       StyleSheet: { create: s => s }, useWindowDimensions: () => ({ width: 390 }) },

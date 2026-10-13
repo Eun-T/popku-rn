@@ -1,4 +1,4 @@
-import { clearTokens, getAuthSession, getSavedAccessToken } from './auth';
+import { clearTokens, getAuthSession } from './auth';
 import { CommunityApiError, toggleCommunityPostLike, toggleCommunityReviewLike } from './community';
 import {
   beginCommunityLike, endCommunityLike, communityLikeSession,
@@ -17,9 +17,9 @@ export async function changeCommunityLike(
   let previous: CommunityLikeState | undefined;
   let authGeneration: number | undefined;
   try {
-    const auth = type === 'REVIEW' ? await getAuthSession() : undefined;
-    authGeneration = auth?.generation;
-    const token = auth ? auth.accessToken : await getSavedAccessToken();
+    const auth = await getAuthSession();
+    authGeneration = auth.generation;
+    const token = auth.accessToken;
     if (session !== communityLikeSession()) return;
     if (!token) { login(); return; }
     const current = mergeCommunityLike(post, -1);
@@ -29,18 +29,13 @@ export async function changeCommunityLike(
       likeCount: Math.max(0, previous.likeCount + (previous.liked ? -1 : 1)),
     }, true, type);
     const result = type === 'REVIEW' ? await toggleCommunityReviewLike(post.id, token, authGeneration)
-      : await toggleCommunityPostLike(post.id, token);
+      : await toggleCommunityPostLike(post.id, token, authGeneration);
     if (session === communityLikeSession()) publishCommunityLike(post.id, result, false, type);
   } catch (error) {
     if (session !== communityLikeSession()) return;
     if (previous) publishCommunityLike(post.id, previous, false, type);
     if (error instanceof CommunityApiError && error.status === 401) {
-      if (type === 'REVIEW') {
-        if (await clearTokens(authGeneration).catch(() => false)) login();
-      } else {
-        await clearTokens().catch(() => {});
-        login();
-      }
+      if (await clearTokens(authGeneration).catch(() => false)) login();
     } else failed();
   } finally { endCommunityLike(post.id, type); }
 }

@@ -3,7 +3,7 @@ const { readFileSync } = require('node:fs');
 const { test } = require('node:test');
 const ts = require('typescript');
 function load(file,mocks,globals={},extra='') {
-  mocks = require('./helpers/uiDependencies.cjs').withUiDependencies(file, mocks);
+  mocks = require('./helpers/uiDependencies.cjs').withUiDependencies(file, mocks, globals.fetch);
   const code=ts.transpileModule(readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText;
   const module={exports:{}};
   new Function('require','module','exports',...Object.keys(globals),code+extra)(name=>{assert.ok(name in mocks,name);return mocks[name];},module,module.exports,...Object.values(globals));

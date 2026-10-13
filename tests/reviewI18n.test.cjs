@@ -42,6 +42,9 @@ async function app({ editing = false, detailFailure = false, popupFailure = fals
       timing: (_value, config) => { timings.push(config); return animation(); }, spring: animation, parallel: animation } });
   const router = { push: route => routes.push(route), replace: route => routes.push(route), back: () => routes.push('back'), canGoBack: () => true };
   const ui = runtime({
+    'src/hooks/useModerationRevision.ts': { useModerationRevision: () => 0 },
+    'src/lib/moderationState.ts': { isLocallyBlocked: () => false },
+    'src/components/community/ModerationActions.tsx': { default: 'ModerationActions' },
     'react-native': native, 'lucide-react-native': Object.fromEntries(['ChevronLeft', 'ChevronRight', 'Heart', 'MoreHorizontal', 'Star', 'X', 'ImagePlus', 'Pencil', 'Trash2'].map(n => [n, n])),
     'expo-router': { useRouter: () => router, useNavigation: () => ({ dispatch: a => routes.push(a) }),
       useLocalSearchParams: () => editing ? { editId: '10', id: '10' } : { publicId: 'popup-original', id: '10' }, useFocusEffect() {} },
@@ -223,4 +226,24 @@ for(const target of ['detail','actions']) test(`Compiler-processed ${target} pen
   s.alerts.at(-1)[2][1].onPress();await s.language('ja');reject(new Error('server free text'));await s.settle();
   assert.equal(s.alerts.at(-1)[0],s.t('review.deleteFailed'));assert.equal(s.alerts.at(-1)[1],s.t('place.detail.tryLater'));
   assert.deepEqual(s.requests.filter(r=>r[0]==='delete'),[['delete',10]]);s.dispose();
+});
+
+
+for(const editing of [false,true]) test('review size error translates while mounted and preserves rating/draft/images in ' + (editing?'edit':'create'), async()=>{
+ const s=await app({editing}),Screen=s.load(files[0]).default,root=s.mount(()=>Screen());await s.settle();
+ const input=()=>nodes(root.tree).find(n=>n.type==='TextInput');
+ input().props.onChangeText('size error review 原文');
+ const press=key=>nodes(root.tree).find(n=>n.type==='Pressable'&&n.props.accessibilityLabel===s.t(key)).props.onPress();
+ if(!editing)nodes(root.tree).find(n=>n.type==='Pressable'&&n.props.accessibilityLabel===s.t('review.write.rating',{value:4})).props.onPress();
+ press('review.write.addPhoto');await s.settle();
+ s.writeFailure(new s.ImageSelectionError('size'));press(editing?'review.write.save':'review.write.register');await s.settle();
+ const order=()=>nodes(root.tree).filter(n=>n.type==='Image').map(n=>n.props.source.uri);
+ const originalOrder=order(),requests=s.requests.slice();
+ for(const lang of ['ko','ja','ko','system']){await s.language(lang);
+  assert.ok(texts(root.tree).includes(s.t('community.imageError.size')));assert.equal(input().props.value,'size error review 原文');
+  assert.deepEqual(order(),originalOrder);assert.deepEqual(s.requests,requests);
+  assert.ok(nodes(root.tree).find(n=>n.type==='Pressable'&&n.props.accessibilityLabel===s.t('review.write.rating',{value:4})).props.accessibilityState.selected);
+ }
+ for(const tag of ['ko-KR','ja-JP']){await s.systemLanguage(tag);assert.ok(texts(root.tree).includes(s.t('community.imageError.size')));assert.deepEqual(s.requests,requests);}
+ assert.deepEqual(s.routes,[]);s.dispose();
 });

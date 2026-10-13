@@ -69,14 +69,16 @@ test('compiler-cached guidance titles and introduction errors update without rep
  nodes(measured.tree).find(n=>n.type==='ScrollView').props.onScroll({nativeEvent:{contentOffset:{x:300}}});
  const cards=nodes(measured.tree).filter(n=>n.type?.name==='GuidanceCard').map((n,i)=>s.mount(()=>{const card=nodes(measured.tree).filter(n=>n.type?.name==='GuidanceCard')[i];return card.type(card.props);}));
  const images=Object.freeze(['original1','original2']),image=s.mount(()=>Carousel({images,width:300}));list(image).props.onScroll({nativeEvent:{contentOffset:{x:300}}});
+ const slides=images.map((item,index)=>s.mount(()=>{const n=list(image).props.renderItem({item,index});return n.type(n.props);}));
+ slides.forEach(slide=>nodes(slide.tree).find(n=>n.type==='ExpoImage').props.onError());
  const key=child(root.tree,'GuidancePager').key,pageKey=child(pager.tree,'MeasuredPager').key;
  for(const lang of ['ja','ko','system']){await s.language(lang);const t=s.load('src/locales/index.ts').t;
   assert.ok(cards.some(c=>texts(c.tree).includes(t('place.detail.notice'))));assert.ok(cards.some(c=>texts(c.tree).includes(detail.benefits)));
   assert.equal(child(root.tree,'GuidancePager').key,key);assert.equal(child(pager.tree,'MeasuredPager').key,pageKey);
   assert.deepEqual(nodes(measured.tree).find(n=>n.type==='ScrollView').props.children.map(n=>n.props.accessibilityElementsHidden),[true,false]);
   assert.ok(nodes(image.tree).some(n=>n.type==='Text'&&[].concat(n.props.children).join('')==='2 / 2'));assert.equal(list(image).props.data,images);
-  assert.ok(texts(list(image).props.renderItem({item:images[1],index:1})).includes(t('place.detail.imageFailed')));
-  assert.deepEqual(s.calls.images,images);
+  assert.ok(texts(slides[1].tree).includes(t('place.detail.imageFailed')));
+  assert.deepEqual(s.calls.images,[]);
  }s.dispose();
 });
 

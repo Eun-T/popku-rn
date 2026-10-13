@@ -1,3 +1,5 @@
+import { useModerationRevision } from '../../hooks/useModerationRevision';
+import { isLocallyBlocked } from '../../lib/moderationState';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -5,7 +7,7 @@ import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'rea
 import CommunityPostItem from '../community/CommunityPostItem';
 import ReviewActions from '../reviews/ReviewActions';
 import { useCommunityNow } from '../../hooks/useCommunityNow';
-import { getAuthSession, getAuthUser, subscribeAuthSession, subscribeAuthUser } from '../../lib/auth';
+import { getAuthSession, getAuthStatus, subscribeAuthSession, subscribeAuthStatus } from '../../lib/auth';
 import { loginHref } from '../../lib/loginReturn';
 import { subscribeCommunityLikes, subscribeCommunityCommentCounts, subscribeCommunityPostChanges } from '../../lib/communityFeedRefresh';
 import { changeCommunityLike } from '../../lib/communityLikes';
@@ -17,8 +19,9 @@ import { radius, spacing, typography } from '../../theme/tokens';
 type Props = { publicId: string; title: string };
 export default function PopupReviews({ publicId, title }: Props) {
   const { t } = useTranslation();
+  const moderation = useModerationRevision();
   const router = useRouter();
-  const authUser = useSyncExternalStore(subscribeAuthUser, getAuthUser, getAuthUser);
+  const authStatus = useSyncExternalStore(subscribeAuthStatus, getAuthStatus, getAuthStatus);
   const { now } = useCommunityNow();
   const [items, setItems] = useState<CommunityFeedItem[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -55,12 +58,12 @@ export default function PopupReviews({ publicId, title }: Props) {
   }, []);
   useEffect(() => {
     setItems([]); setCursor(null);
-  }, [publicId]);
+  }, [publicId, moderation]);
   useEffect(() => {
     request.current?.abort(); busy.current = false;
     void load(null);
     return () => request.current?.abort();
-  }, [publicId, revision]);
+  }, [publicId, revision, moderation]);
 
   async function load(after: string | null) {
     if (busy.current) return;
@@ -103,7 +106,7 @@ export default function PopupReviews({ publicId, title }: Props) {
     try { router.push('/profile/login'); }
     catch { navigationLocked.current = false; Alert.alert(t('place.detail.reviews.openFailed'), t('place.detail.tryLater')); }
   }
-  const writeLabel = authUser ? t('place.detail.reviews.write') : t('place.detail.reviews.loginWrite');
+  const writeLabel = authStatus === 'anonymous' ? t('place.detail.reviews.loginWrite') : t('place.detail.reviews.write');
   const writeButton = <Pressable accessibilityRole="button" accessibilityLabel={writeLabel} onPress={() => { void write(); }} style={styles.write}>
     <Text style={styles.writeText}>{writeLabel}</Text>
   </Pressable>;
@@ -114,7 +117,7 @@ export default function PopupReviews({ publicId, title }: Props) {
       <Text style={styles.description}>{t('place.detail.reviews.emptyDescription')}</Text>
       {writeButton}
     </View>}
-    {items.map(item => <View key={item.id} style={styles.item}><CommunityPostItem post={item} now={now}
+    {items.filter(item => !isLocallyBlocked(item.author.id)).map(item => <View key={item.id} style={styles.item}><CommunityPostItem post={item} now={now}
       reviewActions={<ReviewActions review={item} />}
       onPressLike={item.type === 'REVIEW' ? () => { void changeCommunityLike(item, login,
         () => Alert.alert(t('place.detail.reviews.likeFailed'), t('place.detail.tryLater'))); } : undefined}

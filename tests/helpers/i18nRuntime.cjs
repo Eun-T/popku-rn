@@ -65,9 +65,15 @@ function runtime(overrides = {}, options = {}) {
     owners.push(current); current.render(); return current;
   }
   function load(file) {
-    if (file in overrides) return overrides[file];
+    if (file === 'src/lib/deviceId.ts' && !(file in overrides)) return { getDeviceId: async () => 'device' };
+    if (file in overrides) {
+      if (file === 'src/lib/auth.ts') return { ...require('./authRequestMock.cjs').authRequestMock(overrides[file],
+        (...args) => (overrides.fetch ?? global.fetch)(...args)),
+        getDeviceId: overrides[file].getDeviceId ?? (async () => overrides[file].DEVICE_ID ?? 'device') };
+      return overrides[file];
+    }
     if (cache.has(file)) return cache.get(file);
-    if (/\.(png|webp)$/.test(file)) return file;
+    if (/\.(png|webp|svg|ttf)$/.test(file)) return file;
     if (file.endsWith('.json')) return JSON.parse(fs.readFileSync(file,'utf8'));
     const module={ exports:{} };
     const original=fs.readFileSync(file,'utf8');
