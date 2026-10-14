@@ -140,7 +140,7 @@ export default function Settings() {
         ) : (
           <Pressable
             accessibilityRole="button"
-            onPress={() => router.dismissTo("/profile/login")}
+            onPress={() => router.replace({ pathname: "/login", params: { loginOrigin: "profile" } })}
             style={styles.row}
           >
             <Text style={styles.rowLabel}>{accountUiText(t, "로그인")}</Text>

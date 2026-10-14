@@ -7,6 +7,9 @@ const { loadPure } = require('./helpers/uiDependencies.cjs');
 const { StackRouter, StackActions } = require('expo-router/build/react-navigation/routers/StackRouter');
 const { TabRouter, TabActions } = require('expo-router/build/react-navigation/routers/TabRouter');
 const { findDivergentState, getPayloadFromStateRoute } = require('expo-router/build/global-state/stateUtils');
+const { app, button } = require('./helpers/accountI18nRuntime.cjs');
+const { nodes } = require('./helpers/i18nRuntime.cjs');
+const { compilerTransform } = require('./helpers/reactCompiler.cjs');
 
 const returns = loadPure('src/lib/loginReturn.ts');
 function environment() {
@@ -32,7 +35,16 @@ function environment() {
   };
   const rootNavigation = { getState: () => root, dispatch: action => { calls.push(action); apply(action); } };
   const router = { back: () => { calls.push('back'); apply(StackActions.pop()); }, canGoBack: () => root.index > 0,
-    replace: href => { calls.push(['replace', href]); apply(StackActions.replace('(tabs)')); },
+    replace: href => {
+      calls.push(['replace', href]);
+      if (href.pathname === '/login') {
+        const target = { routes: [{ name: 'login', params: href.params }] };
+        const divergence = findDivergentState(target, root);
+        assert.equal(divergence.navigationState.key, root.key, 'settings and login must use the same Root Stack');
+        const payload = getPayloadFromStateRoute(divergence.actionStateRoute);
+        apply({ ...StackActions.replace(payload.screen, payload.params), target: root.key });
+      } else apply(StackActions.replace('(tabs)'));
+    },
     dismissTo: href => {
       assert.equal(href, '/profile');
       const target = { routes: [{ name: '(tabs)', state: { routes: [{ name: 'profile', state: { routes: [{ name: 'index' }] } }] } }] };
@@ -151,6 +163,35 @@ test('Root login success pops the same Tabs instance; iOS pop and Android back h
   assert.deepEqual(s.calls, ['back']); s.assertClean();
 });
 
+for (const compiled of [false, true]) test(`${compiled ? 'React Compiler output (Settings bailout)' : 'Hook'}: Settings login replaces only Settings without exposing or changing Tabs; login back returns to My Page`, async () => {
+  const s = environment(); s.push('profile/settings');
+  // The current compiler leaves Settings unoptimized. Exercise the
+  // actual compiler output without changing unrelated production code to force compilation.
+  const ui = await app(compiled ? compilerTransform(['src/app/profile/settings.tsx', 'src/hooks/useTranslation.ts'], {
+    allowBailout: ['src/app/profile/settings.tsx'],
+  }) : undefined, false, {
+    'expo-router': { useRouter: () => s.router, useNavigation: () => s.rootNavigation,
+      useLocalSearchParams: () => ({ loginOrigin: 'profile' }), useFocusEffect: () => {} },
+    'src/lib/auth.ts': { getAuthUser: () => null, subscribeAuthUser: () => () => {}, authSessionGeneration: () => 0 },
+  });
+  try {
+    const Settings = ui.load('src/app/profile/settings.tsx').default;
+    const screen = ui.mount(() => Settings());
+    button(ui, screen, '로그인').props.onPress();
+    assert.deepEqual(s.calls, [['replace', { pathname: '/login', params: { loginOrigin: 'profile' } }]]);
+    assert.deepEqual(s.root.routes.map(route => route.name), ['(tabs)', 'login']);
+    assert.equal(s.root.index, 1);
+    assert.deepEqual(s.root.routes[0], s.original.routes[0], 'My Page and other tabs never receive an intermediate navigation');
+    assert.deepEqual(s.root.routes[1].params, { loginOrigin: 'profile' });
+    const Login = ui.load('src/app/login.tsx').default;
+    const login = ui.mount(() => Login());
+    nodes(login.tree).find(node => node.type === 'Pressable').props.onPress();
+    assert.equal(s.calls.at(-1), 'back');
+    s.assertClean();
+    assert.equal(ui.calls.length, 0);
+  } finally { ui.dispose(); }
+});
+
 test('nested unmarked login success removes profile auth instead of switching tabs with auth retained', () => {
   const s = environment(), navigation = s.nestedAuth();
   returns.finishLoginReturn(s.router, navigation, null);
@@ -194,10 +235,13 @@ function handler(file, name, scope) {
   const code = ts.transpileModule(`${node.getText(ast)}\nreturn ${name};`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
   return new Function(...Object.keys(scope), code)(...Object.values(scope));
 }
-for (const method of ['email', 'Google', 'Apple', 'Google signup', 'Apple signup']) {
-  test(`${method} completes authentication before clearing both Stack levels`, async () => {
+for (const origin of ['profile', 'settings']) for (const method of ['email', 'Google', 'Apple', 'Google signup', 'Apple signup']) {
+  test(`${origin}: ${method} completes authentication before clearing both Stack levels`, async () => {
     const s = environment(), signup = method.includes('signup');
-    s.push('login');
+    if (origin === 'settings') {
+      s.push('profile/settings');
+      s.router.replace({ pathname: '/login', params: { loginOrigin: 'profile' } });
+    } else s.push('login');
     const navigation = signup ? s.signupAboveRootLogin() : s.rootNavigation;
     let completed = false, saved = false;
     const noop = () => {};

@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
+import Animated, { type SharedValue, useAnimatedStyle } from "react-native-reanimated";
 
 import { useHomeMainBanners } from "../../hooks/useHomeMainBanners";
 import type { MainBannerPopup } from "../../lib/mainBanners";
@@ -23,15 +24,27 @@ import { useTheme } from '../../theme/useTheme';
 const BANNER_HEIGHT = 400;
 const FOOTER_GRADIENT_TOP = BANNER_HEIGHT * 0.5;
 const POSTER_WIDTH_RATIO = 0.7;
-type Props = { onPressPopup: (id: string) => void };
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+type Props = {
+  onPressPopup: (id: string) => void;
+  pullDistance?: SharedValue<number>;
+};
 
-function BannerBackground({ popup }: { popup: MainBannerPopup }) {
+function BannerBackground({ popup, pullDistance }: { popup: MainBannerPopup; pullDistance?: SharedValue<number> }) {
   const { themeColors } = useTheme();
   const [failed, setFailed] = useState(false);
+  const stretchStyle = useAnimatedStyle(() => {
+    const distance = pullDistance?.value ?? 0;
+    return {
+      height: BANNER_HEIGHT,
+      bottom: 'auto',
+      transform: [{ translateY: distance / 2 }, { scale: 1 + distance / BANNER_HEIGHT }],
+    };
+  });
   return (
-    <View
+    <Animated.View
       pointerEvents="none"
-      style={[StyleSheet.absoluteFill, styles.background, { backgroundColor: themeColors.bannerFallback }]}
+      style={[StyleSheet.absoluteFill, styles.background, { backgroundColor: themeColors.bannerFallback }, pullDistance && stretchStyle]}
     >
       {popup.coverImageUrl && !failed ? (
         <Image
@@ -49,14 +62,14 @@ function BannerBackground({ popup }: { popup: MainBannerPopup }) {
         />
       ) : null}
       <View style={[StyleSheet.absoluteFill, styles.backgroundShade]} />
-    </View>
+    </Animated.View>
   );
 }
 
 function BannerFooterGradient({ width }: { width: number }) {
   const id = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   return (
-    <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+    <View pointerEvents="none" style={styles.footerGradient}>
       <Svg width={width} height={BANNER_HEIGHT}>
         <Defs>
           <LinearGradient
@@ -102,21 +115,27 @@ function BannerImage({
   popup,
   width,
   height,
+  pullDistance,
 }: {
   popup: MainBannerPopup;
   width: number;
   height: number;
+  pullDistance?: SharedValue<number>;
 }) {
   const [failed, setFailed] = useState(false);
   const [aspectRatio, setAspectRatio] = useState(1);
+  const imageStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: 1 + (pullDistance?.value ?? 0) / BANNER_HEIGHT }],
+  }));
   if (!popup.coverImageUrl || failed || width <= 0 || height <= 0) return null;
   const posterWidth = Math.min(width, height * aspectRatio);
   const posterHeight = posterWidth / aspectRatio;
   return (
-    <View
+    <Animated.View
       style={[
         styles.posterShadow,
         { width: posterWidth, height: posterHeight },
+        pullDistance && imageStyle,
       ]}
     >
       <Image
@@ -135,7 +154,7 @@ function BannerImage({
         }}
         onError={() => setFailed(true)}
       />
-    </View>
+    </Animated.View>
   );
 }
 
@@ -143,6 +162,7 @@ function BannerPages({
   popups,
   width,
   onPressPopup,
+  pullDistance,
 }: Props & { popups: MainBannerPopup[]; width: number }) {
   const { resolvedLanguage } = useTranslation();
   const { themeColors } = useTheme();
@@ -157,14 +177,31 @@ function BannerPages({
     ),
   );
   const posterHeight = Math.max(0, BANNER_HEIGHT - posterTop - spacing.space16);
+  const BannerScrollView = pullDistance ? Animated.ScrollView : ScrollView;
+  const BannerPage = pullDistance ? AnimatedPressable : Pressable;
+  // Keep the 400px layout slot. Only the clipped horizontal viewport grows upward.
+  const viewportStyle = useAnimatedStyle(() => ({
+    height: BANNER_HEIGHT + (pullDistance?.value ?? 0),
+    transform: [{ translateY: -(pullDistance?.value ?? 0) }],
+  }));
+  const pageStyle = useAnimatedStyle(() => ({
+    height: BANNER_HEIGHT + (pullDistance?.value ?? 0),
+  }));
+  const posterStyle = useAnimatedStyle(() => {
+    const distance = pullDistance?.value ?? 0;
+    return {
+      bottom: spacing.space16 + distance,
+      transform: [{ translateY: distance }],
+    };
+  });
   return (
-    <View style={{ ...styles.banner, backgroundColor: themeColors.surface }}>
-      <ScrollView
+    <View style={{ ...styles.banner, backgroundColor: themeColors.surface, ...(pullDistance ? styles.stretchSlot : {}) }}>
+      <BannerScrollView
         horizontal
         pagingEnabled
         scrollEnabled={popups.length > 1}
         showsHorizontalScrollIndicator={false}
-        style={{ ...styles.banner, backgroundColor: themeColors.surface }}
+        style={[styles.banner, { backgroundColor: themeColors.surface }, pullDistance && styles.stretchViewport, pullDistance && viewportStyle]}
         onMomentumScrollEnd={({ nativeEvent }) => {
           setPage(
             Math.max(
@@ -180,9 +217,9 @@ function BannerPages({
         {popups.map((popup) => {
           const period = formatPopupPeriod(popup.startDate, popup.endDate);
           return (
-            <Pressable
+            <BannerPage
               key={popup.publicId}
-              style={[styles.banner, { width, backgroundColor: themeColors.surface }]}
+              style={[styles.banner, { width, backgroundColor: themeColors.surface }, pullDistance && pageStyle]}
               accessibilityRole="button"
               accessibilityLabel={popup.name}
               onPress={() => onPressPopup(popup.publicId)}
@@ -190,8 +227,9 @@ function BannerPages({
               <BannerBackground
                 key={`${popup.coverImageUrl}:${popup.coverImageCacheKey}`}
                 popup={popup}
+                pullDistance={pullDistance}
               />
-              <View
+              <Animated.View
                 style={[
                   styles.posterArea,
                   {
@@ -199,6 +237,7 @@ function BannerPages({
                     left: insets.left + spacing.space16,
                     right: insets.right + spacing.space16,
                   },
+                  pullDistance && posterStyle,
                 ]}
               >
                 <BannerImage
@@ -206,8 +245,9 @@ function BannerPages({
                   popup={popup}
                   width={posterWidth}
                   height={posterHeight}
+                  pullDistance={pullDistance}
                 />
-              </View>
+              </Animated.View>
               <BannerFooterGradient width={width} />
               <View
                 style={[
@@ -245,10 +285,10 @@ function BannerPages({
                   </Text>
                 </View>
               </View>
-            </Pressable>
+            </BannerPage>
           );
         })}
-      </ScrollView>
+      </BannerScrollView>
       <View pointerEvents="none" style={styles.pagination}>
         {popups.map((popup, index) => (
           <View
@@ -262,7 +302,7 @@ function BannerPages({
   );
 }
 
-export default function HomeBanner({ onPressPopup }: Props) {
+export default function HomeBanner({ onPressPopup, pullDistance }: Props) {
   const { themeColors } = useTheme();
   const { status, popups } = useHomeMainBanners();
   const { width } = useWindowDimensions();
@@ -274,6 +314,7 @@ export default function HomeBanner({ onPressPopup }: Props) {
       popups={popups}
       width={width}
       onPressPopup={onPressPopup}
+      pullDistance={pullDistance}
     />
   );
 }
@@ -285,6 +326,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     overflow: "hidden",
   },
+  stretchSlot: { overflow: "visible" },
+  stretchViewport: { position: "absolute", top: 0, left: 0, right: 0 },
+  footerGradient: { position: "absolute", left: 0, right: 0, bottom: 0, height: BANNER_HEIGHT },
   posterArea: {
     position: "absolute",
     bottom: spacing.space16,

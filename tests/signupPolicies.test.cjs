@@ -4,7 +4,7 @@ const { app, files, inputs, button } = require('./helpers/accountI18nRuntime.cjs
 const { nodes, texts } = require('./helpers/i18nRuntime.cjs');
 const { compilerTransform } = require('./helpers/reactCompiler.cjs');
 
-test('all Korean policies identify the service and contact; only privacy has its confirmed effective date', async () => {
+test('all Korean policies identify the service and contact and use the release effective date', async () => {
   const s = await app();
   try {
     const { policies } = s.load('src/content/policies.ts');
@@ -12,7 +12,10 @@ test('all Korean policies identify the service and contact; only privacy has its
       const content = JSON.stringify(policy);
       for (const value of ['팝카이브', '김은태', 'popchive.support@gmail.com']) assert.ok(content.includes(value));
       assert.ok(!content.includes('POPKU'));
-      assert.equal(policy.effectiveDate, id === 'privacy' ? '시행일: 2026년 10월 13일' : '시행일: 추후 확정');
+      assert.equal(policy.effectiveDate, '시행일: 2026년 10월 14일');
+      assert.equal(policy.sections.at(-1).title, '부칙');
+      assert.ok(JSON.stringify(policy.sections.at(-1)).includes('2026년 10월 14일부터 시행합니다.'));
+      assert.doesNotMatch(content, /추후 확정|\[서비스명\]|\[운영자명\]|YYYY/);
     }
   } finally { s.dispose(); }
 });

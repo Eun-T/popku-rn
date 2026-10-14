@@ -8,7 +8,7 @@
     "scheme": "popkurn",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon",
+      "icon": "./assets/images/popicon.png",
       "bundleIdentifier": "com.popku.app",
       "usesAppleSignIn": true,
       "infoPlist": {
@@ -37,7 +37,12 @@
         {
           "backgroundColor": "#208AEF",
           "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76
+          "imageWidth": 76,
+          "ios": {
+            "backgroundColor": "#FFFFFF",
+            "image": "./assets/images/splash-icon.png",
+            "imageWidth": 180
+          }
         }
       ],
       [
