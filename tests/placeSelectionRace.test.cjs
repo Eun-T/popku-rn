@@ -16,6 +16,7 @@ async function app(t, { delayTags = false } = {}) {
   const metadata = [], pages = [], regionGates = { KR: deferred(), JP: deferred() }, tagGate = deferred();
   let disposed = false, unmountedWrites = 0, focused = true, focusFn, focusCleanup;
   const ui = runtime({
+    'src/components/home/HomeVenueSection.tsx': { __esModule: true, default: 'HomeVenueSection' },
     'react-native': { FlatList: 'FlatList', Pressable: 'Pressable', Text: 'Text', TextInput: 'TextInput', View: 'View',
       StyleSheet: { create: s => s }, useWindowDimensions: () => ({ width: 390 }) },
     'expo-router': { useLocalSearchParams: () => ({}), useScrollToTop() {},

@@ -1,4 +1,5 @@
 const {runtime,flush}=require('./i18nRuntime.cjs');
+const {reanimatedTransitionMock}=require('./reanimatedTransitionMock.cjs');
 const marker = Object.freeze({ id:'internal-id',publicId:'public-id',name:'サーバー原文 행사명',
   latitude:37.54,longitude:127.05,startDate:'2026-10-08',endDate:'2026-10-11',coverImageUrl:null,
   tags:Object.freeze([Object.freeze({id:5,name:'뷰티'}),Object.freeze({id:999,name:'미등록 원문'})]) });
@@ -17,7 +18,11 @@ async function app({failDetail=false,failReviews=false,realReviewCard=false,tran
   const native={ Platform:{OS:'ios'},View:'View',Text:'Text',ScrollView:'ScrollView',Pressable:'Pressable',FlatList:'FlatList',Image:nativeImage,
     ActivityIndicator:'ActivityIndicator',StyleSheet:{create:s=>s},useWindowDimensions:()=>({width:390,height:844,fontScale:1}),
     Alert:{alert(){}},Share:{share:async value=>calls.share.push(value)},Linking:{openURL:async url=>calls.links.push(url)} };
-  const ui=runtime({
+  let ui;
+  const motion=reanimatedTransitionMock(()=>ui);
+  ui=runtime({
+    'react-native-reanimated':motion.module,
+    'react-native-worklets':{scheduleOnRN:fn=>fn()},
     'expo-constants':{__esModule:true,default:{expoConfig:{ios:{bundleIdentifier:'com.popku.app'},android:{package:'com.popku.app'}}}},
     'expo-image':{Image:'ExpoImage'},
     'react-native':native,'lucide-react-native':Object.fromEntries(['ArrowLeft','ArrowUpRight','CalendarDays','ChevronLeft','ChevronRight','Clock3','Heart','MapPin','MessageCircle','Share2','Star','Ticket'].map(n=>[n,n])),
@@ -26,7 +31,7 @@ async function app({failDetail=false,failReviews=false,realReviewCard=false,tran
     'src/components/common/Tag.tsx':{__esModule:true,default:'Tag'},
     'src/components/navigation/FloatingTabBar.tsx':{FLOATING_TAB_BAR_HEIGHT:60,FLOATING_TAB_BAR_BOTTOM_GAP:12},
     'src/components/place/PlaceMapPreview.tsx':{__esModule:true,default:'MapPreview',isMapPreviewAvailable:true},
-    ...Object.fromEntries(['PopupHeroImage','PopupDetailSkeleton','OfficialChannelIcon'].map(n=>[`src/components/place/${n}.tsx`,{__esModule:true,default:n}])),
+    ...Object.fromEntries(['PopupHeroImage','PopupDetailSkeleton','OfficialChannelIcon','PopupIntroduction'].map(n=>[`src/components/place/${n}.tsx`,{__esModule:true,default:n}])),
     ...(!realReviewCard ? {'src/components/community/CommunityPostItem.tsx':{__esModule:true,default:'ReviewCard'}} : {}),
     'src/components/reviews/ReviewActions.tsx':{__esModule:true,default:'ReviewActions'},
     'src/hooks/useCommunityNow.ts':{useCommunityNow:()=>({now:1})},

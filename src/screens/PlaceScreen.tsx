@@ -13,6 +13,7 @@ import PlaceFilterSheet from '../components/place/PlaceFilterSheet';
 import PopupGridCard from '../components/place/PopupGridCard';
 import { createPlaceCoverRecovery, mergeRecoveredCover } from '../lib/placeCoverRecovery';
 import { getPopupDetail } from '../lib/popups';
+import { getVenuePopups } from '../lib/popupVenues';
 import { mergeExploreCovers, recoverExploreCover } from '../lib/exploreCoverRecovery';
 import PopupGridSkeleton from '../components/place/PopupGridSkeleton';
 import QuickFilterBar from '../components/place/QuickFilterBar';
@@ -20,6 +21,7 @@ import PlaceRegionSection from '../components/place/PlaceRegionSection';
 import PlaceInterestSection from '../components/place/PlaceInterestSection';
 import PlaceWeeklySection from '../components/place/PlaceWeeklySection';
 import TodayOpeningCarousel from '../components/place/TodayOpeningCarousel';
+import HomeVenueSection from '../components/home/HomeVenueSection';
 import { FLOATING_TAB_BAR_BOTTOM_GAP, FLOATING_TAB_BAR_HEIGHT } from '../components/navigation/FloatingTabBar';
 import { placeRegionPages, type PlaceRegionCardItem } from '../constants/placeRegionMocks';
 import {
@@ -27,6 +29,7 @@ import {
   regionFilters,
   type CountryCode,
   type InterestId,
+  type PlaceFilterState,
   type QuickFeatureId,
 } from '../constants/placeFilters';
 import { colors, radius, spacing, typography } from '../theme/tokens';
@@ -66,8 +69,23 @@ export default function PlaceScreen() {
     return () => { if (__DEV__) console.log('[EndingSoon] Place unmount'); };
   }, []);
   const openPopup = usePopupNavigation();
-  const entry = useLocalSearchParams<{ tab?: string; countryCode?: string; openingFrom?: string; openingTo?: string; homeNewEntry?: string }>();
+  const entry = useLocalSearchParams<{ tab?: string; countryCode?: string; tagId?: string; openingFrom?: string; openingTo?: string; homeNewEntry?: string; homeCategoryEntry?: string; venueId?: string; homeVenueEntry?: string; placeBrowseEntry?: string }>();
   const consumedEntry = useRef<string | undefined>(undefined);
+  const consumedCategoryEntry = useRef<string | undefined>(undefined);
+  const consumedVenueEntry = useRef<string | undefined>(undefined);
+  const consumedBrowseEntry = useRef<string | undefined>(undefined);
+  const [selectedVenueId, setSelectedVenueId] = useState<string | null>(null);
+  const pendingVenueEntry = !!entry.homeVenueEntry && consumedVenueEntry.current !== entry.homeVenueEntry
+    && entry.tab === 'all' && !!entry.venueId;
+  const categoryTagId = entry.tagId ? Number(entry.tagId) : undefined;
+  const pendingCategoryEntry = !!entry.homeCategoryEntry && consumedCategoryEntry.current !== entry.homeCategoryEntry
+    && entry.tab === 'all' && ['all', 'KR', 'JP'].includes(entry.countryCode ?? '')
+    && (categoryTagId === undefined || (Number.isSafeInteger(categoryTagId) && categoryTagId > 0));
+  const pendingNewEntry = !!entry.homeNewEntry && consumedEntry.current !== entry.homeNewEntry && entry.tab === 'all'
+    && (entry.countryCode === 'KR' || entry.countryCode === 'JP')
+    && !!entry.openingFrom && !!entry.openingTo
+    && /^\d{4}-\d{2}-\d{2}$/.test(entry.openingFrom) && /^\d{4}-\d{2}-\d{2}$/.test(entry.openingTo);
+  const homeEntryPending = pendingVenueEntry || pendingNewEntry || pendingCategoryEntry;
   const listRef = useRef<FlatList<PublicPopup>>(null);
   const [selectedTab, setSelectedTab] = useState<PlaceTab>('탐색');
   const scrollYRef = useRef(0);
@@ -75,6 +93,7 @@ export default function PlaceScreen() {
   const pendingInterestScrollReset = useRef(false);
   const tabPressScrollRef = useRef({
     scrollToTop: () => {
+      setSelectedVenueId(null);
       if (scrollYRef.current > 0) {
         listRef.current?.scrollToOffset({ offset: 0, animated: true });
       } else {
@@ -130,7 +149,9 @@ export default function PlaceScreen() {
     regionSelection.current++;
     categorySelection.current++;
   }, []));
-  const country = appliedFilters.countries[0];
+  // Use the destination country immediately so auxiliary queries never load the previous country on entry.
+  const entryCountry = entry.countryCode === 'KR' || entry.countryCode === 'JP' ? entry.countryCode : undefined;
+  const country = homeEntryPending ? entryCountry : appliedFilters.countries[0];
   const endingCoverScope = JSON.stringify([country, resolvedLanguage, today]);
   const latestEndingScope = useRef(endingCoverScope);
   latestEndingScope.current = endingCoverScope;
@@ -154,7 +175,7 @@ export default function PlaceScreen() {
   const directPeriod = datePeriod.mode === 'sevenDays' || datePeriod.mode === 'custom';
   const operatingFrom = directPeriod ? datePeriod.startDate ?? undefined : undefined;
   const operatingTo = directPeriod ? datePeriod.endDate ?? undefined : undefined;
-  const filterOptionsCountry = isFilterSheetOpen ? draftQuickFilters.countries[0] : country;
+  const filterOptionsCountry = isFilterSheetOpen && !homeEntryPending ? draftQuickFilters.countries[0] : country;
   const regionIdsKey = appliedDetailFilters.regionIds.join(',');
   const tagIdsKey = appliedDetailFilters.tagIds.join(',');
   const hasAppliedFilters = appliedFilters.countries.length > 0
@@ -163,18 +184,28 @@ export default function PlaceScreen() {
     || appliedDetailFilters.tagIds.length > 0
     || appliedDetailFilters.status !== undefined
     || visitPeriod !== 'all' || datePeriod.mode !== 'all' || appliedDetailFilters.openingFrom !== undefined;
-  const queryKey = [country ?? '', regionIdsKey, tagIdsKey, appliedDetailFilters.status ?? '', requestVisitPeriod, requestVisitPeriod === 'all' ? '' : today, datePeriod.mode, datePeriod.startDate ?? '', datePeriod.endDate ?? '', appliedDetailFilters.openingFrom ?? '', appliedDetailFilters.openingTo ?? '', resolvedLanguage, hasReservation, hasBenefits].join('|');
+  const queryKey = selectedVenueId ? JSON.stringify(['venue', selectedVenueId, resolvedLanguage])
+    : [country ?? '', regionIdsKey, tagIdsKey, appliedDetailFilters.status ?? '', requestVisitPeriod, requestVisitPeriod === 'all' ? '' : today, datePeriod.mode, datePeriod.startDate ?? '', datePeriod.endDate ?? '', appliedDetailFilters.openingFrom ?? '', appliedDetailFilters.openingTo ?? '', resolvedLanguage, hasReservation, hasBenefits].join('|');
 
   useEffect(() => {
-    if (!entry.homeNewEntry || consumedEntry.current === entry.homeNewEntry || entry.tab !== 'all'
-      || (entry.countryCode !== 'KR' && entry.countryCode !== 'JP')
-      || !entry.openingFrom || !entry.openingTo
-      || !/^\d{4}-\d{2}-\d{2}$/.test(entry.openingFrom) || !/^\d{4}-\d{2}-\d{2}$/.test(entry.openingTo)) return;
-    consumedEntry.current = entry.homeNewEntry;
+    if (!entry.placeBrowseEntry || consumedBrowseEntry.current === entry.placeBrowseEntry) return;
+    consumedBrowseEntry.current = entry.placeBrowseEntry;
+    // Only an explicit bottom-tab entry clears the venue; returning from detail retains it.
+    if (!homeEntryPending) setSelectedVenueId(null);
+  }, [entry.placeBrowseEntry, homeEntryPending]);
+
+  useEffect(() => {
+    if (!homeEntryPending) return;
+    if (pendingNewEntry) consumedEntry.current = entry.homeNewEntry;
+    if (pendingCategoryEntry) consumedCategoryEntry.current = entry.homeCategoryEntry;
+    if (pendingVenueEntry) consumedVenueEntry.current = entry.homeVenueEntry;
+    setSelectedVenueId(pendingVenueEntry ? entry.venueId! : null);
     regionSelection.current++;
     categorySelection.current++;
-    const quick = { ...createEmptyPlaceFilters(), countries: [entry.countryCode as CountryCode] };
-    const detail = { ...emptyPopupFilters(), openingFrom: entry.openingFrom, openingTo: entry.openingTo };
+    const quick: PlaceFilterState = { ...createEmptyPlaceFilters(), countries: entryCountry ? [entryCountry] : [] };
+    const detail = pendingVenueEntry ? emptyPopupFilters() : pendingNewEntry
+      ? { ...emptyPopupFilters(), openingFrom: entry.openingFrom, openingTo: entry.openingTo }
+      : { ...emptyPopupFilters(), tagIds: categoryTagId === undefined ? [] : [categoryTagId] };
     setAppliedFilters(quick);
     setDraftQuickFilters(quick);
     setAppliedDetailFilters(detail);
@@ -186,8 +217,9 @@ export default function PlaceScreen() {
     setSearchQuery('');
     setFilterSheetOpen(false);
     setSelectedTab('전체');
-    listRef.current?.scrollToOffset({ offset: 0, animated: false });
-  }, [entry.homeNewEntry, entry.tab, entry.countryCode, entry.openingFrom, entry.openingTo]);
+    pendingInterestScrollReset.current = true;
+    setInterestScrollReset(current => current + 1);
+  }, [homeEntryPending, pendingVenueEntry, pendingNewEntry, pendingCategoryEntry, entry.homeVenueEntry, entry.venueId, entry.homeNewEntry, entry.homeCategoryEntry, entry.tab, entryCountry, categoryTagId, entry.openingFrom, entry.openingTo]);
 
   useEffect(() => {
     let active = true;
@@ -227,7 +259,7 @@ export default function PlaceScreen() {
     setPopupListState(next);
   }
   function loadPage(after: string | null = null) {
-    if (listRequest.current || selectedTab !== '전체') return;
+    if (homeEntryPending || listRequest.current || selectedTab !== '전체') return;
     const current = listStateRef.current;
     if (after && (current.queryKey !== queryKey || current.status !== 'ready' || current.nextCursor !== after)) return;
     const controller = new AbortController();
@@ -235,8 +267,11 @@ export default function PlaceScreen() {
     listRequest.current = controller;
     publishList(after ? { ...current, loadingMore: true, moreError: false }
       : { queryKey, status: 'loading', popups: [], nextCursor: null, loadingMore: false, moreError: false });
-    getPopupPage(country, controller.signal, { ...appliedDetailFilters, visitPeriod: requestVisitPeriod, operatingFrom, operatingTo,
-      hasReservation: hasReservation || undefined, hasBenefits: hasBenefits || undefined }, after, resolvedLanguage)
+    const request = selectedVenueId
+      ? getVenuePopups(selectedVenueId, controller.signal, resolvedLanguage).then(popups => ({ popups, nextCursor: null }))
+      : getPopupPage(country, controller.signal, { ...appliedDetailFilters, visitPeriod: requestVisitPeriod, operatingFrom, operatingTo,
+        hasReservation: hasReservation || undefined, hasBenefits: hasBenefits || undefined }, after, resolvedLanguage);
+    request
       .then(page => {
         if (controller.signal.aborted || latestQueryKey.current !== queryKey) return;
         const previous = after ? listStateRef.current.popups : [];
@@ -258,9 +293,9 @@ export default function PlaceScreen() {
     publishList({ queryKey, status: 'loading', popups: [], nextCursor: null, loadingMore: false, moreError: false });
   }, [queryKey]);
   useEffect(() => {
-    if (selectedTab === '전체' && listStateRef.current.status === 'loading') loadPage();
+    if (!homeEntryPending && selectedTab === '전체' && listStateRef.current.status === 'loading') loadPage();
     // Retain data and active requests when switching tabs.
-  }, [selectedTab, queryKey]);
+  }, [selectedTab, queryKey, homeEntryPending]);
   useEffect(() => () => { listRequest.current?.abort(); coverRecovery.current?.reset(); }, []);
 
   useEffect(() => {
@@ -287,7 +322,7 @@ export default function PlaceScreen() {
     return () => controller.abort();
   }, [country, today, resolvedLanguage]);
 
-  const status = popupListState.queryKey === queryKey ? popupListState.status : 'loading';
+  const status = !homeEntryPending && popupListState.queryKey === queryKey ? popupListState.status : 'loading';
   const visiblePopups = status === 'ready' ? popupListState.popups : emptyPopups;
   const normalizedQuery = searchQuery.trim().toLocaleLowerCase();
   const searchedPopups = normalizedQuery
@@ -296,7 +331,7 @@ export default function PlaceScreen() {
   const endingSoonEnd = new Date(Date.parse(`${today}T00:00:00Z`) + 5 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const endingSoonMatches = endingSoonState.country === country && endingSoonState.languageCode === resolvedLanguage;
   const endingSoonPopups = endingSoonMatches
-    ? endingSoonState.popups.filter((popup) => popup.startDate <= today && popup.endDate >= today && popup.endDate <= endingSoonEnd).slice(0, 7)
+    ? endingSoonState.popups.filter((popup) => popup.endDate !== null && popup.startDate <= today && popup.endDate >= today && popup.endDate <= endingSoonEnd).slice(0, 7)
     : emptyPopups;
   const endingSoonLoading = !endingSoonMatches || endingSoonState.status === 'loading';
   const stateMessage = status === 'loading' ? t('place.all.loading')
@@ -310,6 +345,7 @@ export default function PlaceScreen() {
   const cardWidth = (width - insets.left - insets.right - spacing.space16 * 2 - spacing.space12) / 2;
   const carouselWidth = width - insets.left - insets.right - spacing.space16 * 2;
   const selectExploreRegion = (item: PlaceRegionCardItem) => {
+    setSelectedVenueId(null);
     categorySelection.current++;
     const source = regionFilters.find((region) => region.id === item.id);
     const selection = ++regionSelection.current;
@@ -338,6 +374,7 @@ export default function PlaceScreen() {
       if (!tag) return;
 
       regionSelection.current++;
+      setSelectedVenueId(null);
       setAppliedFilters((current) => ({ ...createEmptyPlaceFilters(), countries: current.countries }));
       const detailFilters = { ...emptyPopupFilters(), tagIds: [tag.id] };
       setAppliedDetailFilters(detailFilters);
@@ -351,6 +388,7 @@ export default function PlaceScreen() {
   };
 
   const toggleCountry = (selectedCountry: CountryCode) => {
+    setSelectedVenueId(null);
     regionSelection.current++;
     setAppliedFilters((current) => {
       const isSelected = current.countries.includes(selectedCountry);
@@ -388,6 +426,7 @@ export default function PlaceScreen() {
 
   const applyFilterSheet = () => {
     if (draftDatePeriod.mode === 'custom' && !isValidDateRange(draftDatePeriod.startDate, draftDatePeriod.endDate)) return;
+    setSelectedVenueId(null);
     // A committed draft supersedes any pending tile selection, even in the same country.
     regionSelection.current++;
     categorySelection.current++;
@@ -399,6 +438,7 @@ export default function PlaceScreen() {
   };
 
   const resetAppliedFilters = () => {
+    setSelectedVenueId(null);
     setDatePeriod(emptyDatePeriod());
     setDraftDatePeriod(emptyDatePeriod());
     regionSelection.current++;
@@ -412,6 +452,7 @@ export default function PlaceScreen() {
   };
 
   const removeAppliedFilter = (group: 'countries' | 'quickFeatures' | 'regionIds' | 'tagIds' | 'status' | 'period' | 'openingWeek', id: string | number) => {
+    setSelectedVenueId(null);
     if (group === 'openingWeek') {
       setAppliedDetailFilters((current) => ({ ...current, openingFrom: undefined, openingTo: undefined }));
       setDraftDetailFilters((current) => ({ ...current, openingFrom: undefined, openingTo: undefined }));
@@ -439,6 +480,7 @@ export default function PlaceScreen() {
   const updateSearchQuery = (value: string) => {
     setSearchQuery(value);
     if (value.trim()) {
+      setSelectedVenueId(null);
       categorySelection.current++;
       setSelectedTab('전체');
     }
@@ -504,6 +546,7 @@ export default function PlaceScreen() {
                     accessibilityRole="tab"
                     accessibilityState={{ selected: isSelected }}
                     onPress={() => {
+                      if (tab === '탐색') setSelectedVenueId(null);
                       pendingInterestScrollReset.current = false;
                       categorySelection.current++;
                       setSelectedTab(tab);
@@ -555,8 +598,10 @@ export default function PlaceScreen() {
                     <QuickFilterBar
                       selectedFilters={appliedFilters}
                       onToggleCountry={toggleCountry}
-                      onToggleFeature={(id: QuickFeatureId) =>
-                        setAppliedFilters((current) => ({ ...current, quickFeatures: toggleId(current.quickFeatures, id) }))}
+                      onToggleFeature={(id: QuickFeatureId) => {
+                        setSelectedVenueId(null);
+                        setAppliedFilters((current) => ({ ...current, quickFeatures: toggleId(current.quickFeatures, id) }));
+                      }}
                       onOpenDetails={openFilterSheet}
                     />
                   )}
@@ -580,15 +625,16 @@ export default function PlaceScreen() {
                   error={endingSoonMatches && endingSoonState.status === 'error'}
                   onPressPopup={(popup) => openPopup(popup.publicId)}
                 />
+                <HomeVenueSection isActive={selectedTab === '탐색' && !homeEntryPending} style={styles.venueSection} />
                 <PlaceRegionSection
                   pages={placeRegionPages}
                   width={carouselWidth}
                   onPress={selectExploreRegion}
-                  isActive={selectedTab === '탐색'}
+                  isActive={selectedTab === '탐색' && !homeEntryPending}
                 />
                 <PlaceWeeklySection
                   country={country}
-                  isActive={selectedTab === '탐색'}
+                  isActive={selectedTab === '탐색' && !homeEntryPending}
                   onPressPopup={(popup) => openPopup(popup.publicId)}
                   isFavorite={isFavorite}
                   isFavoriteDisabled={isFavoriteDisabled}
@@ -601,6 +647,7 @@ export default function PlaceScreen() {
         renderItem={({ item }) => (
           <PopupGridCard
             item={item}
+            today={today}
             width={cardWidth}
             isFavorite={isFavorite(item.publicId)}
             isFavoriteDisabled={isFavoriteDisabled(item.publicId)}
@@ -678,6 +725,7 @@ export default function PlaceScreen() {
 
 const styles = StyleSheet.create({
   hiddenExplore: { display: 'none' },
+  venueSection: { marginHorizontal: -spacing.space16, marginTop: spacing.space40, marginBottom: spacing.space0 },
   container: {
     flex: 1,
     paddingTop: 8,
@@ -779,7 +827,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   gridRowGap: {
-    height: spacing.space24,
+    height: spacing.space32,
   },
   stateText: {
     ...typography.body,

@@ -9,6 +9,7 @@ const pureFiles = new Set([
   'src/lib/communityTime.ts', 'src/locales/index.ts', 'src/locales/languageStore.ts',
   'src/lib/loginReturn.ts', 'src/lib/requestTimeout.ts',
   'src/lib/mapDirections.ts',
+  'src/lib/mapPopupDates.ts',
   'src/lib/placeDatePeriod.ts',
   'src/locales/filterLabels.ts', 'src/locales/accountUi.ts',
 ]);
@@ -93,6 +94,9 @@ function withUiDependencies(file, mocks = {}, requestFetch) {
 // and persistence are exercised with the real modules in i18n.test.cjs.
 function withI18nDependencies(file, mocks = {}, requestFetch) {
   const imports = { ...mocks };
+  if (file === 'src/screens/PlaceScreen.tsx') {
+    imports['../components/home/HomeVenueSection'] ??= { __esModule: true, default: 'HomeVenueSection' };
+  }
   if (file === 'src/lib/auth.ts') imports['./deviceId'] ??= { getDeviceId: async () => 'device' };
   if (file.startsWith('src/lib/') && file !== 'src/lib/auth.ts' && file !== 'src/lib/deviceId.ts') {
     imports['./auth'] = require('./authRequestMock.cjs').authRequestMock(imports['./auth'] ?? {}, requestFetch);
@@ -115,6 +119,10 @@ function withI18nDependencies(file, mocks = {}, requestFetch) {
       mergeExploreCovers: (rows, _country, _language, fetchedAt) => rows.map(row => ({ ...row, coverImageFetchedAt: fetchedAt })) };
   }
   if (file === 'src/app/places/[id].tsx') imports['../../lib/placeCoverRecovery'] ??= { mergeRecoveredCover: rows => rows };
+  // Legacy general-list fixtures do not enter venue mode. Venue tests exercise the real API.
+  if (file === 'src/screens/PlaceScreen.tsx') imports['../lib/popupVenues'] ??= {
+    getVenuePopups: async () => { throw new Error('Unexpected venue request in a general-list fixture'); },
+  };
   if (['src/components/home/NewPopupCard.tsx', 'src/components/home/PopupRankingCard.tsx'].includes(file)) {
     imports['expo-image'] ??= { Image: imports['react-native']?.Image ?? 'ExpoImage' };
     // Stateless layout fixtures; homeCoverRecovery executes the real mounted hook/API.

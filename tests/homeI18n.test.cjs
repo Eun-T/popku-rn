@@ -172,7 +172,7 @@ test('all 20 used home keys exist in ko/ja with matching placeholders and no new
 test('Korean UI preserves original text and the expanded ranking/country state survives live ko/ja/system switching', async () => {
   const env = await home();
   assert.deepEqual(text(env.trending.tree).slice(0, 2), ['지금 뜨는 팝업 🔥', '요즘 인기 있는 팝업을 모아봤어요!']);
-  assert.deepEqual(text(env.fresh.tree).slice(0, 2), ['이번 주 새로 열려요 ✨', '이번 주 새롭게 오픈하는 팝업을 만나보세요!']);
+  assert.deepEqual(text(env.fresh.tree).slice(0, 2), ['이번 주 팝업 오픈 ✨', '이번 주 새롭게 오픈하는 팝업을 만나보세요!']);
   const filter = () => component(env.trending.tree, 'FilterChips');
   assert.deepEqual(filter().props.options, [{ label: '한국', value: 'KR' }, { label: '일본', value: 'JP' }]);
   component(env.trending.tree, 'MoreButton').props.onPress();

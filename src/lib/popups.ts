@@ -14,7 +14,7 @@ export type PublicPopup = {
   latitude: number | null;
   longitude: number | null;
   startDate: string;
-  endDate: string;
+  endDate: string | null;
   coverImageUrl: string | null;
   coverImageCacheKey?: string | null;
   /** Client-only timestamp: start of the request that delivered this cover URL. */

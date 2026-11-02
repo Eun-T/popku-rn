@@ -16,6 +16,7 @@ async function app({ compiled=false, slowLists=false, withScreen=false }={}) {
   const compile=compilerTransform(['src/components/place/PlaceWeeklyPopupList.tsx',carouselFile,
     'src/components/place/ExplorePopupPoster.tsx','src/hooks/useTranslation.ts'], { allowBailout:[], onBailout:f=>bailouts.push(f) });
   const ui=runtime({
+    'src/components/home/HomeVenueSection.tsx': { __esModule: true, default: 'HomeVenueSection' },
     'test-clock':{ now:()=>now },
     'react-native':{ ...Object.fromEntries(['View','Text','Pressable','TextInput','FlatList','Image'].map(n=>[n,n])),
       StyleSheet:{ create:s=>s, absoluteFill:{position:'absolute',left:0,right:0,top:0,bottom:0} },

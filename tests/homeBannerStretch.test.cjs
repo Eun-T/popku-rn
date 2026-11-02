@@ -4,31 +4,40 @@ const { runtime } = require('./helpers/i18nRuntime.cjs');
 
 // Execute the actual screen handlers; native gestures and Reanimated dispatch are mocked.
 function screen() {
-  let handlers, renders = 0, writes = 0;
+  let handlers, renders = 0, writes = 0, sharedValues = 0;
+  const scrolls = [];
   const ui = runtime({
+    'expo-router': { useScrollToTop: () => {} },
     'react-native': { ScrollView: 'ScrollView', View: 'View', StyleSheet: { create: value => value } },
     'react-native-reanimated': {
       __esModule: true, default: { ScrollView: 'AnimatedScrollView' },
       useSharedValue(initial) {
         let value = initial;
-        return { get value() { return value; }, set value(next) { writes++; value = next; } };
+        const isBanner = sharedValues++ === 0;
+        return { get value() { return value; }, set value(next) { if (isBanner) writes++; value = next; } };
       },
       useAnimatedScrollHandler(value) { handlers = value; return value; },
     },
     'src/hooks/usePopupNavigation.ts': { usePopupNavigation: () => () => {} },
     'src/theme/useTheme.ts': { useTheme: () => ({ themeColors: { background: '#FFFFFF' } }) },
     'src/components/home/HomeBanner.tsx': { __esModule: true, default: 'HomeBanner' },
+    'src/components/home/HomeCategoryShortcuts.tsx': { __esModule: true, default: 'HomeCategoryShortcuts' },
+    'src/components/home/HomeLatestPopupSection.tsx': { __esModule: true, default: 'HomeLatestPopupSection' },
+    'src/components/home/HomeVenueSection.tsx': { __esModule: true, default: 'HomeVenueSection' },
     'src/components/home/HomeTrendingSection.tsx': { __esModule: true, default: 'HomeTrendingSection' },
     'src/components/home/HomeNewPopupSection.tsx': { __esModule: true, default: 'HomeNewPopupSection' },
     'src/components/navigation/FloatingTabBar.tsx': { FLOATING_TAB_BAR_HEIGHT: 60, FLOATING_TAB_BAR_BOTTOM_GAP: 12 },
   });
   const HomeScreen = ui.load('src/screens/HomeScreen.tsx').default;
   const mounted = ui.mount(() => { renders++; return HomeScreen(); });
+  mounted.tree.props.ref.current = { scrollTo: options => scrolls.push(options) };
+  const collapse = height => mounted.tree.props.children.find(child => child.type === 'HomeTrendingSection').props.onBeforeCollapse(height);
   const distance = mounted.tree.props.children[0].props.pullDistance;
   const context = {};
   const send = (name, y) => handlers[name]({ contentOffset: { x: 0, y } }, context);
   return {
     begin: y => send('onBeginDrag', y), end: y => send('onEndDrag', y), scroll: y => send('onScroll', y),
+    collapse, scrolls,
     get distance() { return distance.value; }, get renders() { return renders; }, get writes() { return writes; },
   };
 }
@@ -122,5 +131,21 @@ test('normal scrolling and clamped Android-style top offsets leave the banner un
   s.end(0);
   assert.equal(s.distance, 0);
   assert.equal(s.writes, 0);
+  assert.equal(s.renders, 1);
+});
+
+test('ranking collapse subtracts the measured removed height from the latest scroll offset', () => {
+  const s = screen();
+  s.scroll(1800);
+  s.collapse(620);
+  assert.deepEqual(s.scrolls, [{ y: 1180, animated: true }]);
+  s.scroll(1180);
+  s.scroll(1700);
+  s.collapse(540);
+  assert.deepEqual(s.scrolls.at(-1), { y: 1160, animated: true });
+  s.scroll(100);
+  s.collapse(540);
+  assert.deepEqual(s.scrolls.at(-1), { y: 0, animated: true });
+  assert.equal(s.distance, 0);
   assert.equal(s.renders, 1);
 });

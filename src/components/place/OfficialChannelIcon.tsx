@@ -6,6 +6,7 @@ export type SocialChannel = 'website' | 'instagram' | 'x' | 'youtube' | 'threads
 
 type OfficialChannelIconProps = {
   channel: SocialChannel;
+  size?: number;
 };
 
 // Brand glyph paths from Simple Icons; rendered with the project's existing SVG package.
@@ -32,11 +33,11 @@ const glyphs: Record<Exclude<SocialChannel, 'website'>, { path: string; color: s
   },
 };
 
-export default function OfficialChannelIcon({ channel }: OfficialChannelIconProps) {
-  if (channel === 'website') return <Globe size={24} color={colors.text} accessible={false} />;
+export default function OfficialChannelIcon({ channel, size = 24 }: OfficialChannelIconProps) {
+  if (channel === 'website') return <Globe size={size} color={colors.text} accessible={false} />;
   const glyph = glyphs[channel];
   return (
-    <Svg width={24} height={24} viewBox="0 0 24 24" accessible={false}>
+    <Svg width={size} height={size} viewBox="0 0 24 24" accessible={false}>
       <Path d={glyph.path} fill={glyph.color} />
     </Svg>
   );

@@ -1,16 +1,16 @@
 import { StyleSheet, View } from 'react-native';
 
 import SkeletonBlock from '../common/SkeletonBlock';
-import { radius, spacing } from '../../theme/tokens';
+import { spacing } from '../../theme/tokens';
 
 type PopupGridSkeletonProps = { cardWidth: number };
 
 function PopupGridSkeletonCard({ width }: { width: number }) {
   return (
     <View style={{ width }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-      <SkeletonBlock width="100%" height={width * 5 / 4} borderRadius={radius.radius8} />
-      <SkeletonBlock width={88} height={26} style={styles.badge} />
-      <SkeletonBlock width="85%" height={20} style={styles.title} />
+      <SkeletonBlock width="100%" height={width * 4 / 3} borderRadius={6} />
+      <SkeletonBlock width={88} height={20} style={styles.dayStatus} />
+      <SkeletonBlock width="85%" height={24} style={styles.title} />
       <View style={styles.locationAndTag}>
         <SkeletonBlock width="43%" height={18} />
         <SkeletonBlock width="38%" height={18} />
@@ -35,9 +35,9 @@ export default function PopupGridSkeleton({ cardWidth }: PopupGridSkeletonProps)
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', columnGap: spacing.space12, alignItems: 'flex-start' },
-  nextRow: { marginTop: spacing.space24 },
-  badge: { marginTop: spacing.space8 },
-  title: { marginTop: spacing.space6 },
+  nextRow: { marginTop: spacing.space32 },
+  dayStatus: { marginTop: spacing.space12 },
+  title: { marginTop: spacing.space4 },
   locationAndTag: { flexDirection: 'row', columnGap: spacing.space4, marginTop: spacing.space8 },
   period: { marginTop: spacing.space6 },
 });

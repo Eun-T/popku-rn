@@ -26,6 +26,7 @@ function driver() {
       return [slots[i].value, value => { slots[i].value = typeof value === 'function' ? value(slots[i].value) : value; }]; },
     useRef(initial) { return slots[index++] ??= { current: initial }; },
     useCallback(fn, deps) { const i = index++; if (!same(slots[i]?.deps, deps)) slots[i] = { value: fn, deps }; return slots[i].value; },
+    useMemo(fn, deps) { const i = index++; if (!same(slots[i]?.deps, deps)) slots[i] = { value: fn(), deps }; return slots[i].value; },
     useEffect(fn, deps) { const i = index++; if (!same(slots[i]?.deps, deps)) {
       const old = slots[i]; slots[i] = { deps }; pending.push(() => { old?.cleanup?.(); slots[i].cleanup = fn(); });
     } },
@@ -147,6 +148,8 @@ test('home: initial errors retry at TTL, cache keys stay isolated and late compl
 function mapEnv() {
   const d = driver(), calls = [];
   const module = load('src/hooks/useMapPopups.ts', { react: d.react, 'expo-router': { useFocusEffect: d.useFocusEffect },
+    'react-native': { AppState: { addEventListener: () => ({ remove() {} }) } },
+    '../lib/mapPopupDates': require('./helpers/uiDependencies.cjs').loadPure('src/lib/mapPopupDates.ts'),
     '../lib/popups': { getPopupMap(signal) { const wait = deferred(); calls.push({ signal, ...wait }); return wait.promise; } } });
   return { ...d, calls, render: () => d.render(() => module.useMapPopups('ko')) };
 }
@@ -158,10 +161,10 @@ test('map: failure differs from empty; focus retries only failures and concurren
   e.blur(); e.focus(); assert.equal(e.calls.length, 2, 'normal empty response never refreshes on focus'); e.dispose();
 });
 test('map: refresh failure retains markers; manual retry recovers; cleanup aborts and rejects late reads', async () => {
-  const e = mapEnv(); e.render(); const rows = [{ id: 'a' }]; e.calls[0].resolve(rows); await flush();
+  const e = mapEnv(); e.render(); const rows = [{ id: 'a', startDate: '2020-01-01', endDate: '2099-12-31' }]; e.calls[0].resolve(rows); await flush();
   const refresh = e.render().refresh(); e.calls[1].reject(new Error('offline')); await assert.rejects(refresh);
   assert.equal(e.render().status, 'error'); assert.deepEqual(e.render().popups, rows);
-  const retry = e.render().refresh(); e.calls[2].resolve([{ id: 'b' }]); await retry;
+  const retry = e.render().refresh(); e.calls[2].resolve([{ id: 'b', startDate: '2020-01-01', endDate: '2099-12-31' }]); await retry;
   assert.equal(e.render().popups[0].id, 'b'); assert.equal(e.render().status, 'ready');
   const late = e.render().refresh(); e.dispose(); assert.equal(e.calls[3].signal.aborted, true);
   e.calls[3].resolve([{ id: 'late' }]); await assert.rejects(late, /aborted/);

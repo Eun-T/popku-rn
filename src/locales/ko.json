@@ -1,16 +1,30 @@
 {
   "common": {},
   "home": {
+    "japanNew": { "title": "일본 신상 팝업", "empty": "등록된 일본 팝업이 없어요." },
+    "seoulMap": {
+      "totalPrefix": "총",
+      "totalSuffix": "개",
+      "title": "지도로 발견하는 팝업",
+      "description": "지도에서 가까운 팝업을 한눈에 살펴보세요.",
+      "open": "서울 팝업 지도에서 보기",
+      "loading": "지도를 불러오는 중입니다.",
+      "failed": "지도를 불러오지 못했습니다."
+    },
+    "venues": { "title": "여기서 열리는 팝업 ", "count": "팝업 {count}개" },
+    "latest": { "title": "새로 올라온 팝업 " },
     "title": "메인 홈",
+    "categoriesTitle": "인기 카테고리",
     "trending": {
-      "title": "지금 뜨는 팝업 🔥",
+      "title": "지금 핫한 팝업",
       "description": "요즘 인기 있는 팝업을 모아봤어요!",
       "emptyTitle": "진행 중인 팝업이 없어요",
       "emptyDescription": "새로운 팝업을 준비 중이에요",
       "showAll": "TOP 10 모두 보기"
     },
     "new": {
-      "title": "이번 주 새로 열려요 ✨",
+      "showAll": "더 많은 팝업 보기",
+      "title": "이번 주 팝업 오픈 ✨",
       "description": "이번 주 새롭게 오픈하는 팝업을 만나보세요!",
       "empty": "이번 주 새로 여는 팝업이 없어요."
     },
@@ -28,14 +42,28 @@
   "place": {
     "title": "플레이스",
     "detail": {
+      "descriptionTitle": "상세",
       "about": "팝업 소개",
+      "introduction": {
+        "attractions": "볼거리",
+        "products": "판매 상품",
+        "more": "더 보기",
+        "collapse": "접기"
+      },
       "benefits": "혜택",
+      "benefitsGuide": "혜택",
       "notice": "공지사항",
       "officialChannels": "공식 채널",
       "website": "공식 홈페이지",
       "officialChannelLink": "{channel} 공식 채널",
       "channelOpenError": "링크를 열지 못했어요. 잠시 후 다시 시도해 주세요.",
+      "blogReviews": "블로그 후기",
+      "nearbyPopups": "주변에서 열리는 팝업",
+      "similarPopups": "비슷한 취향의 팝업",
+      "nearbyImageUnavailable": "이미지가 없습니다.",
+      "nearbyDistance": "거리 {distance}",
       "basicInfo": {
+        "heading": "기본 정보",
         "period": "기간",
         "time": "시간",
         "place": "장소",
@@ -250,6 +278,7 @@
     }
   },
   "map": {
+    "clusterPopups": "이 위치의 팝업 {count}개",
     "title": "지도",
     "search": {
       "placeholder": "장소나 팝업을 검색해보세요",

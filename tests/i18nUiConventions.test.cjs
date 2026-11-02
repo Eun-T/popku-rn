@@ -15,8 +15,13 @@ const scope = ['HomeTrendingSection','HomeNewPopupSection','HomeBanner'].map(n=>
     ["src/app/profile/settings.tsx","src/app/profile/language.tsx","src/app/(tabs)/profile/login.tsx","src/app/(tabs)/profile/signup.tsx","src/app/profile/withdrawal.tsx","src/app/profile/notices/index.tsx","src/app/profile/notices/[id].tsx","src/app/profile/inquiries/index.tsx","src/app/profile/inquiries/[id].tsx","src/app/profile/inquiries/write.tsx","src/components/profile/AccountSettingsScreen.tsx","src/components/profile/NoticeLayout.tsx","src/components/profile/InquiryLayout.tsx","src/components/profile/PolicyDetailScreen.tsx","src/app/profile/policies/index.tsx"]);
 
 scope.push('src/components/place/PopupGridCard.tsx');
+scope.push('src/components/place/PopupIntroduction.tsx');
+scope.push('src/components/place/PopupGuidanceSheet.tsx');
 scope.push('src/components/profile/ThemePreferenceSheet.tsx');
 scope.push('src/components/home/NewPopupCard.tsx', 'src/components/home/PopupRankingCard.tsx');
+scope.push('src/components/home/HomeCategoryShortcuts.tsx');
+scope.push('src/components/home/HomeLatestPopupSection.tsx', 'src/components/home/LatestPopupCard.tsx');
+scope.push('src/components/home/HomeVenueSection.tsx', 'src/screens/PlaceScreen.tsx');
 
 test('previously fixed home/place and stages 5/6 React UI follow the scoped i18n rules',()=>{
   for(const file of scope) assert.deepEqual(inspectI18nUi(fs.readFileSync(file,'utf8'),file),[],file);

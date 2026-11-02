@@ -280,12 +280,12 @@ export default function TodayOpeningCarousel({
                   </Svg>
                 </View>
                 <View pointerEvents="none" style={styles.caption}>
-                  <Text style={styles.deadlineBadge}>
+                  {item.endDate && <Text style={styles.deadlineBadge}>
                     {Date.parse(`${item.endDate}T00:00:00Z`) ===
                     Date.parse(`${today}T00:00:00Z`)
                       ? t("place.explore.endsToday")
                       : `D-${Math.round((Date.parse(`${item.endDate}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86400000)}`}
-                  </Text>
+                  </Text>}
                   <Text
                     numberOfLines={2}
                     ellipsizeMode="tail"
@@ -299,10 +299,10 @@ export default function TodayOpeningCarousel({
                     style={styles.period}
                   >
                     {formatDate(item.startDate, true)} ~{" "}
-                    {formatDate(
+                    {item.endDate ? formatDate(
                       item.endDate,
                       item.startDate.slice(0, 4) !== item.endDate.slice(0, 4),
-                    )}
+                    ) : t('place.detail.schedulePending')}
                   </Text>
                 </View>
               </Pressable>

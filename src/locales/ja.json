@@ -1,15 +1,29 @@
 {
   "common": {},
   "home": {
+    "japanNew": { "title": "日本の新着ポップアップ", "empty": "登録された日本のポップアップはありません。" },
+    "seoulMap": {
+      "totalPrefix": "全",
+      "totalSuffix": "件",
+      "title": "地図で見つけるポップアップ",
+      "description": "近くのポップアップを地図でチェックしましょう。",
+      "open": "ソウルのポップアップを地図で見る",
+      "loading": "地図を読み込み中です。",
+      "failed": "地図を読み込めませんでした。"
+    },
+    "venues": { "title": "ここで開催するポップアップ", "count": "ポップアップ {count}件" },
+    "latest": { "title": "新着ポップアップ ✨" },
     "title": "",
+    "categoriesTitle": "人気カテゴリー",
     "trending": {
-      "title": "今話題のポップアップ 🔥",
+      "title": "今話題のポップアップ",
       "description": "人気のポップアップを集めました！",
       "emptyTitle": "開催中のポップアップはありません",
       "emptyDescription": "新しいポップアップを準備中です",
       "showAll": "TOP 10をすべて見る"
     },
     "new": {
+      "showAll": "もっとポップアップを見る",
       "title": "今週オープン ✨",
       "description": "今週オープンするポップアップをチェック！",
       "empty": "今週オープンするポップアップはありません。"
@@ -28,14 +42,28 @@
   "place": {
     "title": "プレイス",
     "detail": {
+      "descriptionTitle": "詳細",
       "about": "ポップアップ紹介",
+      "introduction": {
+        "attractions": "見どころ",
+        "products": "販売商品",
+        "more": "もっと見る",
+        "collapse": "閉じる"
+      },
       "benefits": "特典",
+      "benefitsGuide": "特典",
       "notice": "お知らせ",
       "officialChannels": "公式チャンネル",
       "website": "公式サイト",
       "officialChannelLink": "{channel}の公式チャンネル",
       "channelOpenError": "リンクを開けませんでした。しばらくしてからもう一度お試しください。",
+      "blogReviews": "ブログレビュー",
+      "nearbyPopups": "近くで開催中のポップアップ",
+      "similarPopups": "好みが似ているポップアップ",
+      "nearbyImageUnavailable": "画像がありません。",
+      "nearbyDistance": "距離 {distance}",
       "basicInfo": {
+        "heading": "基本情報",
         "period": "期間",
         "time": "時間",
         "place": "場所",
@@ -250,6 +278,7 @@
     }
   },
   "map": {
+    "clusterPopups": "この場所のポップアップ{count}件",
     "title": "",
     "search": {
       "placeholder": "場所やポップアップを検索",

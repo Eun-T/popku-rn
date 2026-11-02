@@ -1,18 +1,13 @@
-import { getPopupRegionDisplayName, getTagDisplayName } from '../../locales/filterLabels';
-import { useTranslation } from '../../hooks/useTranslation';
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import {
   ArrowLeft,
-  ArrowUpRight,
   CalendarDays,
   ChevronLeft,
   ChevronRight,
   Clock3,
   Heart,
   MapPin,
-  MessageCircle,
   Share2,
-  Star,
   Ticket,
 } from "lucide-react-native";
 import {
@@ -30,6 +25,7 @@ import {
   Pressable,
   ScrollView,
   Share,
+  StatusBar,
   StyleSheet,
   Text,
   useWindowDimensions,
@@ -39,24 +35,31 @@ import {
   SafeAreaView,
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
+import { useTranslation } from "../../hooks/useTranslation";
+import {
+  getPopupRegionDisplayName,
+  getTagDisplayName,
+} from "../../locales/filterLabels";
 
-import Tag from "../../components/common/Tag";
-import DirectionsSheet from '../../components/place/DirectionsSheet';
-import Constants from 'expo-constants';
-import { buildMapLinks, openMapLinks, type MapService } from '../../lib/mapDirections';
+import Constants from "expo-constants";
 import {
   FLOATING_TAB_BAR_BOTTOM_GAP,
   FLOATING_TAB_BAR_HEIGHT,
 } from "../../components/navigation/FloatingTabBar";
+import DirectionsSheet from "../../components/place/DirectionsSheet";
 import IntroductionImageCarousel from "../../components/place/IntroductionImageCarousel";
 import OfficialChannelIcon from "../../components/place/OfficialChannelIcon";
 import PlaceMapPreview, {
   isMapPreviewAvailable,
 } from "../../components/place/PlaceMapPreview";
 import PopupDetailSkeleton from "../../components/place/PopupDetailSkeleton";
-import PopupGuidanceCarousel from "../../components/place/PopupGuidanceCarousel";
 import PopupHeroImage from "../../components/place/PopupHeroImage";
+import PopupIntroduction from "../../components/place/PopupIntroduction";
+import PopupBlogReviews, { type BlogReviewsHandle } from "../../components/place/PopupBlogReviews";
+import PopupNearbySection, { type NearbySectionHandle } from "../../components/place/PopupNearbySection";
+import PopupSimilarSection, { type SimilarSectionHandle } from "../../components/place/PopupSimilarSection";
 import PopupReviews from "../../components/place/PopupReviews";
+import type { RecoverHomeCover } from "../../hooks/useHomeCoverImage";
 import {
   clearTokens,
   getAuthSession,
@@ -64,17 +67,25 @@ import {
   subscribeAuthUser,
 } from "../../lib/auth";
 import {
+  mergeExploreCovers,
+  recoverExploreCover,
+} from "../../lib/exploreCoverRecovery";
+import {
   favoritePopup,
   FavoriteUnauthorizedError,
   unfavoritePopup,
 } from "../../lib/favorites";
 import {
-  highlightHeading,
+  buildMapLinks,
+  openMapLinks,
+  type MapService,
+} from "../../lib/mapDirections";
+import { mergeRecoveredCover } from "../../lib/placeCoverRecovery";
+import {
   isValidExternalUrl,
   officialChannelLabel,
   officialChannelLinks,
-  popupSummary,
-  visiblePopupHighlights,
+  popupIntroductionSections,
 } from "../../lib/popupDetailContent";
 import {
   getPopupDetail,
@@ -82,13 +93,12 @@ import {
   type PublicPopup,
   type PublicPopupDetail,
 } from "../../lib/popups";
-import { mergeExploreCovers, recoverExploreCover } from '../../lib/exploreCoverRecovery';
-import { mergeRecoveredCover } from '../../lib/placeCoverRecovery';
-import type { RecoverHomeCover } from '../../hooks/useHomeCoverImage';
-import { popupOperatingStatus } from "../../lib/popupStatus";
 import { subscribeReviews } from "../../lib/reviews";
 import type { Locale } from "../../locales";
 import { colors, radius, spacing, typography } from "../../theme/tokens";
+
+// Temporarily hide the location preview; keep directions available.
+const SHOW_LOCATION_MAP = false;
 
 type DetailRowProps = {
   icon: ReactNode;
@@ -96,9 +106,10 @@ type DetailRowProps = {
   children: ReactNode;
   alignTop?: boolean;
   compact?: boolean;
+  webFact?: boolean;
 };
-type DetailTab = "info" | "reviews";
-type DetailWithCover = PublicPopupDetail & Pick<PublicPopup, 'coverImageFetchedAt'> & { contentImageFetchedAt?: number };
+type DetailWithCover = PublicPopupDetail &
+  Pick<PublicPopup, "coverImageFetchedAt"> & { contentImageFetchedAt?: number };
 type DetailState = {
   id: string | undefined;
   languageCode: Locale;
@@ -106,74 +117,68 @@ type DetailState = {
   detail: DetailWithCover | null;
 };
 
-type DetailTabsProps = {
-  selectedTab: DetailTab;
-  onSelectInfo: () => void;
-  onSelectReviews: () => void;
-};
-
-function DetailTabs({
-  selectedTab,
-  onSelectInfo,
-  onSelectReviews,
-}: DetailTabsProps) {
-  const { t, resolvedLanguage } = useTranslation();
-  return (
-    <View style={styles.tabs}>
-      <Pressable
-        accessibilityRole="tab"
-        accessibilityState={{ selected: selectedTab === "info" }}
-        onPress={onSelectInfo}
-        style={styles.tab}
-      >
-        <Text
-          style={[
-            styles.tabText,
-            selectedTab === "info" && styles.activeTabText,
-          ]}
-        >
-          {t("place.detail.infoTab")}
-        </Text>
-        {selectedTab === "info" && <View style={styles.tabIndicator} />}
-      </Pressable>
-      <Pressable
-        accessibilityRole="tab"
-        accessibilityState={{ selected: selectedTab === "reviews" }}
-        onPress={onSelectReviews}
-        style={styles.tab}
-      >
-        <Text
-          style={[
-            styles.tabText,
-            selectedTab === "reviews" && styles.activeTabText,
-          ]}
-        >
-          {t("community.reviewFilterLabel")}
-        </Text>
-        {selectedTab === "reviews" && <View style={styles.tabIndicator} />}
-      </Pressable>
-    </View>
-  );
-}
-
 function DetailRow({
   icon,
   label,
   children,
   alignTop = false,
   compact = false,
+  webFact = false,
 }: DetailRowProps) {
   return (
     <View style={[styles.infoRow, alignTop && styles.infoRowTop]}>
-      <View style={[styles.rowIcon, alignTop && styles.rowIconTop]}>
+      <View
+        style={[
+          styles.rowIcon,
+          alignTop && styles.rowIconTop,
+          webFact && styles.factIcon,
+        ]}
+      >
         {icon}
       </View>
-      <Text style={[styles.rowLabel, compact && styles.reservationLabel]}>
+      <Text
+        style={[
+          styles.rowLabel,
+          compact && styles.reservationLabel,
+          webFact && styles.factLabel,
+        ]}
+      >
         {label}
       </Text>
-      <View style={styles.rowValue}>{children}</View>
+      <View style={[styles.rowValue, webFact && styles.factValue]}>
+        {children}
+      </View>
     </View>
   );
+}
+
+function detailDayStatus(
+  item: PublicPopupDetail,
+  today: string,
+  language: string,
+) {
+  const { startDate: start, endDate: end } = item;
+  const ja = language === "ja";
+  const daysUntil = (date: string) =>
+    (Date.parse(date + "T00:00:00Z") - Date.parse(today + "T00:00:00Z")) /
+    86_400_000;
+  if (end && end < today)
+    return { label: ja ? "終了" : "종료", color: "#9CA3AF" };
+  if (start && start > today)
+    return {
+      label: (ja ? "オープン" : "오픈") + " D-" + daysUntil(start),
+      color: "#2563EB",
+    };
+  if (end === today)
+    return { label: ja ? "本日終了" : "오늘 종료", color: "#C05621" };
+  if (start === today)
+    return { label: ja ? "本日オープン" : "오늘 오픈", color: "#16805D" };
+  if (start && start < today && end && end > today)
+    return {
+      label: (ja ? "終了" : "종료") + " D-" + daysUntil(end),
+      color: "#16805D",
+    };
+  return null;
 }
 
 function formatDate(value: string): string {
@@ -183,7 +188,23 @@ function formatDate(value: string): string {
 
 // Recovery reads only cover identity; nullable detail dates are not filter inputs.
 function heroPopup(detail: DetailWithCover): PublicPopup {
-  return { ...detail, startDate: detail.startDate ?? '', endDate: detail.endDate ?? '' };
+  return {
+    ...detail,
+    startDate: detail.startDate ?? "",
+    endDate: detail.endDate ?? "",
+  };
+}
+
+function formatPopupDetailPeriod(start: string | null, end: string | null): string {
+  const format = (date: string, withYear: boolean) => {
+    const [year, month, day] = date.split("-");
+    return `${withYear ? `${year.slice(-2)}년 ` : ""}${Number(month)}월 ${Number(day)}일`;
+  };
+  if (start && end)
+    return `${format(start, true)} - ${format(end, start.slice(0, 4) !== end.slice(0, 4))}`;
+  if (start) return format(start, true);
+  if (end) return format(end, true);
+  return "";
 }
 
 function formatDateTime(value: string): string {
@@ -199,6 +220,9 @@ export default function PlaceDetail() {
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
+  const blogReviewsRef = useRef<BlogReviewsHandle>(null);
+  const nearbySectionRef = useRef<NearbySectionHandle>(null);
+  const similarSectionRef = useRef<SimilarSectionHandle>(null);
   const authUser = useSyncExternalStore(
     subscribeAuthUser,
     getAuthUser,
@@ -208,46 +232,89 @@ export default function PlaceDetail() {
   const favoriteBusy = useRef(false);
   const favoriteGeneration = useRef(0);
   const refreshReviews = useRef<(() => void) | null>(null);
-  const [selectedTab, setSelectedTab] = useState<DetailTab>("info");
+  const [reviewsVisible, setReviewsVisible] = useState(tab === "reviews");
+  const reviewsY = useRef<number | null>(null);
+  const pendingReviewScroll = useRef(tab === "reviews");
   const [directionsVisible, setDirectionsVisible] = useState(false);
+  const [officialChannelsVisible, setOfficialChannelsVisible] = useState(false);
   const directionsTranslation = useRef(t);
-  useEffect(() => { directionsTranslation.current = t; }, [t]);
-  const [isTabPinned, setTabPinned] = useState(false);
+  useEffect(() => {
+    directionsTranslation.current = t;
+  }, [t]);
   const [requestState, setRequestState] = useState<DetailState>({
     id,
     languageCode,
     status: "loading",
     detail: null,
   });
-  const coverScope = JSON.stringify([id, languageCode, requestState.detail?.countryCode]);
+  const coverScope = JSON.stringify([
+    id,
+    languageCode,
+    requestState.detail?.countryCode,
+  ]);
   const latestCoverScope = useRef(coverScope);
   latestCoverScope.current = coverScope;
   const coverMounted = useRef(false);
   useEffect(() => {
     coverMounted.current = true;
-    return () => { coverMounted.current = false; };
+    return () => {
+      coverMounted.current = false;
+    };
   }, []);
   const recoverHeroCover: RecoverHomeCover = async (original, manual) => {
     const generation = favoriteGeneration.current;
-    if (!coverMounted.current || latestCoverScope.current !== coverScope
-      || (original.countryCode !== 'KR' && original.countryCode !== 'JP')) return null;
-    const result = await recoverExploreCover(original, original.countryCode, languageCode, manual);
-    if (!coverMounted.current || latestCoverScope.current !== coverScope
-      || favoriteGeneration.current !== generation || !result) return null;
-    setRequestState(current => {
-      if (current.id !== id || current.languageCode !== languageCode || !current.detail) return current;
+    if (
+      !coverMounted.current ||
+      latestCoverScope.current !== coverScope ||
+      (original.countryCode !== "KR" && original.countryCode !== "JP")
+    )
+      return null;
+    const result = await recoverExploreCover(
+      original,
+      original.countryCode,
+      languageCode,
+      manual,
+    );
+    if (
+      !coverMounted.current ||
+      latestCoverScope.current !== coverScope ||
+      favoriteGeneration.current !== generation ||
+      !result
+    )
+      return null;
+    setRequestState((current) => {
+      if (
+        current.id !== id ||
+        current.languageCode !== languageCode ||
+        !current.detail
+      )
+        return current;
       const popup = heroPopup(current.detail);
-      const [cover] = mergeRecoveredCover([popup], original, result.detail, result.fetchedAt);
-      return cover === popup ? current : { ...current, detail: { ...current.detail,
-        coverImageUrl: cover.coverImageUrl, coverImageCacheKey: cover.coverImageCacheKey,
-        coverImageFetchedAt: cover.coverImageFetchedAt } };
+      const [cover] = mergeRecoveredCover(
+        [popup],
+        original,
+        result.detail,
+        result.fetchedAt,
+      );
+      return cover === popup
+        ? current
+        : {
+            ...current,
+            detail: {
+              ...current.detail,
+              coverImageUrl: cover.coverImageUrl,
+              coverImageCacheKey: cover.coverImageCacheKey,
+              coverImageFetchedAt: cover.coverImageFetchedAt,
+            },
+          };
     });
     return result;
   };
 
   useEffect(() => {
-    setSelectedTab(tab === "reviews" ? "reviews" : "info");
-    setTabPinned(false);
+    setReviewsVisible(tab === "reviews");
+    reviewsY.current = null;
+    pendingReviewScroll.current = tab === "reviews";
   }, [id, tab]);
 
   useEffect(() => {
@@ -279,7 +346,8 @@ export default function PlaceDetail() {
       dirty = false;
       void getAuthSession()
         .then(async ({ accessToken: token, generation }) => {
-          if (controller.signal.aborted) throw new Error("Popup detail read aborted");
+          if (controller.signal.aborted)
+            throw new Error("Popup detail read aborted");
           if (__DEV__)
             console.info("[FAVORITE] detail request", {
               publicId: id,
@@ -315,17 +383,30 @@ export default function PlaceDetail() {
           if (active && !controller.signal.aborted && readVersion === version) {
             if (summaryOnly) {
               if (
-                typeof detail.reviewCount !== "number" || !Number.isSafeInteger(detail.reviewCount) || detail.reviewCount < 0 ||
-                typeof detail.averageRating !== "number" || !Number.isFinite(detail.averageRating) ||
-                detail.averageRating < 0 || detail.averageRating > 5
+                typeof detail.reviewCount !== "number" ||
+                !Number.isSafeInteger(detail.reviewCount) ||
+                detail.reviewCount < 0 ||
+                typeof detail.averageRating !== "number" ||
+                !Number.isFinite(detail.averageRating) ||
+                detail.averageRating < 0 ||
+                detail.averageRating > 5
               ) {
                 throw new Error("Invalid popup review summary");
               }
               // The public detail GET is authoritative for aggregates only. A review
               // refresh must not overwrite a favorite mutation made during this GET.
-              setRequestState(current =>
-                current.id === id && current.languageCode === languageCode && current.detail
-                  ? { ...current, detail: { ...current.detail, reviewCount: detail.reviewCount, averageRating: detail.averageRating } }
+              setRequestState((current) =>
+                current.id === id &&
+                current.languageCode === languageCode &&
+                current.detail
+                  ? {
+                      ...current,
+                      detail: {
+                        ...current.detail,
+                        reviewCount: detail.reviewCount,
+                        averageRating: detail.averageRating,
+                      },
+                    }
                   : current,
               );
               return;
@@ -336,18 +417,37 @@ export default function PlaceDetail() {
                 favoriteCount: detail.favoriteCount,
                 isFavorited: detail.isFavorited,
               });
-            const [cover] = mergeExploreCovers([heroPopup(detail)], detail.countryCode, languageCode, fetchedAt);
-            setRequestState({ id, languageCode, status: "ready", detail: { ...detail,
-              contentImageFetchedAt: fetchedAt,
-              coverImageUrl: cover.coverImageUrl, coverImageCacheKey: cover.coverImageCacheKey,
-              coverImageFetchedAt: cover.coverImageFetchedAt } });
+            const [cover] = mergeExploreCovers(
+              [heroPopup(detail)],
+              detail.countryCode,
+              languageCode,
+              fetchedAt,
+            );
+            setRequestState({
+              id,
+              languageCode,
+              status: "ready",
+              detail: {
+                ...detail,
+                contentImageFetchedAt: fetchedAt,
+                coverImageUrl: cover.coverImageUrl,
+                coverImageCacheKey: cover.coverImageCacheKey,
+                coverImageFetchedAt: cover.coverImageFetchedAt,
+              },
+            });
             summaryOnly = true;
           }
         })
         .catch(() => {
           if (active && !controller.signal.aborted && readVersion === version) {
             if (summaryOnly) dirty = true;
-            else setRequestState({ id, languageCode, status: "error", detail: null });
+            else
+              setRequestState({
+                id,
+                languageCode,
+                status: "error",
+                detail: null,
+              });
           }
         })
         .finally(() => {
@@ -355,7 +455,7 @@ export default function PlaceDetail() {
           request = null;
         });
     }
-    const unsubscribe = subscribeReviews(changed => {
+    const unsubscribe = subscribeReviews((changed) => {
       if (changed !== id) return;
       version += 1;
       dirty = true;
@@ -373,7 +473,26 @@ export default function PlaceDetail() {
     };
   }, [id, authUser, languageCode]);
 
-  useFocusEffect(useCallback(() => { refreshReviews.current?.(); }, [id, authUser, languageCode]));
+  useFocusEffect(
+    useCallback(() => {
+      const entry = StatusBar.pushStackEntry({ barStyle: "dark-content" });
+      return () => StatusBar.popStackEntry(entry);
+    }, []),
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      refreshReviews.current?.();
+    }, [id, authUser, languageCode]),
+  );
+
+  const topSafeAreaBackground = (
+    <View
+      pointerEvents="none"
+      accessible={false}
+      style={[styles.topSafeAreaBackground, { height: insets.top }]}
+    />
+  );
 
   const detail =
     requestState.id === id &&
@@ -424,7 +543,10 @@ export default function PlaceDetail() {
         if (invalidated === false) return;
         router.push("/profile/login");
       } else {
-        Alert.alert(t("place.detail.favoriteFailed"), t("place.detail.tryLater"));
+        Alert.alert(
+          t("place.detail.favoriteFailed"),
+          t("place.detail.tryLater"),
+        );
       }
     } finally {
       favoriteBusy.current = false;
@@ -443,12 +565,14 @@ export default function PlaceDetail() {
           <ScrollView contentContainerStyle={styles.content}>
             <PopupDetailSkeleton
               width={width}
+              heroHeight={
+                (width * 0.78 * 4) / 3 + spacing.space24 * 2 + insets.top
+              }
               heroControls={
-                <View
-                  style={[
-                    styles.heroControls,
-                    { top: insets.top + spacing.space12 },
-                  ]}
+                <SafeAreaView
+                  edges={["top"]}
+                  pointerEvents="box-none"
+                  style={styles.heroControls}
                 >
                   <Pressable
                     accessibilityRole="button"
@@ -458,19 +582,11 @@ export default function PlaceDetail() {
                   >
                     <ChevronLeft size={24} color={colors.background} />
                   </Pressable>
-                </View>
-              }
-              tabs={
-                <View style={styles.tabSlot}>
-                  <DetailTabs
-                    selectedTab="info"
-                    onSelectInfo={() => {}}
-                    onSelectReviews={() => {}}
-                  />
-                </View>
+                </SafeAreaView>
               }
             />
           </ScrollView>
+          {topSafeAreaBackground}
         </SafeAreaView>
       );
     }
@@ -487,6 +603,7 @@ export default function PlaceDetail() {
         <View style={styles.empty}>
           <Text style={styles.valueText}>{t("place.detail.loadFailed")}</Text>
         </View>
+        {topSafeAreaBackground}
       </SafeAreaView>
     );
   }
@@ -502,13 +619,16 @@ export default function PlaceDetail() {
     Math.abs(longitude) <= 180
       ? { latitude, longitude }
       : null;
-  const hasMapSection = Boolean(mapCoordinates && isMapPreviewAvailable);
-  const summary = popupSummary(detail.summary);
-  const highlights = visiblePopupHighlights(detail.highlights);
-  const hasDescriptionContent = !!summary || highlights.length > 0;
+  const hasDirections = Boolean(mapCoordinates && isMapPreviewAvailable);
+  const hasMapSection = SHOW_LOCATION_MAP && hasDirections;
+  const introductionSections = popupIntroductionSections(detail);
+  const socialLinks = officialChannelLinks(detail.socialLinks);
+  const hasDescriptionContent = introductionSections.length > 0;
+  const hasGuidance = introductionSections.some(
+    (section) => section.kind === "notice" || section.kind === "benefits",
+  );
   const hasDescriptionSection =
     hasDescriptionContent || detail.contentImageUrls.length > 0;
-  const socialLinks = officialChannelLinks(detail.socialLinks);
   const reservationUrl =
     detail.reservationUrl && isValidExternalUrl(detail.reservationUrl)
       ? detail.reservationUrl
@@ -525,57 +645,66 @@ export default function PlaceDetail() {
   ]
     .filter(Boolean)
     .join("\n");
-  const period = [
-    detail.startDate && formatDate(detail.startDate),
-    detail.endDate && formatDate(detail.endDate),
-  ]
-    .filter(Boolean)
-    .join(" - ");
+  const period = formatPopupDetailPeriod(detail.startDate, detail.endDate);
   const locationDetail = detail.locationDetail?.trim();
   const hasAddress = Boolean(detail.address?.trim());
-  const status = popupOperatingStatus(detail.startDate, detail.endDate);
-  const statusVariant =
-    status === "운영 중"
-      ? "primary"
-      : status === "오픈 예정"
-        ? "info"
-        : "neutral";
+  const today = new Date(Date.now() + 9 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10);
+  const dayStatus = detailDayStatus(detail, today, resolvedLanguage);
   const openReviews = () => {
-    setSelectedTab("reviews");
-    scrollRef.current?.scrollTo({ y: width, animated: true });
+    setReviewsVisible(true);
+    if (reviewsY.current !== null)
+      scrollRef.current?.scrollTo({
+        y: Math.max(0, reviewsY.current - insets.top),
+        animated: true,
+      });
+    else pendingReviewScroll.current = true;
   };
   const reviewCount = detail.reviewCount ?? 0;
-  const averageRating = reviewCount > 0 ? (detail.averageRating ?? 0).toFixed(1) : "0.0";
+  const averageRating =
+    reviewCount > 0 ? (detail.averageRating ?? 0).toFixed(1) : "0.0";
   const openDirections = () => {
     setDirectionsVisible(true);
   };
   const selectMap = async (service: MapService) => {
-    const appIdentifier = Platform.OS === 'ios' ? Constants.expoConfig?.ios?.bundleIdentifier
-      : Constants.expoConfig?.android?.package;
+    const appIdentifier =
+      Platform.OS === "ios"
+        ? Constants.expoConfig?.ios?.bundleIdentifier
+        : Constants.expoConfig?.android?.package;
     const links = buildMapLinks(service, detail, Platform.OS, appIdentifier);
     if (!links) {
-      Alert.alert(directionsTranslation.current('place.detail.directions'),
-        directionsTranslation.current('place.detail.directionMaps.unavailable'));
+      Alert.alert(
+        directionsTranslation.current("place.detail.directions"),
+        directionsTranslation.current("place.detail.directionMaps.unavailable"),
+      );
       return;
     }
     const result = await openMapLinks(links, Linking, Platform.OS);
-    if (result === 'failed') Alert.alert(directionsTranslation.current('place.detail.directions'),
-      directionsTranslation.current('place.detail.directionMaps.failed'));
-    else if (result === 'web' && links.naverWeb) Alert.alert(directionsTranslation.current('place.detail.directions'),
-      directionsTranslation.current('place.detail.directionMaps.naverWeb', { destination: links.destination }));
+    if (result === "failed")
+      Alert.alert(
+        directionsTranslation.current("place.detail.directions"),
+        directionsTranslation.current("place.detail.directionMaps.failed"),
+      );
+    else if (result === "web" && links.naverWeb)
+      Alert.alert(
+        directionsTranslation.current("place.detail.directions"),
+        directionsTranslation.current("place.detail.directionMaps.naverWeb", {
+          destination: links.destination,
+        }),
+      );
   };
 
   return (
     <SafeAreaView style={styles.container} edges={["bottom"]}>
       <ScrollView
         ref={scrollRef}
+        scrollEventThrottle={100}
+        onScroll={() => { blogReviewsRef.current?.checkVisibility(); nearbySectionRef.current?.checkVisibility(); similarSectionRef.current?.checkVisibility(); }}
+        onContentSizeChange={() => { blogReviewsRef.current?.checkVisibility(); nearbySectionRef.current?.checkVisibility(); similarSectionRef.current?.checkVisibility(); }}
         contentContainerStyle={[styles.content, styles.floatingContentInset]}
-        scrollEventThrottle={16}
-        onScroll={(event) =>
-          setTabPinned(event.nativeEvent.contentOffset.y >= width - insets.top)
-        }
       >
-        <View style={[styles.hero, { width, height: width }]}>
+        <View style={[styles.hero, { width }]}>
           <PopupHeroImage
             key={detail.publicId}
             uri={detail.coverImageUrl}
@@ -585,8 +714,10 @@ export default function PlaceDetail() {
             accessibilityLabel={detail.name}
             topInset={insets.top}
           />
-          <View
-            style={[styles.heroControls, { top: insets.top + spacing.space12 }]}
+          <SafeAreaView
+            edges={["top"]}
+            pointerEvents="box-none"
+            style={styles.heroControls}
           >
             <Pressable
               accessibilityRole="button"
@@ -604,342 +735,298 @@ export default function PlaceDetail() {
             >
               <Share2 size={24} color={colors.background} />
             </Pressable>
-          </View>
+          </SafeAreaView>
         </View>
 
-        <View style={styles.tabSlot}>
-          {!isTabPinned && (
-            <DetailTabs
-              selectedTab={selectedTab}
-              onSelectInfo={() => setSelectedTab("info")}
-              onSelectReviews={openReviews}
-            />
-          )}
-        </View>
-
-        {selectedTab === "info" ? (
-          <View style={styles.infoContent}>
-            <View>
-              <View style={styles.tags}>
-                {status && <Tag label={t(status === "운영 중" ? "place.all.card.ongoing" : status === "오픈 예정" ? "place.filters.operationStatuses.upcoming" : "place.filters.operationStatuses.closed")} variant={statusVariant} />}
-                {detail.regionName && <Tag label={getPopupRegionDisplayName(detail, resolvedLanguage)} />}
-                {detail.tags.map((tag) => (
-                  <Tag key={tag.id} label={getTagDisplayName(tag, resolvedLanguage)} />
-                ))}
-              </View>
-              <Text numberOfLines={1} ellipsizeMode="tail" style={styles.title}>
-                {detail.name}
-              </Text>
-              <View style={styles.stats}>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={t(detail.isFavorited ? "place.all.removeFavorite" : "place.all.addFavorite")}
-                  accessibilityState={{
-                    selected: detail.isFavorited,
-                    disabled: isFavoriteUpdating,
-                  }}
-                  disabled={isFavoriteUpdating}
-                  onPress={() => void toggleFavorite()}
-                  style={styles.stat}
-                >
-                  <Heart
-                    size={18}
-                    color="#FF5A6E"
-                    fill={detail.isFavorited ? "#FF5A6E" : "none"}
-                  />
-                  <Text style={[styles.statText, styles.favoriteCount]}>{detail.favoriteCount}</Text>
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={reviewCount > 0 ? t("place.detail.ratingReviews", { rating: averageRating }) : t("place.detail.noRatingReviews")}
-                  onPress={openReviews}
-                  style={styles.stat}
-                >
-                  <Star size={18} color="#F5B800" fill="#F5B800" />
-                  <Text style={styles.statText}>{averageRating}</Text>
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={t("place.detail.openReviews")}
-                  onPress={openReviews}
-                  style={styles.stat}
-                >
-                  <MessageCircle size={18} color="#5B8DEF" fill="#5B8DEF" />
-                  <Text style={styles.statText}>{reviewCount > 0 ? t("place.detail.reviewCount", { count: reviewCount }) : t("place.detail.reviewLabel")}</Text>
-                  <ChevronRight size={16} color={colors.secondaryText} />
-                </Pressable>
-              </View>
+        <View style={styles.infoContent}>
+          <View>
+            <View style={styles.tags}>
+              {detail.tags.map((tag) => (
+                <Text key={tag.id} style={styles.metadataTag}>
+                  {getTagDisplayName(tag, resolvedLanguage)}
+                </Text>
+              ))}
+              {detail.regionName && (
+                <Text style={styles.metadataTag}>
+                  {getPopupRegionDisplayName(detail, resolvedLanguage)}
+                </Text>
+              )}
             </View>
-
-            <PopupGuidanceCarousel
-              popupId={detail.publicId}
-              languageCode={languageCode}
-              notice={detail.notice}
-              benefits={detail.benefits}
-            />
-
-            <View style={styles.infoSection}>
-              <View style={styles.infoRows}>
-                <DetailRow
-                  icon={<CalendarDays size={18} color={colors.secondaryText} />}
-                  label={t("place.detail.basicInfo.period")}
-                  alignTop
+            <Text style={styles.title}>{detail.name}</Text>
+            {dayStatus && (
+              <View style={styles.dayStatus}>
+                <Text
+                  style={[styles.dayStatusText, { color: dayStatus.color }]}
                 >
-                  <Text style={[styles.valueText, styles.infoValueText]}>
-                    {period || t("place.detail.basicInfo.pending")}
-                  </Text>
-                </DetailRow>
-                <DetailRow
-                  icon={<Clock3 size={18} color={colors.secondaryText} />}
-                  label={t("place.detail.basicInfo.time")}
-                  alignTop
-                >
-                  <Text
-                    numberOfLines={2}
-                    ellipsizeMode="tail"
-                    style={[styles.valueText, styles.infoValueText]}
-                  >
-                    {detail.operatingHours?.trim() ||
-                      t("place.detail.basicInfo.pending")}
-                  </Text>
-                </DetailRow>
-                <DetailRow
-                  icon={<MapPin size={18} color={colors.secondaryText} />}
-                  label={t("place.detail.basicInfo.place")}
-                  alignTop
-                >
-                  <View style={styles.placeDetails}>
-                    {hasAddress ? (
-                      <Text style={[styles.valueText, styles.infoValueText]}>
-                        {detail.address}
-                      </Text>
-                    ) : null}
-                    {locationDetail ? (
-                      <Text style={[styles.valueText, styles.infoValueText]}>
-                        {locationDetail}
-                      </Text>
-                    ) : null}
-                    {!hasAddress && !locationDetail ? (
-                      <Text style={[styles.valueText, styles.infoValueText]}>
-                        {t("place.detail.basicInfo.addressPending")}
-                      </Text>
-                    ) : null}
-                  </View>
-                </DetailRow>
-                {reservationUrl ? (
-                  <Pressable
-                    accessibilityRole="link"
-                    accessibilityLabel={t("place.detail.basicInfo.reserve")}
-                    onPress={() => {
-                      void Linking.openURL(reservationUrl).catch(() =>
-                        Alert.alert(t("place.detail.channelOpenError")),
-                      );
-                    }}
-                    style={styles.reservationCard}
-                  >
-                    <DetailRow
-                      icon={<Ticket size={18} color={colors.primary} />}
-                      label={t("place.detail.basicInfo.reservation")}
-                      compact
-                    >
-                      <View style={styles.reservationContent}>
-                        {reservationTimes ? (
-                          <View style={styles.reservationText}>
-                            <Text style={styles.reservationTimes}>
-                              {reservationTimes}
-                            </Text>
-                          </View>
-                        ) : null}
-                        <View style={styles.reservationAction}>
-                          <Text style={styles.reservationActionText}>
-                            {t("place.detail.basicInfo.reserve")}
-                          </Text>
-                          <ChevronRight size={18} color={colors.primary} />
-                        </View>
-                      </View>
-                    </DetailRow>
-                  </Pressable>
-                ) : null}
-              </View>
-            </View>
-            {mapCoordinates && isMapPreviewAvailable && (
-              <View style={styles.mapSection}>
-                <View style={styles.mapDivider} />
-                <View style={styles.mapFrame}>
-                  <Text style={styles.sectionTitle}>{t("place.detail.location")}</Text>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={t("place.detail.viewOnMap")}
-                    onPress={() =>
-                      router.dismissTo({
-                        pathname: "/(tabs)/map",
-                        params: { popupId: detail.publicId },
-                      })
-                    }
-                    style={styles.mapPreview}
-                  >
-                    <PlaceMapPreview {...mapCoordinates} />
-                  </Pressable>
-                  <Pressable
-                    accessibilityRole="button"
-                    onPress={openDirections}
-                    style={styles.directionsButton}
-                  >
-                    <Text style={styles.directionsText}>{t("place.detail.directions")}</Text>
-                    <ArrowUpRight size={16} color={colors.text} />
-                  </Pressable>
-                </View>
-                <View style={[styles.mapDivider, styles.mapBottomDivider]} />
+                  {dayStatus.label}
+                </Text>
               </View>
             )}
-            {hasDescriptionSection && (
-              <View style={!hasMapSection && styles.descriptionSection}>
-                {!hasMapSection && <View style={styles.mapDivider} />}
-                <View style={styles.descriptionContent}>
-                  <Text style={styles.sectionTitle}>
-                    {t("place.detail.about")}
-                  </Text>
-                  {summary && (
+          </View>
+
+          <View style={styles.infoSection}>
+            <View style={styles.infoRows}>
+              <DetailRow
+                icon={<CalendarDays size={16} color={colors.secondaryText} />}
+                label={t("place.detail.basicInfo.period")}
+                alignTop
+                webFact
+              >
+                <Text style={[styles.valueText, styles.infoValueText]}>
+                  {period || t("place.detail.basicInfo.pending")}
+                </Text>
+              </DetailRow>
+              <DetailRow
+                icon={<Clock3 size={16} color={colors.secondaryText} />}
+                label={t("place.detail.basicInfo.time")}
+                alignTop
+                webFact
+              >
+                <Text style={[styles.valueText, styles.infoValueText]}>
+                  {detail.operatingHours?.trim() ||
+                    t("place.detail.basicInfo.pending")}
+                </Text>
+              </DetailRow>
+              <DetailRow
+                icon={<MapPin size={16} color={colors.secondaryText} />}
+                label={t("place.detail.basicInfo.place")}
+                alignTop
+                webFact
+              >
+                <View style={styles.placeDetails}>
+                  {hasAddress ? (
+                    <Text style={[styles.valueText, styles.infoValueText]}>
+                      {detail.address}
+                    </Text>
+                  ) : null}
+                  {locationDetail ? (
                     <Text
                       style={[
-                        styles.descriptionText,
-                        styles.descriptionAfterTitle,
+                        styles.valueText,
+                        styles.infoValueText,
+                        styles.addressExtra,
                       ]}
                     >
-                      {summary}
+                      {locationDetail}
                     </Text>
-                  )}
-                  {highlights.length > 0 && (
-                    <View
-                      style={[
-                        styles.highlights,
-                        summary
-                          ? styles.descriptionAfterBenefit
-                          : styles.descriptionAfterTitle,
-                      ]}
-                    >
-                      {highlights.map((highlight, index) => {
-                        const heading = highlightHeading(highlight.type);
-                        return (
-                          <View key={`${index}-${highlight.type}`}>
-                            <View style={styles.highlightHeading}>
-                              <Text
-                                accessible={false}
-                                accessibilityElementsHidden
-                                importantForAccessibility="no"
-                                style={styles.highlightEmoji}
-                              >
-                                {heading.emoji}
-                              </Text>
-                              <Text
-                                style={[
-                                  styles.benefitTitle,
-                                  styles.highlightTitle,
-                                ]}
-                              >
-                                {t(heading.key)}
-                              </Text>
-                            </View>
-                            <Text
-                              style={[
-                                styles.descriptionText,
-                                styles.highlightText,
-                              ]}
-                            >
-                              {highlight.text}
-                            </Text>
-                          </View>
-                        );
-                      })}
-                    </View>
-                  )}
-                  {detail.contentImageUrls.length > 0 && (
-                    <View
-                      style={[
-                        hasDescriptionContent
-                          ? styles.descriptionImages
-                          : styles.descriptionAfterTitle,
-                      ]}
-                    >
-                      <IntroductionImageCarousel
-                        key={detail.publicId}
-                        images={detail.contentImageUrls}
-                        popupId={detail.publicId}
-                        countryCode={detail.countryCode}
-                        fetchedAt={detail.contentImageFetchedAt}
-                        width={width - spacing.space16 * 2}
-                      />
-                    </View>
-                  )}
-                  <Pressable
-                    disabled
-                    accessibilityRole="button"
-                    accessibilityLabel={t("place.detail.reportInformation")}
-                    accessibilityState={{ disabled: true }}
-                    hitSlop={10}
-                    style={styles.reportAction}
-                  >
-                    <Text numberOfLines={1} style={styles.reportActionText}>
-                      {t("place.detail.reportInformationButton")}
+                  ) : null}
+                  {!hasAddress && !locationDetail ? (
+                    <Text style={[styles.valueText, styles.infoValueText]}>
+                      {t("place.detail.basicInfo.addressPending")}
                     </Text>
-                  </Pressable>
+                  ) : null}
                 </View>
-                <View style={[styles.mapDivider, styles.mapBottomDivider]} />
-              </View>
-            )}
-            {socialLinks.length > 0 && (
-              <View>
-                <View style={styles.officialContent}>
-                  <Text numberOfLines={1} style={styles.sectionTitle}>
-                    {t("place.detail.officialChannels")}
-                  </Text>
-                  <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    style={styles.socialScroller}
-                    contentContainerStyle={styles.socialButtons}
+              </DetailRow>
+              {reservationUrl ? (
+                <Pressable
+                  accessibilityRole="link"
+                  accessibilityLabel={t("place.detail.basicInfo.reserve")}
+                  onPress={() => {
+                    void Linking.openURL(reservationUrl).catch(() =>
+                      Alert.alert(t("place.detail.channelOpenError")),
+                    );
+                  }}
+                  style={styles.reservationCard}
+                >
+                  <DetailRow
+                    icon={<Ticket size={18} color={colors.primary} />}
+                    label={t("place.detail.basicInfo.reservation")}
+                    compact
                   >
-                    {socialLinks.map(({ channel, url }) => (
-                      <Pressable
-                        key={channel}
-                        accessibilityRole="link"
-                        accessibilityLabel={t(
-                          "place.detail.officialChannelLink",
-                          { channel: officialChannelLabel(channel, t) },
-                        )}
-                        onPress={() => {
-                          void Linking.openURL(url).catch(() =>
+                    <View style={styles.reservationContent}>
+                      {reservationTimes ? (
+                        <View style={styles.reservationText}>
+                          <Text style={styles.reservationTimes}>
+                            {reservationTimes}
+                          </Text>
+                        </View>
+                      ) : null}
+                      <View style={styles.reservationAction}>
+                        <Text style={styles.reservationActionText}>
+                          {t("place.detail.basicInfo.reserve")}
+                        </Text>
+                        <ChevronRight size={18} color={colors.primary} />
+                      </View>
+                    </View>
+                  </DetailRow>
+                </Pressable>
+              ) : null}
+              {(socialLinks.length > 0 || hasDirections) && (
+                <View style={styles.basicActions}>
+                  {socialLinks.length > 0 && (
+                    <Pressable
+                      accessibilityRole={socialLinks.length === 1 ? "link" : "button"}
+                      accessibilityState={
+                        socialLinks.length > 1
+                          ? { expanded: officialChannelsVisible }
+                          : undefined
+                      }
+                      onPress={() => {
+                        if (socialLinks.length === 1) {
+                          void Linking.openURL(socialLinks[0].url).catch(() =>
                             Alert.alert(t("place.detail.channelOpenError")),
                           );
-                        }}
-                        style={styles.socialButton}
-                      >
-                        <OfficialChannelIcon channel={channel} />
-                      </Pressable>
-                    ))}
-                  </ScrollView>
+                        } else {
+                          setOfficialChannelsVisible((visible) => !visible);
+                        }
+                      }}
+                      style={[styles.basicActionButton, styles.officialActionButton]}
+                    >
+                      <Text style={[styles.basicActionText, styles.officialActionText]}>
+                        {t("place.detail.officialChannels")}
+                      </Text>
+                    </Pressable>
+                  )}
+                  {hasDirections && (
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={openDirections}
+                      style={[styles.basicActionButton, styles.directionsActionButton]}
+                    >
+                      <Text style={[styles.basicActionText, styles.directionsActionText]}>
+                        {t("place.detail.directions")}
+                      </Text>
+                    </Pressable>
+                  )}
                 </View>
-                <View style={[styles.mapDivider, styles.mapBottomDivider]} />
-              </View>
-            )}
+              )}
+              {socialLinks.length > 1 && officialChannelsVisible && (
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  style={styles.socialScroller}
+                  contentContainerStyle={styles.socialButtons}
+                >
+                  {socialLinks.map(({ channel, url }) => (
+                    <Pressable
+                      key={channel}
+                      accessibilityRole="link"
+                      accessibilityLabel={t(
+                        "place.detail.officialChannelLink",
+                        { channel: officialChannelLabel(channel, t) },
+                      )}
+                      onPress={() => {
+                        void Linking.openURL(url).catch(() =>
+                          Alert.alert(t("place.detail.channelOpenError")),
+                        );
+                      }}
+                      style={styles.socialButton}
+                    >
+                      <OfficialChannelIcon channel={channel} />
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              )}
+
+
+            </View>
           </View>
-        ) : (
-          <PopupReviews publicId={detail.publicId} title={detail.name} />
+          {hasMapSection && mapCoordinates && (
+            <View style={styles.mapSection}>
+              <View style={styles.mapDivider} />
+              <View style={styles.mapFrame}>
+                <Text style={styles.sectionTitle}>
+                  {t("place.detail.location")}
+                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={t("place.detail.viewOnMap")}
+                  onPress={() =>
+                    router.dismissTo({
+                      pathname: "/(tabs)/map",
+                      params: { popupId: detail.publicId },
+                    })
+                  }
+                  style={styles.mapPreview}
+                >
+                  <PlaceMapPreview {...mapCoordinates} />
+                </Pressable>
+              </View>
+              <View style={[styles.mapDivider, styles.mapBottomDivider]} />
+            </View>
+          )}
+          {hasDescriptionSection && (
+            <View style={!hasMapSection && styles.descriptionSection}>
+              {!hasMapSection && <View style={styles.mapDivider} />}
+              <View style={styles.descriptionContent}>
+                <Text style={styles.sectionTitle}>
+                  {t("place.detail.descriptionTitle")}
+                </Text>
+                <PopupIntroduction
+                  key={detail.publicId}
+                  sections={introductionSections}
+                  detailImages={
+                    detail.contentImageUrls.length > 0 ? (
+                      <View
+                        style={[
+                          hasGuidance
+                            ? styles.descriptionImagesAfterGuidance
+                            : hasDescriptionContent
+                              ? styles.descriptionImages
+                              : styles.descriptionAfterTitle,
+                        ]}
+                      >
+                        <IntroductionImageCarousel
+                          key={detail.publicId}
+                          images={detail.contentImageUrls}
+                          popupId={detail.publicId}
+                          countryCode={detail.countryCode}
+                          fetchedAt={detail.contentImageFetchedAt}
+                          width={width - spacing.space16 * 2}
+                        />
+                      </View>
+                    ) : null
+                  }
+                />
+
+                <Pressable
+                  disabled
+                  accessibilityRole="button"
+                  accessibilityLabel={t("place.detail.reportInformation")}
+                  accessibilityState={{ disabled: true }}
+                  hitSlop={10}
+                  style={styles.reportAction}
+                >
+                  <Text numberOfLines={1} style={styles.reportActionText}>
+                    {t("place.detail.reportInformationButton")}
+                  </Text>
+                </Pressable>
+              </View>
+              <View style={[styles.mapDivider, styles.mapBottomDivider]} />
+            </View>
+          )}
+
+        </View>
+        <PopupBlogReviews key={`blog:${detail.publicId}`} ref={blogReviewsRef} publicId={detail.publicId} />
+        <PopupNearbySection key={`nearby:${detail.publicId}`} ref={nearbySectionRef}
+          publicId={detail.publicId} latitude={detail.latitude} longitude={detail.longitude} />
+        <PopupSimilarSection key={`similar:${detail.publicId}`} ref={similarSectionRef} publicId={detail.publicId} />
+        {reviewsVisible && (
+          <View
+            onLayout={({ nativeEvent: { layout } }) => {
+              reviewsY.current = layout.y;
+              if (pendingReviewScroll.current) {
+                pendingReviewScroll.current = false;
+                scrollRef.current?.scrollTo({
+                  y: Math.max(0, layout.y - insets.top),
+                  animated: true,
+                });
+              }
+            }}
+          >
+            <PopupReviews publicId={detail.publicId} title={detail.name} />
+          </View>
         )}
       </ScrollView>
-      {isTabPinned && (
-        <View style={[styles.pinnedTabs, { paddingTop: insets.top }]}>
-          <DetailTabs
-            selectedTab={selectedTab}
-            onSelectInfo={() => setSelectedTab("info")}
-            onSelectReviews={openReviews}
-          />
-        </View>
-      )}
+      {topSafeAreaBackground}
       <Pressable
         testID="popup-floating-favorite"
         accessibilityRole="button"
-        accessibilityLabel={t(detail.isFavorited ? "place.all.removeFavorite" : "place.all.addFavorite")}
+        accessibilityLabel={t(
+          detail.isFavorited
+            ? "place.all.removeFavorite"
+            : "place.all.addFavorite",
+        )}
         accessibilityState={{
           selected: detail.isFavorited,
           disabled: isFavoriteUpdating,
@@ -963,21 +1050,43 @@ export default function PlaceDetail() {
           fill={detail.isFavorited ? colors.background : "none"}
         />
         <Text style={styles.floatingFavoriteText}>
-          {t(detail.isFavorited ? "place.detail.favorited" : "place.all.addFavorite")}
+          {t(
+            detail.isFavorited
+              ? "place.detail.favorited"
+              : "place.all.addFavorite",
+          )}
         </Text>
       </Pressable>
-      {directionsVisible && <DirectionsSheet onClose={() => setDirectionsVisible(false)}
-        onSelect={service => { void selectMap(service); }} />}
+      {directionsVisible && (
+        <DirectionsSheet
+          onClose={() => setDirectionsVisible(false)}
+          onSelect={(service) => {
+            void selectMap(service);
+          }}
+        />
+      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
+  topSafeAreaBackground: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: "#FFFFFF",
+    zIndex: 20,
+    elevation: 20,
+  },
   content: { paddingBottom: spacing.space40 },
   hero: { position: "relative" },
   heroControls: {
     position: "absolute",
+    // SafeAreaView adds its top inset to this padding, preserving button Y.
+    top: 0,
+    paddingTop: spacing.space12,
     left: spacing.space16,
     right: spacing.space16,
     flexDirection: "row",
@@ -994,7 +1103,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 1 },
     elevation: 2,
   },
-  floatingContentInset: { paddingBottom: 48 + spacing.space16 * 2 },
+  floatingContentInset: { paddingBottom: spacing.space40 },
   floatingFavorite: {
     position: "absolute",
     height: 48,
@@ -1015,70 +1124,36 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: colors.background,
   },
-  tabSlot: { width: "100%", height: 56, backgroundColor: colors.background },
-  pinnedTabs: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: colors.background,
-    zIndex: 10,
-    elevation: 10,
-  },
-  tabs: {
-    width: "100%",
-    height: 56,
-    flexDirection: "row",
-    alignItems: "stretch",
-    backgroundColor: colors.background,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    zIndex: 1,
-  },
-  tab: {
-    flex: 1,
-    minWidth: 0,
-    height: 56,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  tabText: { fontSize: 16, fontWeight: "500", color: colors.secondaryText },
-  activeTabText: { fontWeight: "700", color: colors.text },
-  tabIndicator: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: 2,
-    backgroundColor: colors.text,
-  },
   infoContent: {
     paddingTop: spacing.space24,
     paddingHorizontal: spacing.space16,
   },
   title: {
-    marginTop: spacing.space12,
-    fontSize: 18,
+    marginTop: spacing.space8,
+    fontSize: 24,
     fontWeight: "700",
-    lineHeight: 26,
+    lineHeight: 28,
     color: colors.text,
   },
   tags: { flexDirection: "row", flexWrap: "wrap", gap: spacing.space8 },
-  stats: {
-    flexDirection: "row",
-    alignItems: "center",
-    columnGap: spacing.space12,
-    marginTop: spacing.space12,
-  },
-  stat: { flexDirection: "row", alignItems: "center", columnGap: 5 },
-  statText: {
-    fontSize: 14,
-    fontWeight: "600",
-    lineHeight: 20,
+  metadataTag: {
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 5,
+    backgroundColor: "#F5F5F7",
     color: colors.text,
+    fontSize: 12,
+    fontWeight: "600",
+    lineHeight: 18,
   },
-  favoriteCount: { fontVariant: ["tabular-nums"] },
-  infoSection: { marginTop: spacing.space24 },
+  dayStatus: {
+    marginTop: 8,
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: 8,
+  },
+  dayStatusText: { fontSize: 18, fontWeight: "600", lineHeight: 26 },
+  infoSection: { marginTop: 16 },
   mapSection: { marginTop: spacing.space24 },
   mapDivider: {
     height: 8,
@@ -1088,44 +1163,16 @@ const styles = StyleSheet.create({
   mapBottomDivider: { marginTop: spacing.space24 },
   descriptionSection: { marginTop: spacing.space24 },
   descriptionContent: { marginTop: spacing.space24 },
-  benefitTitle: {
-    flexShrink: 0,
-    fontSize: 14,
-    fontWeight: "600",
-    lineHeight: 20,
-    color: colors.text,
-  },
-  descriptionText: {
-    fontSize: 14,
-    fontWeight: "400",
-    lineHeight: 22,
-    color: colors.text,
-  },
-  descriptionAfterBenefit: { marginTop: spacing.space24 },
   descriptionAfterTitle: { marginTop: spacing.space16 },
-  descriptionImages: { marginTop: spacing.space20 },
-  highlights: { gap: spacing.space24 },
-  highlightHeading: {
-    flexDirection: "row",
-    alignItems: "center",
-    columnGap: spacing.space6,
-  },
-  highlightTitle: { flex: 1, flexShrink: 1 },
-  highlightEmoji: { fontSize: 16 },
-  highlightText: { marginTop: spacing.space8 },
+  descriptionImages: { marginTop: spacing.space24 },
+  descriptionImagesAfterGuidance: { marginTop: spacing.space20 },
   reportAction: { alignSelf: "flex-end", marginTop: spacing.space16 },
   reportActionText: {
     fontSize: 13,
     fontWeight: "600",
     color: colors.secondaryText,
   },
-  officialContent: {
-    marginTop: spacing.space24,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  socialScroller: { flexShrink: 1, marginLeft: spacing.space12 },
+  socialScroller: { flexShrink: 1 },
   socialButtons: {
     flexGrow: 1,
     flexDirection: "row",
@@ -1143,28 +1190,37 @@ const styles = StyleSheet.create({
   },
   mapFrame: { marginTop: spacing.space24 },
   mapPreview: { marginTop: spacing.space12 },
-  directionsButton: {
+  basicActions: { flexDirection: "column", gap: spacing.space8, marginTop: 12 },
+  basicActionButton: {
     width: "100%",
-    height: 48,
-    marginTop: spacing.space12,
-    paddingHorizontal: spacing.space16,
+    minWidth: 0,
+    minHeight: 44,
+    paddingVertical: spacing.space8,
+    paddingHorizontal: spacing.space12,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: radius.radius12,
+    borderRadius: 5,
     backgroundColor: colors.background,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     columnGap: spacing.space6,
   },
-  directionsText: { fontSize: 15, fontWeight: "600", color: colors.text },
+  basicActionText: { fontSize: 14, fontWeight: "600", color: colors.text },
+  officialActionButton: { backgroundColor: "#171717", borderColor: "#171717" },
+  officialActionText: { color: colors.background },
+  directionsActionButton: { backgroundColor: "#E9E9ED", borderWidth: 0 },
+  directionsActionText: { color: "#171717" },
   sectionTitle: {
     fontSize: 18,
     fontWeight: "700",
     lineHeight: 26,
     color: colors.text,
   },
-  infoRows: { flexDirection: "column", gap: spacing.space12 },
+  infoRows: {
+    flexDirection: "column",
+    gap: spacing.space6,
+  },
   infoRow: { minHeight: 20, flexDirection: "row", alignItems: "center" },
   infoRowTop: { alignItems: "flex-start" },
   rowIcon: {
@@ -1189,7 +1245,16 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     color: colors.text,
   },
-  infoValueText: { textAlign: "right" },
+  infoValueText: {
+    textAlign: "left",
+    fontSize: 14,
+    fontWeight: "400",
+    lineHeight: 22,
+  },
+  addressExtra: { color: colors.secondaryText },
+  factLabel: { width: 68, fontSize: 14, fontWeight: "400", lineHeight: 22 },
+  factIcon: { width: 16, marginRight: 8, paddingTop: 3 },
+  factValue: { marginLeft: 12 },
   reservationLabel: { width: 40 },
   reservationCard: {
     minHeight: 48,

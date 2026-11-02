@@ -57,6 +57,24 @@ function environment(url, storage = new Map(), options = {}) {
 const legacyStorage = () => new Map([['accessToken', 'local-access'], ['refreshToken', 'local-refresh']]);
 const productionTokens = { accessToken: 'production-access', refreshToken: 'production-refresh' };
 
+test('new production domain restores the existing production session without changing storage keys', async () => {
+  const storage = legacyStorage();
+  const previous = environment(productionUrl, storage, { development: false });
+  await previous.auth.saveTokens(productionTokens);
+  const saved = new Map(storage);
+  const current = environment(' https://api.theplave.co.kr/// ', storage, { development: false });
+  assert.equal(current.api.API_TOKEN_STORAGE_NAMESPACE, previous.api.API_TOKEN_STORAGE_NAMESPACE);
+  assert.equal(await current.auth.getSavedAccessToken(), productionTokens.accessToken);
+  await current.auth.refreshAuthUser();
+  assert.equal(current.requests[0].url, 'https://api.theplave.co.kr/api/users/me');
+  assert.equal(current.requests[0].headers.Authorization, 'Bearer production-access');
+  assert.deepEqual(storage, saved);
+  assert.deepEqual(current.writes, []);
+  assert.deepEqual(current.deletes, []);
+  assert.notEqual(apiFor('https://api.theplave.co.kr:8443').API_TOKEN_STORAGE_NAMESPACE,
+    current.api.API_TOKEN_STORAGE_NAMESPACE);
+});
+
 for (const value of [undefined, '', '   ', localUrl, ` ${localUrl}/// `]) {
   test(`default/explicit local address ${JSON.stringify(value)} retains the existing URL and token keys`, async () => {
     const s = environment(value, legacyStorage());

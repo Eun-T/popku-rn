@@ -33,6 +33,7 @@ async function app({ fail=false,favoritesError=false,renamedMetadata=false,trans
     PanResponder:{ create:()=>({ panHandlers:{} }) } };
   const icons = Object.fromEntries(['Search','X','Bell','ChevronDown','ChevronUp','ChevronLeft','ChevronRight','RotateCcw','Heart','Store'].map(n=>[n,n]));
   const ui=runtime({
+    'src/components/home/HomeVenueSection.tsx': { __esModule: true, default: 'HomeVenueSection' },
     'react-native':native,'expo-image':{ Image:'ExpoImage' },'lucide-react-native':icons,'@expo/vector-icons':{ Ionicons:'Ionicons' },
     'expo-router':{ useScrollToTop(){},useLocalSearchParams:()=>({}),useFocusEffect(){} },
     'expo-blur':{ BlurTargetView:'BlurTargetView',BlurView:'BlurView' },
@@ -105,22 +106,33 @@ test('compiled retained all-list labels follow ko-ja-ko/system with preserved ID
   assert.deepEqual(s.calls,afterLanguage);s.dispose();
 });
 
-test('actual compiled card translates ongoing/upcoming/ended status and favorite labels while keeping status styles and source content',async()=>{
+test('actual compiled card translates D-day states and favorite labels while keeping status styles and source content',async()=>{
   const file='src/components/place/PopupGridCard.tsx',s=await app({transform:compilerTransform([file,'src/hooks/useTranslation.ts'])});
   tab(s.screen,'전체').props.onPress();await s.settle();const data=s.list().props.data,calls=s.calls.slice(),card=s.list().props.renderItem({item:data[0]});
-  const rows=[['ongoing','2026-10-08','2026-10-11'],['upcoming','2027-01-01','2027-01-02'],['ended','2026-01-01','2026-01-02']].map(([key,startDate,endDate])=>{
-    const item=Object.freeze({...data[0],startDate,endDate});return{key,item,root:s.mount(()=>card.type({...card.props,item}))};
+  const rows=[
+    ['종료 D-2','終了 D-2','2026-10-08','2026-10-11'],
+    ['오픈 D-1','オープン D-1','2026-10-10',null],
+    ['오늘 오픈','本日オープン','2026-10-09','2026-10-11'],
+    ['오늘 종료','本日終了','2026-10-08','2026-10-09'],
+    ['오늘 종료','本日終了','2026-10-09','2026-10-09'],
+    ['종료','終了','2026-01-01','2026-01-02'],
+    [null,null,'2026-10-08',null],
+  ].map(([ko,ja,startDate,endDate])=>{
+    const item=Object.freeze({...data[0],startDate,endDate});return{ko,ja,item,root:s.mount(()=>card.type({...card.props,item,today:'2026-10-09'}))};
   });
   const nativeStyles=rows.map(({root})=>nodes(root.tree).filter(n=>n.type==='Text').map(n=>n.props.style));
   const languages=[];
   for(const language of ['ja','ko','system']){
     await s.language(language);languages.push(language==='ko'?'ko':'ja',language==='ko'?'ko':'ja');
     const {resolvedLanguage}=s.languageStore.getSnapshot(),translate=s.load('src/locales/index.ts').translate;
-    for(const {key,item,root}of rows){assert.ok(texts(root.tree).includes(translate(resolvedLanguage,'place.all.card.'+key)));assert.ok(texts(root.tree).includes(item.name));
+    for(const {ko,ja,item,root}of rows){
+      const status=nodes(root.tree).find(n=>n.type==='Text'&&Array.isArray(n.props.style)&&n.props.style[0]?.fontSize===13);
+      if(ko===null)assert.equal(status,undefined);else assert.equal(status.props.children,resolvedLanguage==='ja'?ja:ko);
+      assert.ok(texts(root.tree).includes(item.name));
       assert.ok(nodes(root.tree).some(n=>n.props.accessibilityLabel===translate(resolvedLanguage,'place.all.addFavorite')));}
     assert.deepEqual(rows.map(({root})=>nodes(root.tree).filter(n=>n.type==='Text').map(n=>n.props.style)),nativeStyles);assertContentLanguages(s.calls,calls,languages);assert.deepEqual(s.list().props.data,data);
   }
-  s.systemLanguage('ko-KR');await s.settle();for(const {key,root}of rows)assert.ok(texts(root.tree).includes(s.load('src/locales/index.ts').translate('ko','place.all.card.'+key)));assertContentLanguages(s.calls,calls,[...languages,'ko','ko']);s.dispose();
+  s.systemLanguage('ko-KR');await s.settle();for(const {ko,root}of rows)if(ko!==null)assert.ok(texts(root.tree).includes(ko));assertContentLanguages(s.calls,calls,[...languages,'ko','ko']);s.dispose();
 });
 
 test('all keys used by active Place components, static filters and ID labels exist in ko/ja with matching variables', () => {
@@ -256,22 +268,23 @@ test('grid and weekly card labels react with identical props; original content, 
   const s=await app(), original=JSON.stringify(popup);
   const Grid=s.load('src/components/place/PopupGridCard.tsx').default;
   const Weekly=s.load('src/components/place/PlaceWeeklyPopupList.tsx').default;
-  const props={ item:popup,width:170,isFavorite:false,isFavoriteDisabled:false,onToggleFavorite:()=>s.favoriteToggles.push(popup),onPress:item=>s.opened.push(item.publicId) };
+  const props={ item:popup,today:'2026-10-09',width:170,isFavorite:false,isFavoriteDisabled:false,onToggleFavorite:()=>s.favoriteToggles.push(popup),onPress:item=>s.opened.push(item.publicId) };
   const grid=s.mount(()=>Grid(props));
   const weekly=s.mount(()=>Weekly({ popups:[popup],onPressPopup:item=>s.opened.push(item.publicId),isFavorite:()=>true,isFavoriteDisabled:()=>false,onToggleFavorite:item=>s.favoriteToggles.push(item) }));
   const koStyle=grid.tree.props.style;
-  assert.ok(texts(grid.tree).includes('진행중')); assert.ok(texts(grid.tree).includes('성수')); assert.ok(texts(grid.tree).includes('뷰티'));
+  assert.ok(texts(grid.tree).includes('종료 D-2')); assert.ok(texts(grid.tree).includes('성수')); assert.ok(texts(grid.tree).includes('뷰티'));
   await s.language('ja');
-  for (const o of [grid,weekly]) { assert.ok(texts(o.tree).includes('開催中')); assert.ok(texts(o.tree).includes('聖水')); assert.ok(texts(o.tree).includes('ビューティー')); assert.ok(texts(o.tree).includes(popup.name)); }
+  assert.ok(texts(grid.tree).includes('終了 D-2')); assert.ok(texts(weekly.tree).includes('開催中'));
+  for (const o of [grid,weekly]) { assert.ok(texts(o.tree).includes('聖水')); assert.ok(texts(o.tree).includes('ビューティー')); assert.ok(texts(o.tree).includes(popup.name)); }
   assert.deepEqual(grid.tree.props.style,koStyle); assert.equal(nodes(grid.tree).find(n=>n.type==='ExpoImage').props.source.uri,popup.coverImageUrl);
   let stopped=0; grid.tree.props.onPress(); button(grid.tree,'お気に入りに追加').props.onPress({stopPropagation(){stopped++;}});
   nodes(weekly.tree).find(n=>n.type==='Pressable').props.onPress(); button(weekly.tree,'お気に入りを解除').props.onPress({stopPropagation(){stopped++;}});
   assert.equal(stopped,2); assert.deepEqual(s.opened,[popup.publicId,popup.publicId]); assert.deepEqual(s.favoriteToggles,[popup,popup]); assert.equal(JSON.stringify(popup),original);
-  // Every status keeps its existing badge style/date calculation while text changes.
+  // D-day text changes language while the weekly card keeps its existing status.
   const upcoming=s.mount(()=>Grid({...props,item:{...popup,startDate:'2026-10-10',endDate:'2026-10-20'}}));
   const ended=s.mount(()=>Grid({...props,item:{...popup,startDate:'2026-10-01',endDate:'2026-10-08'}}));
-  assert.ok(texts(upcoming.tree).includes('オープン予定')); assert.ok(texts(ended.tree).includes('終了'));
-  await s.language('ko'); assert.ok(texts(upcoming.tree).includes('오픈예정')); assert.ok(texts(ended.tree).includes('종료됨'));
+  assert.ok(texts(upcoming.tree).includes('オープン D-1')); assert.ok(texts(ended.tree).includes('終了'));
+  await s.language('ko'); assert.ok(texts(grid.tree).includes('종료 D-2')); assert.ok(texts(upcoming.tree).includes('오픈 D-1')); assert.ok(texts(ended.tree).includes('종료'));
   s.dispose();
 });
 

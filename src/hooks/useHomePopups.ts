@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 
-import { getNewPopups, getNowHotPopups, getPopupDetail, type PublicPopup, type PublicPopupDetail } from '../lib/popups';
+import { getNewPopups, getNowHotPopups, getPopupPage, getPopupDetail, type PublicPopup, type PublicPopupDetail } from '../lib/popups';
 import { COVER_RECOVERY_RETRY_MS, COVER_URL_FRESH_MS, mergeRecoveredCover } from '../lib/placeCoverRecovery';
 import type { RecoverHomeCover } from './useHomeCoverImage';
 import { useTranslation } from './useTranslation';
 import type { Locale } from '../locales';
+import { API_BASE_URL } from '../constants/api';
 
-type Section = 'trending' | 'new';
+type Section = 'trending' | 'new' | 'latest' | 'japanNew';
 type Country = 'KR' | 'JP';
-type CacheKey = `${Section}:${Country}:${Locale}`;
+type HomeCountry = Country | 'ALL';
+type CacheKey = `${Section}:${HomeCountry}:${Locale}`;
 type CacheEntry = ({ data: PublicPopup[]; fetchedAt: number } | { error: true }) & { retryAt?: number };
 
 const TTL_MS = 10 * 60 * 1000;
@@ -26,7 +28,7 @@ function sameCover(a: PublicPopup, b: PublicPopup) {
 }
 
 function recoverCover(country: Country, languageCode: Locale, item: PublicPopup, manual: boolean): Promise<CoverResult | null> {
-  const keys: CacheKey[] = [`new:${country}:${languageCode}`, `trending:${country}:${languageCode}`];
+  const keys: CacheKey[] = [`new:${country}:${languageCode}`, `trending:${country}:${languageCode}`, `latest:ALL:${languageCode}`, `japanNew:JP:${languageCode}`];
   if (!item.coverImageUrl || !keys.some(key => {
     const entry = cache[key];
     return entry && 'data' in entry && entry.data.some(popup => sameCover(popup, item));
@@ -85,7 +87,27 @@ function publish(key: CacheKey, entry: CacheEntry) {
   listeners[key]?.forEach((listener) => listener());
 }
 
-function revalidate(section: Section, country: Country, languageCode: Locale) {
+async function getJapanNewPopups(signal: AbortSignal, languageCode: Locale): Promise<PublicPopup[]> {
+  // Match web japan-new-popups: unpaginated JP list, no status/homeNew/date
+  // filters. The server owns created_at DESC, id DESC; createdAt is not a DTO field.
+  const response = await fetch(`${API_BASE_URL}/api/popups?countryCode=JP&languageCode=${encodeURIComponent(languageCode)}`, { signal });
+  if (!response.ok) throw new Error('Japan new popups unavailable');
+  const body: unknown = await response.json();
+  if (!body || typeof body !== 'object' || !('popups' in body) || !Array.isArray(body.popups)
+    || 'nextCursor' in body || 'hasMore' in body || 'page' in body) throw new Error('Invalid Japan popup list');
+  const seen = new Set<string>();
+  for (const value of body.popups as unknown[]) {
+    if (!value || typeof value !== 'object') throw new Error('Invalid Japan popup');
+    const popup = value as Partial<PublicPopup>;
+    if (popup.countryCode !== 'JP' || typeof popup.publicId !== 'string' || !popup.publicId
+      || typeof popup.name !== 'string' || !popup.name || !Array.isArray(popup.tags)
+      || seen.has(popup.publicId)) throw new Error('Invalid Japan popup');
+    seen.add(popup.publicId);
+  }
+  return (body.popups as PublicPopup[]).slice(0, 10);
+}
+
+function revalidate(section: Section, country: HomeCountry, languageCode: Locale) {
   const key: CacheKey = `${section}:${country}:${languageCode}`;
   const entry = cache[key];
   if (entry?.retryAt && Date.now() < entry.retryAt) return;
@@ -94,8 +116,12 @@ function revalidate(section: Section, country: Country, languageCode: Locale) {
 
   const controller = new AbortController();
   const fetchedAt = Date.now();
-  const fetchPopups = section === 'trending' ? getNowHotPopups : getNewPopups;
-  requests[key] = fetchPopups(country, controller.signal, languageCode)
+  // Pagination accepts only limit=10. Keep the first seven in the server's registration order.
+  const request = section === 'latest'
+    ? getPopupPage(undefined, controller.signal, {}, null, languageCode).then(page => page.popups.slice(0, 7))
+    : section === 'japanNew' ? getJapanNewPopups(controller.signal, languageCode)
+    : (section === 'trending' ? getNowHotPopups : getNewPopups)(country as Country, controller.signal, languageCode);
+  requests[key] = request
     .then((data) => {
       const cached = cache[key];
       const previous = new Map(cached && 'data' in cached ? cached.data.map(item => [item.publicId, item]) : []);
@@ -118,7 +144,7 @@ function revalidate(section: Section, country: Country, languageCode: Locale) {
     .finally(() => { delete requests[key]; });
 }
 
-export function useHomePopups(section: Section, country: Country): {
+export function useHomePopups(section: Section, country: HomeCountry, enabled = true): {
   status: 'loading' | 'ready' | 'error';
   popups: PublicPopup[];
   recoverCover?: RecoverHomeCover;
@@ -136,16 +162,19 @@ export function useHomePopups(section: Section, country: Country): {
   }, [key]);
   const getSnapshot = useCallback(() => cache[key], [key]);
   const entry = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
-  const recover = useCallback<RecoverHomeCover>((item, manual = false) =>
-    recoverCover(country, languageCode, item, manual), [country, languageCode]);
+  const recover = useCallback<RecoverHomeCover>((item, manual = false) => {
+    const coverCountry = country === 'ALL' ? item.countryCode : country;
+    if (coverCountry !== 'KR' && coverCountry !== 'JP') return Promise.resolve(null);
+    return recoverCover(coverCountry, languageCode, item, manual);
+  }, [country, languageCode]);
 
-  useEffect(() => { revalidate(section, country, languageCode); }, [section, country, languageCode]);
+  useEffect(() => { if (enabled) revalidate(section, country, languageCode); }, [section, country, languageCode, enabled]);
   useEffect(() => {
-    if (!entry) return;
+    if (!enabled || !entry) return;
     const next = entry.retryAt ?? ('data' in entry ? entry.fetchedAt + TTL_MS : Date.now());
     const timer = setTimeout(() => revalidate(section, country, languageCode), Math.max(1, next - Date.now() + 1));
     return () => clearTimeout(timer);
-  }, [entry, section, country, languageCode]);
+  }, [entry, section, country, languageCode, enabled]);
 
   if (entry && 'data' in entry) return { status: 'ready', popups: entry.data, recoverCover: recover };
   if (entry && 'error' in entry) return { status: 'error', popups: [] };

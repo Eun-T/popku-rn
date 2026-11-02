@@ -21,7 +21,7 @@ type Props = {
 
 const placeholderImage = require("../../../assets/images/ranking-placeholder.png");
 
-/** The parent owns the stable viewport; intrinsic poster dimensions never resize it. */
+/** Match the mobile web poster's natural ratio inside a full-width blurred area. */
 export default function PopupHeroImage({
   uri,
   accessibilityLabel,
@@ -42,38 +42,20 @@ export default function PopupHeroImage({
     coverScope,
   );
   const hasPoster = typeof cover.source === "object";
-  const [viewport, setViewport] = useState({ width: 0, height: 0 });
   const [posterSize, setPosterSize] = useState<{
     key: string; width: number; height: number;
   } | null>(null);
-  const availableWidth = viewport.width - spacing.space16 * 2;
-  const availableHeight = viewport.height - topInset - spacing.space16 * 2;
   const size = posterSize?.key === cover.imageKey ? posterSize : null;
-  const fitScale = size && availableWidth > 0 && availableHeight > 0
-    ? Math.min(availableWidth / size.width, availableHeight / size.height)
-    : null;
-  const fittedPoster = size && fitScale !== null ? {
-    width: size.width * fitScale,
-    height: size.height * fitScale,
-    left: spacing.space16 + (availableWidth - size.width * fitScale) / 2,
-    top: topInset + spacing.space16 + (availableHeight - size.height * fitScale) / 2,
-    right: undefined,
-    bottom: undefined,
-  } : null;
 
   return (
-    <View pointerEvents="box-none" style={styles.layers}
-      onLayout={({ nativeEvent: { layout } }) => {
-        setViewport(current => current.width === layout.width && current.height === layout.height
-          ? current : { width: layout.width, height: layout.height });
-      }}>
+    <View pointerEvents="box-none" style={[styles.layers, { paddingTop: topInset + spacing.space24 }]}>
       {hasPoster && (
         <Image
           key={`background:${cover.imageKey}`}
           source={cover.source}
           contentFit="cover"
           cachePolicy="memory-disk"
-          blurRadius={20}
+          blurRadius={35}
           pointerEvents="none"
           accessible={false}
           accessibilityElementsHidden
@@ -104,7 +86,7 @@ export default function PopupHeroImage({
             setPosterSize({ key: cover.imageKey, width: event.source.width, height: event.source.height });
           }
         }}
-        style={[styles.poster, { top: topInset + spacing.space16 }, ...(fittedPoster ? [fittedPoster] : [])]}
+        style={[styles.poster, { aspectRatio: size ? size.width / size.height : 3 / 4 }]}
       />
       {cover.canRetry && (
         <Pressable
@@ -130,22 +112,18 @@ export default function PopupHeroImage({
 
 const styles = StyleSheet.create({
   layers: {
-    position: "absolute",
-    top: 0,
-    bottom: 0,
-    left: 0,
-    right: 0,
+    width: "100%",
+    paddingBottom: spacing.space24,
+    alignItems: "center",
     overflow: "hidden",
     backgroundColor: "#111111",
   },
   background: {
     position: "absolute",
-    top: 0,
-    bottom: 0,
-    left: 0,
-    right: 0,
-    opacity: 0.55,
-    transform: [{ scale: 1.12 }],
+    top: -70,
+    bottom: -70,
+    left: -70,
+    right: -70,
   },
   backgroundDim: {
     position: "absolute",
@@ -154,16 +132,12 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     backgroundColor: "#000000",
-    opacity: 0.15,
+    opacity: 0.2,
   },
   poster: {
-    position: "absolute",
-    borderRadius: radius.radius12,
+    width: "74.1%",
+    borderRadius: 5,
     overflow: "hidden",
-    top: spacing.space16,
-    bottom: spacing.space16,
-    left: spacing.space16,
-    right: spacing.space16,
   },
   retry: {
     position: "absolute",

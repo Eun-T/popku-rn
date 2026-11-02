@@ -1,8 +1,9 @@
 import { MaterialIcons } from "@expo/vector-icons";
+import { Image as MarkerImage } from "expo-image";
 import * as Location from "expo-location";
 import { uuid } from "expo-modules-core";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import { ArrowLeft, LocateFixed, Search, Star, X } from "lucide-react-native";
+import { ArrowLeft, LocateFixed, Search, X } from "lucide-react-native";
 import {
   useCallback,
   useEffect,
@@ -31,12 +32,12 @@ import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
 import Reanimated, {
   cancelAnimation,
   Easing as ReanimatedEasing,
+  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Svg, { Circle, Path } from "react-native-svg";
 import Supercluster from "supercluster";
 import { useMapPopups } from "../hooks/useMapPopups";
 import { usePopupNavigation } from "../hooks/usePopupNavigation";
@@ -55,6 +56,7 @@ import {
   hasValidCoordinates,
   type MapBounds,
 } from "../lib/mapMarkerBounds";
+import { clusterExpansion, MAP_MAX_CLUSTER_ZOOM, mapZoom, overlappingMapMarkers } from "../lib/mapClustering";
 import {
   isPlaceCameraComplete,
   placeCameraRegion,
@@ -101,7 +103,8 @@ type MapMarkerItem =
   | { type: "popup"; popup: PopupMapMarker }
   | {
       type: "cluster";
-      id: number;
+      id: number | string;
+      popupIds?: string[];
       count: number;
       latitude: number;
       longitude: number;
@@ -182,6 +185,24 @@ const markerStyles: Record<
   기타: { backgroundColor: "#9CA3AF", iconName: "more-horiz" },
 };
 
+function markerSvgSource(viewBox: string, artwork: string) {
+  return { uri: `data:image/svg+xml;utf8,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}">${artwork}</svg>`,
+  )}` };
+}
+
+// Preserve the artwork, but decode it as an image rather than mounting Fabric SVG children
+// inside the Google marker's legacy iconView. Sources are shared by the existing tag palette.
+const markerPinSources = Object.fromEntries(Object.values(markerStyles).map(({ backgroundColor }) => [
+  backgroundColor, markerSvgSource("0 0 48 52",
+    `<path d="M24 2 C12 2 4 10 4 21 C4 32 12 38 24 50 C36 38 44 32 44 21 C44 10 36 2 24 2 Z" fill="${backgroundColor}"/><circle cx="24" cy="21" r="15" fill="#FFFFFF"/>`),
+]));
+// Lucide Star artwork (ISC), identical to the installed lucide-react-native Star icon.
+const markerStarSources = Object.fromEntries([...Object.values(markerStyles).map(style => style.backgroundColor), "#FFFFFF"].map(color => [
+  color, markerSvgSource("0 0 24 24",
+    `<path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`),
+]));
+
 function markerStyleFor(name: PopupMapMarker["primaryTag"]) {
   return name && Object.prototype.hasOwnProperty.call(markerStyles, name)
     ? markerStyles[name as MarkerTag]
@@ -203,6 +224,8 @@ function ClusterMapMarker({
     <Marker
       coordinate={{ latitude, longitude }}
       tracksViewChanges={false}
+      anchor={{ x: 0.5, y: 0.5 }}
+      zIndex={1}
       stopPropagation
       onPress={onPress}
     >
@@ -219,7 +242,7 @@ export default function MapScreen() {
   const openPopup = usePopupNavigation();
   const { popupId } = useLocalSearchParams<{ popupId?: string }>();
   const insets = useSafeAreaInsets();
-  const { height: windowHeight } = useWindowDimensions();
+  const { height: windowHeight, fontScale = 1 } = useWindowDimensions();
   const mapRef = useRef<MapView>(null);
   const markerRefs = useRef(new Map<string, ComponentRef<typeof Marker>>());
   const mapReady = useRef(false);
@@ -234,6 +257,8 @@ export default function MapScreen() {
   const placeResolveController = useRef<AbortController | null>(null);
   const placeResolveId = useRef<string | null>(null);
   const mapMoving = useRef(false);
+  const overlapHistory = useRef<ReadonlyMap<string, string>>(new Map());
+  const clusterZoomAttempt = useRef<{ ids: string[]; zoom: number } | null>(null);
   const locatingRef = useRef(false);
   const regionChangeVersion = useRef(0);
   const [isLocating, setIsLocating] = useState(false);
@@ -253,6 +278,7 @@ export default function MapScreen() {
     initialRegion.latitudeDelta <= MARKER_LABEL_SHOW_LATITUDE_DELTA,
   );
   const [mapWidth, setMapWidth] = useState(Dimensions.get("window").width);
+  const [mapHeight, setMapHeight] = useState(Dimensions.get("window").height);
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchMode, setIsSearchMode] = useState(false);
   const [popupSearch, setPopupSearch] = useState<{
@@ -286,9 +312,25 @@ export default function MapScreen() {
   >([]);
   const [keyboardTop, setKeyboardTop] = useState<number | null>(null);
   const [searchMoveVersion, setSearchMoveVersion] = useState(0);
-  const [selectedPopupId, setSelectedPopupId] = useState<string | null>(null);
-  const setSelectedPopup = (popup: PopupMapMarker | null) =>
-    setSelectedPopupId(popup?.id ?? null);
+  type PreviewSelection = { ids: string[]; cluster: boolean; closing: number | null };
+  const [selection, setSelection] = useState<PreviewSelection | null>(null);
+  const pendingPreview = useRef<PreviewSelection | null>(null);
+  const previewVersion = useRef(0);
+  const regionTransitionVersion = useRef(0);
+  const selectedPopupId = selection && !selection.cluster ? selection.ids[0] : null;
+  const setSelectedPopup = (popup: PopupMapMarker | null) => {
+    // A new marker takes ownership of an in-flight regional close; both states keep the same snapshot.
+    const waitForRegion = popup !== null && pendingPreview.current !== null && sheetTransition.get() !== 0;
+    const nextSelection: PreviewSelection | null = popup
+      ? { ids: [popup.id], cluster: false, closing: waitForRegion ? ++previewVersion.current : null }
+      : null;
+    if (pendingPreview.current) {
+      if (!popup) setPreviewSelection(null);
+    }
+    pendingPreview.current = waitForRegion ? nextSelection : null;
+    setSelection(nextSelection);
+    if (nextSelection) setPreviewSelection(nextSelection);
+  };
   const pendingPopupId =
     pendingSearchAction.current?.kind === "popup"
       ? pendingSearchAction.current.id
@@ -303,12 +345,12 @@ export default function MapScreen() {
     [popups, selectedTag],
   );
   const { clusterIndex, popupsById } = useMemo(() => {
-    const validPopups = filteredPopups.filter(hasValidCoordinates);
+    const validPopups = [...new Map(filteredPopups.filter(hasValidCoordinates).map(popup => [popup.id, popup])).values()];
     const index = new Supercluster<
       PopupClusterProperties,
       Record<string, never>
     >({
-      radius: 40,
+      radius: 64,
       maxZoom: 16,
       extent: CLUSTER_EXTENT,
     });
@@ -339,12 +381,12 @@ export default function MapScreen() {
   );
   const markerItems = useMemo((): MapMarkerItem[] => {
     if (mapRegion.latitudeDelta < CLUSTERING_LATITUDE_DELTA) {
-      return expandedMarkerPopups(
+      return overlappingMapMarkers(expandedMarkerPopups(
         filteredPopups,
         mapBounds,
         selectedPopupId ?? undefined,
         pendingPopupId,
-      ).map((popup) => ({ type: "popup", popup }));
+      ), mapRegion, mapWidth, mapHeight, showMarkerLabels, fontScale, overlapHistory.current);
     }
 
     return clusterIndex
@@ -378,7 +420,11 @@ export default function MapScreen() {
     clusterZoom,
     filteredPopups,
     mapBounds,
-    mapRegion.latitudeDelta,
+    mapRegion,
+    mapWidth,
+    mapHeight,
+    showMarkerLabels,
+    fontScale,
     popupsById,
     selectedPopupId,
     pendingPopupId,
@@ -399,7 +445,7 @@ export default function MapScreen() {
   const [markerHeights, setMarkerHeights] = useState<Record<string, number>>(
     {},
   );
-  const [previewPopup, setPreviewPopup] = useState<PopupMapMarker | null>(null);
+  const [previewSelection, setPreviewSelection] = useState<PreviewSelection | null>(null);
   const [isListOpen, setIsListOpen] = useState(false);
   const [filterBottom, setFilterBottom] = useState<number | null>(null);
   const [sheetHeight, setSheetHeight] = useState(0);
@@ -410,17 +456,46 @@ export default function MapScreen() {
   const sheetAnimatedStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: (1 - sheetTransition.get()) * sheetHeight }],
   }));
-  const hasSelectedPopup = selectedPopupId !== null && !isListOpen;
-  const hasPreviewPopup = previewPopup !== null;
-  const currentPreviewPopup = previewPopup
-    ? (popupsById.get(previewPopup.id) ?? null)
-    : null;
+  const closingPreviewVersion = selection?.closing ?? null;
+  const hasSelectedPopup = selection !== null && !isListOpen;
+  const hasPreviewPopup = previewSelection !== null;
+  // Content replacements can keep the same native parent height and emit no new onLayout.
+  // Discard its measurement only after that preview has actually been removed.
+  useEffect(() => {
+    if (!hasPreviewPopup) setPreviewHeight(0);
+  }, [hasPreviewPopup]);
+  const currentPreviewPopups = useMemo(() => previewSelection?.ids.flatMap(id => {
+    const popup = popupsById.get(id);
+    return popup ? [popup] : [];
+  }) ?? [], [previewSelection, popupsById]);
   const bottomInset = Math.max(insets.bottom, 28);
+  const previewMaxHeight = Math.max(0, windowHeight - (filterBottom ?? insets.top + 112) - 12);
+  // Entry animation and visibility use the same committed selection/content pair.
+  const previewAvailable = hasSelectedPopup && closingPreviewVersion === null && previewSelection === selection;
   const previewReady =
-    hasSelectedPopup &&
-    hasPreviewPopup &&
+    previewAvailable &&
     actionHeight > 0 &&
     previewHeight > 0;
+  const finishRegionClose = useCallback((animationVersion: number) => {
+    const pending = pendingPreview.current;
+    if (!cameraScreenActive.current || regionTransitionVersion.current !== animationVersion || !pending) return;
+    pendingPreview.current = null;
+    const nextSelection = { ...pending, closing: null };
+    setSelection(nextSelection);
+    setPreviewSelection(nextSelection);
+  }, []);
+  const showClusterPreview = (ids: string[]) => {
+    const validIds = [...new Set(ids)].filter(id => popupsById.has(id));
+    if (validIds.length === 0) return;
+    const version = ++previewVersion.current;
+    const waitForRegion = sheetHeight > 0 && (isListOpen || sheetTransition.get() !== 0);
+    const nextSelection: PreviewSelection = { ids: validIds, cluster: true, closing: waitForRegion ? version : null };
+    pendingPreview.current = waitForRegion ? nextSelection : null;
+    // Prepare immediately. A closed region uses the same simultaneous transition as a normal marker.
+    setPreviewSelection(nextSelection);
+    setSelection(nextSelection);
+    setIsListOpen(false);
+  };
   const searchCardTop = insets.top + 62;
   const searchCardMaxHeight = Math.max(
     96,
@@ -543,6 +618,11 @@ export default function MapScreen() {
   }, [isSearchMode, searchQuery]);
 
   const invalidateCameraRequests = useCallback(() => {
+    if (pendingPreview.current) {
+      pendingPreview.current = null;
+      setPreviewSelection(null);
+      setSelection(current => current?.closing !== null ? null : current);
+    }
     cameraRequestVersion.current += 1;
     pendingSearchAction.current = null;
     pendingDetailPopupId.current = null;
@@ -564,6 +644,7 @@ export default function MapScreen() {
     setResolvingPlaceId(null);
     return () => {
       cameraScreenActive.current = false;
+      clusterZoomAttempt.current = null;
       invalidateCameraRequests();
     };
   }, [invalidateCameraRequests]));
@@ -597,6 +678,7 @@ export default function MapScreen() {
   };
 
   const handleMapInteraction = () => {
+    clusterZoomAttempt.current = null;
     invalidateCameraRequests();
     if (isSearchMode) closeSearch();
   };
@@ -760,13 +842,12 @@ export default function MapScreen() {
       setIsListOpen(true);
       return;
     }
-    const marker = markerItems.find(
-      (item) => item.type === "popup" && item.popup.id === pending.id,
-    );
-    if (!marker || marker.type !== "popup") return;
+    // A searched popup may belong to an exact-coordinate cluster at every zoom.
+    const popup = popupsById.get(pending.id);
+    if (!popup) return;
     pendingSearchAction.current = null;
-    setSelectedPopup(marker.popup);
-  }, [markerItems, searchMoveVersion, visiblePopups]);
+    setSelectedPopup(popup);
+  }, [markerItems, searchMoveVersion, visiblePopups, popupsById]);
 
   useEffect(() => {
     let active = true;
@@ -828,26 +909,35 @@ export default function MapScreen() {
   };
 
   useEffect(() => {
-    if (selectedPopup && !isListOpen) setPreviewPopup(selectedPopup);
-  }, [selectedPopup, isListOpen]);
+    // Preserve the existing return from the regional list to a previously selected marker.
+    if (selection && selection.closing === null && !isListOpen && previewSelection !== selection) setPreviewSelection(selection);
+  }, [selection, previewSelection, isListOpen]);
 
   useEffect(() => {
     if (sheetHeight === 0) return;
+    const animationVersion = ++regionTransitionVersion.current;
     sheetTransition.set(
       withTiming(isListOpen ? 1 : 0, {
         duration: 400,
         easing: ReanimatedEasing.out(ReanimatedEasing.cubic),
+      }, finished => {
+        if (finished && !isListOpen) {
+          runOnJS(finishRegionClose)(animationVersion);
+        }
       }),
     );
-    return () => cancelAnimation(sheetTransition);
-  }, [isListOpen, sheetHeight, sheetTransition]);
+    return () => {
+      regionTransitionVersion.current += 1;
+      cancelAnimation(sheetTransition);
+    };
+  }, [isListOpen, sheetHeight, sheetTransition, finishRegionClose]);
 
   useEffect(() => {
     if (
       mapStatus === "ready" &&
       selectedPopupId &&
       !markerItems.some(
-        (item) => item.type === "popup" && item.popup.id === selectedPopupId,
+        (item) => item.type === "popup" ? item.popup.id === selectedPopupId : item.popupIds?.includes(selectedPopupId),
       )
     ) {
       setSelectedPopup(null);
@@ -855,6 +945,11 @@ export default function MapScreen() {
   }, [markerItems, selectedPopupId, mapStatus]);
 
   useEffect(() => {
+    if (mapStatus === "ready" && selection?.cluster && !selection.ids.some(id => popupsById.has(id))) setSelectedPopup(null);
+  }, [mapStatus, selection, popupsById]);
+
+  useEffect(() => {
+    let cancelled = false;
     if (!hasSelectedPopup && !hasPreviewPopup) return;
     if (hasSelectedPopup && !previewReady) return;
     Animated.timing(bottomTransition, {
@@ -863,12 +958,12 @@ export default function MapScreen() {
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start(({ finished }) => {
-      if (finished && !hasSelectedPopup) {
-        setPreviewPopup(null);
+      if (finished && !cancelled && !hasSelectedPopup) {
+        setPreviewSelection(null);
         setPreviewHeight(0);
       }
     });
-    return () => bottomTransition.stopAnimation();
+    return () => { cancelled = true; bottomTransition.stopAnimation(); };
   }, [bottomTransition, hasSelectedPopup, hasPreviewPopup, previewReady]);
 
   const actionTranslateY = bottomTransition.interpolate({
@@ -888,6 +983,8 @@ export default function MapScreen() {
         onLayout={(event) => {
           const width = event.nativeEvent.layout.width;
           if (width > 0) setMapWidth(width);
+          const height = event.nativeEvent.layout.height;
+          if (height > 0) setMapHeight(height);
         }}
         provider={PROVIDER_GOOGLE}
         googleMapId={GOOGLE_MAP_ID}
@@ -896,6 +993,7 @@ export default function MapScreen() {
         showsMyLocationButton={false}
         scrollEnabled
         zoomEnabled
+        maxZoomLevel={MAP_MAX_CLUSTER_ZOOM}
         onMapReady={() => {
           mapReady.current = true;
           if (!cameraScreenActive.current) return;
@@ -940,6 +1038,18 @@ export default function MapScreen() {
         }}
         onRegionChangeComplete={(region, details) => {
           mapMoving.current = false;
+          const history = new Map<string, string>();
+          for (const marker of markerItems) {
+            if (marker.type === "cluster" && marker.popupIds) {
+              for (const id of marker.popupIds) history.set(id, String(marker.id));
+            }
+          }
+          overlapHistory.current = history;
+          const attempt = clusterZoomAttempt.current;
+          clusterZoomAttempt.current = null;
+          if (attempt && !details?.isGesture && cameraScreenActive.current && mapZoom(region, mapWidth) <= attempt.zoom + 0.05) {
+            showClusterPreview(attempt.ids);
+          }
           const bounds = boundsForRegion(region);
           regionChangeVersion.current += 1;
           // Keep equal snapshots stable without skipping pending completion or
@@ -994,25 +1104,25 @@ export default function MapScreen() {
                 count={item.count}
                 onPress={() => {
                   if (!cameraScreenActive.current) return;
+                  if (mapMoving.current) return;
+                  const ids = item.popupIds ?? clusterIndex.getLeaves(Number(item.id), Infinity)
+                    .map(leaf => leaf.properties.popupId);
+                  const members = [...new Set(ids)].flatMap(id => {
+                    const popup = popupsById.get(id); return popup ? [popup] : [];
+                  });
+                  const activeSelection = pendingPreview.current ?? selection;
+                  if (activeSelection?.cluster && members.length === activeSelection.ids.length && members.every(popup => activeSelection.ids.includes(popup.id))) return;
                   invalidateCameraRequests();
+                  const target = clusterExpansion(members, mapRegion, mapWidth);
+                  if (!target) {
+                    showClusterPreview(members.map(popup => popup.id));
+                    return;
+                  }
                   setSelectedPopup(null);
-                  const expansionZoom = clusterIndex.getClusterExpansionZoom(
-                    item.id,
-                  );
-                  const targetZoom = Math.min(expansionZoom, clusterZoom + 2);
-                  const longitudeDelta =
-                    (360 * mapWidth) / (CLUSTER_EXTENT * 2 ** targetZoom);
-                  mapRef.current?.animateToRegion(
-                    {
-                      latitude: item.latitude,
-                      longitude: item.longitude,
-                      latitudeDelta:
-                        (mapRegion.latitudeDelta * longitudeDelta) /
-                        mapRegion.longitudeDelta,
-                      longitudeDelta,
-                    },
-                    350,
-                  );
+                  setIsListOpen(false);
+                  clusterZoomAttempt.current = { ids: members.map(popup => popup.id), zoom: mapZoom(mapRegion, mapWidth) };
+                  mapMoving.current = true;
+                  mapRef.current?.animateToRegion({ ...target, latitude: item.latitude, longitude: item.longitude }, 350);
                 }}
               />
             );
@@ -1022,10 +1132,10 @@ export default function MapScreen() {
             popup.primaryTag,
           );
           const isSelected = selectedPopup?.id === popup.id;
-          const markerKey = `${popup.id}-${isSelected}-${resolvedLanguage}`;
-          // Keep the native marker key stable when labels toggle. Labelled
-          // measurements must not be overwritten by the icon-only layout.
-          const markerMeasurementKey = `${markerKey}-labels`;
+          const showSelectedPin = isSelected;
+          const markerKey = popup.id;
+          // Native marker identity stays stable; measurements still distinguish each appearance.
+          const markerMeasurementKey = `${popup.id}-${isSelected}-${resolvedLanguage}-labels`;
           const markerHeight = showMarkerLabels
             ? markerHeights[markerMeasurementKey]
             : styles.markerGraphicSlot.height;
@@ -1039,7 +1149,8 @@ export default function MapScreen() {
                   longitude: popup.longitude,
                 }}
                 tracksViewChanges={false}
-                zIndex={isSelected ? 1 : 0}
+                zIndex={isSelected ? 2 : 0}
+                stopPropagation
                 onPress={() => setSelectedPopup(popup)}
               />
             );
@@ -1061,10 +1172,12 @@ export default function MapScreen() {
                 y: markerHeight ? MARKER_ANCHOR_Y / markerHeight : 0.5,
               }}
               tracksViewChanges={false}
-              zIndex={isSelected ? 1 : 0}
+              zIndex={isSelected ? 2 : 0}
+              stopPropagation
               onPress={() => setSelectedPopup(popup)}
             >
               <View
+                collapsable={false}
                 style={styles.markerContent}
                 onLayout={(event) => {
                   const height = event.nativeEvent.layout.height;
@@ -1083,21 +1196,19 @@ export default function MapScreen() {
                 <View
                   style={[
                     styles.markerGraphicSlot,
-                    !isSelected && styles.markerGraphicBottom,
+                    !showSelectedPin && styles.markerGraphicBottom,
                   ]}
                 >
-                  {isSelected ? (
-                    <View style={styles.selectedPin}>
-                      <Svg width={34} height={38} viewBox="0 0 48 52">
-                        <Path
-                          d="M24 2 C12 2 4 10 4 21 C4 32 12 38 24 50 C36 38 44 32 44 21 C44 10 36 2 24 2 Z"
-                          fill={backgroundColor}
-                        />
-                        <Circle cx={24} cy={21} r={15} fill="#FFFFFF" />
-                      </Svg>
+                  {showSelectedPin ? (
+                    <View collapsable={false} style={styles.selectedPin}>
+                      <MarkerImage source={markerPinSources[backgroundColor]}
+                        style={{ width: 34, height: 38 }} contentFit="contain" cachePolicy="memory" transition={0}
+                        onDisplay={() => markerRefs.current.get(markerKey)?.redraw()} />
                       <View style={styles.selectedPinIcon}>
                         {iconName === "lucide-star" ? (
-                          <Star size={14} color={backgroundColor} />
+                          <MarkerImage source={markerStarSources[backgroundColor]}
+                            style={{ width: 14, height: 14 }} contentFit="contain" cachePolicy="memory" transition={0}
+                            onDisplay={() => markerRefs.current.get(markerKey)?.redraw()} />
                         ) : (
                           <MaterialIcons
                             name={iconName}
@@ -1108,10 +1219,12 @@ export default function MapScreen() {
                       </View>
                     </View>
                   ) : (
-                    <View style={styles.markerWrapper}>
+                    <View collapsable={false} style={styles.markerWrapper}>
                       <View style={[styles.marker, { backgroundColor }]}>
                         {iconName === "lucide-star" ? (
-                          <Star size={12} color="#FFFFFF" />
+                          <MarkerImage source={markerStarSources["#FFFFFF"]}
+                            style={{ width: 12, height: 12 }} contentFit="contain" cachePolicy="memory" transition={0}
+                            onDisplay={() => markerRefs.current.get(markerKey)?.redraw()} />
                         ) : (
                           <MaterialIcons
                             name={iconName}
@@ -1343,25 +1456,34 @@ export default function MapScreen() {
           </Pressable>
         </View>
       </Animated.View>
-      {currentPreviewPopup && (
+      {currentPreviewPopups.length > 0 && (
         <Animated.View
-          pointerEvents={hasSelectedPopup ? "auto" : "none"}
+          pointerEvents={previewAvailable ? "auto" : "none"}
+          accessibilityElementsHidden={!previewAvailable}
+          importantForAccessibility={previewAvailable ? "auto" : "no-hide-descendants"}
           onLayout={(event) =>
             setPreviewHeight(event.nativeEvent.layout.height)
           }
           style={[
             styles.previewOverlay,
             {
-              opacity: !isListOpen && previewHeight > 0 ? 1 : 0,
+              opacity: !isListOpen && (!selection || previewAvailable) && previewHeight > 0 ? 1 : 0,
               transform: [{ translateY: previewTranslateY }],
             },
           ]}
         >
-          <MapPopupPreviewCard
-            popup={currentPreviewPopup}
+          {previewSelection?.cluster ? <MapPopupPreviewCard
+            key={JSON.stringify(previewSelection.ids)}
+            popups={currentPreviewPopups}
             bottomInset={bottomInset}
-            onPress={() => openPopup(currentPreviewPopup.id)}
-          />
+            maxHeight={previewMaxHeight}
+            width={mapWidth}
+            onPopupPress={openPopup}
+          /> : <MapPopupPreviewCard
+            popup={currentPreviewPopups[0]}
+            bottomInset={bottomInset}
+            onPress={() => openPopup(currentPreviewPopups[0].id)}
+          />}
         </Animated.View>
       )}
     </View>

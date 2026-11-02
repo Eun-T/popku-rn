@@ -100,52 +100,42 @@ test('grid cover uses expo-image memory-disk and the server cache identifier wit
   assert.equal(image.props.transition,undefined);assert.equal(image.props.resizeMode,undefined);
 });
 
-test('grid information has four compact lines with inclusive status dates and an unambiguous single period', () => {
+test('grid information uses D-day text and the confirmed title and poster design', () => {
   const Card = load('src/components/place/PopupGridCard.tsx', mocks).default;
   for (const [startDate, endDate, status, period, textColor] of [
-    ['2026-10-06', '2026-10-11', '진행중', '26.10.06 ~ 26.10.11', '#15803D'],
-    ['2026-10-01', '2026-10-06', '진행중', '26.10.01 ~ 26.10.06', '#15803D'],
-    ['2026-10-07', '2026-11-01', '오픈예정', '26.10.07 ~ 26.11.01', '#1D4ED8'],
-    ['2026-10-01', '2026-10-05', '종료됨', '26.10.01 ~ 26.10.05', '#6B7280'],
-    ['2026-12-31', '2027-01-02', '오픈예정', '26.12.31 ~ 27.01.02', '#1D4ED8'],
+    ['2026-10-06', '2026-10-11', '오늘 오픈', '26.10.06 ~ 26.10.11', '#16805D'],
+    ['2026-10-01', '2026-10-06', '오늘 종료', '26.10.01 ~ 26.10.06', '#C05621'],
+    ['2026-10-06', '2026-10-06', '오늘 종료', '26.10.06 ~ 26.10.06', '#C05621'],
+    ['2026-10-01', '2026-10-11', '종료 D-5', '26.10.01 ~ 26.10.11', '#16805D'],
+    ['2026-10-07', '2026-11-01', '오픈 D-1', '26.10.07 ~ 26.11.01', '#2563EB'],
+    ['2026-10-01', '2026-10-05', '종료', '26.10.01 ~ 26.10.05', '#9CA3AF'],
+    ['2026-12-31', '2027-01-02', '오픈 D-86', '26.12.31 ~ 27.01.02', '#2563EB'],
   ]) {
     for (const width of [110, 170, 280]) {
-    const tree = Card({ item: { ...popup, startDate, endDate }, width,
+    const tree = Card({ item: { ...popup, startDate, endDate }, width, today: '2026-10-06',
       isFavorite: false, isFavoriteDisabled: false, onToggleFavorite() {} });
     const [, first, title, periodNode, metadata] = tree.props.children;
     assert.equal(tree.props.children.length, 5, 'poster plus exactly four information lines');
     const badgeStyle = Object.assign({}, ...(Array.isArray(first.props.style) ? first.props.style : [first.props.style]));
-    assert.equal(badgeStyle.marginTop, 8);
+    assert.equal(badgeStyle.marginTop, 12);
     assert.equal(badgeStyle.columnGap, undefined);
     assert.equal(badgeStyle.backgroundColor, undefined);
     assert.equal(badgeStyle.borderRadius, undefined);
     assert.equal(badgeStyle.paddingHorizontal, undefined);
     assert.equal(badgeStyle.paddingVertical, undefined);
-    assert.equal(badgeStyle.maxWidth, '100%');
-    assert.equal(badgeStyle.flexWrap, 'nowrap');
-    const statusBadgeNode = first.props.children;
+    assert.equal(first.type, 'Text');
     assert.equal(nodes(first).filter(n => n.type === 'Text').length, 1, 'status has its own line');
     assert.ok(!nodes(tree).some(n => (JSON.stringify(n.props.style) ?? '').includes('#D1D5DB')));
-    assert.equal(badgeStyle.alignItems, 'center');
-    assert.equal(statusBadgeNode.type, 'View');
-    const statusBadgeStyle = Object.assign({}, ...statusBadgeNode.props.style);
-    assert.equal(statusBadgeStyle.flexShrink, 0);
-    assert.equal(statusBadgeStyle.borderRadius, 5);
-    assert.equal(statusBadgeStyle.paddingHorizontal, 5);
-    assert.equal(statusBadgeStyle.paddingVertical, 1);
-    assert.equal(statusBadgeStyle.alignItems, 'center');
-    assert.equal(statusBadgeStyle.backgroundColor, status === '진행중' ? '#DCFCE7' : status === '오픈예정' ? '#DBEAFE' : '#F3F4F6');
-    const statusNode = statusBadgeNode.props.children;
+    const statusNode = first;
     assert.equal(statusNode.props.children, status);
     const statusStyle = Object.assign({}, ...(Array.isArray(statusNode.props.style) ? statusNode.props.style : [statusNode.props.style]));
     const periodStyle = Object.assign({}, ...(Array.isArray(periodNode.props.style) ? periodNode.props.style : [periodNode.props.style]));
     assert.equal(statusStyle.color, textColor);
     assert.equal(statusStyle.fontWeight, '600');
-    assert.equal(statusStyle.fontSize, 12);
-    assert.equal(statusStyle.lineHeight, 16);
-    assert.equal(statusBadgeStyle.paddingVertical * 2 + statusStyle.lineHeight, 18, 'compact status badge preserves the original 18px row height');
-    assert.equal(statusStyle.flexShrink, 0);
-    assert.equal(statusNode.props.numberOfLines, 1);
+    assert.equal(statusStyle.fontSize, 13);
+    assert.equal(statusStyle.lineHeight, 20);
+    assert.equal(tree.props.children[0].props.style.aspectRatio, 3 / 4);
+    assert.equal(nodes(tree).find(n => n.type === 'Image').props.style.borderRadius, 6);
     assert.equal(periodNode.props.children, period);
     assert.equal(periodNode.props.numberOfLines, 1);
     assert.equal(periodNode.props.ellipsizeMode, 'tail');
@@ -155,12 +145,13 @@ test('grid information has four compact lines with inclusive status dates and an
     assert.equal(periodStyle.fontWeight, '400');
     assert.equal(periodStyle.fontSize, 13);
     assert.equal(periodStyle.lineHeight, 20);
-    assert.equal(periodStyle.marginTop, 6);
+    assert.equal(periodStyle.marginTop, 3);
     assert.equal(title.props.children, popup.name);
     assert.equal(title.props.style.fontSize, 16);
-    assert.equal(title.props.style.fontWeight, '700');
-    assert.equal(title.props.style.marginTop, 6);
-    assert.equal(Object.assign({}, ...metadata.props.style).marginTop, 6);
+    assert.equal(title.props.style.fontWeight, '600');
+    assert.equal(title.props.style.lineHeight, 24);
+    assert.equal(title.props.style.marginTop, 4);
+    assert.equal(Object.assign({}, ...metadata.props.style).marginTop, 4);
     assert.equal(Object.assign({}, ...metadata.props.style).flexWrap, 'nowrap');
     }
   }

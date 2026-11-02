@@ -1,15 +1,13 @@
-import { Heart } from 'lucide-react-native';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { Image, type ImageSource } from 'expo-image';
-import { useHomeCoverImage, type RecoverHomeCover } from '../../hooks/useHomeCoverImage';
-import type { PublicPopup } from '../../lib/popups';
-
-import { colors, radius, spacing, typography } from '../../theme/tokens';
-import { useTranslation } from '../../hooks/useTranslation';
-import { useMemo } from 'react';
-import { useTheme } from '../../theme/useTheme';
+import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Image, type ImageSource } from "expo-image";
+import { useHomeCoverImage, type RecoverHomeCover } from "../../hooks/useHomeCoverImage";
+import type { PublicPopup } from "../../lib/popups";
+import { spacing, typography } from "../../theme/tokens";
+import { useTranslation } from "../../hooks/useTranslation";
+import { useTheme } from "../../theme/useTheme";
 
 type PopupRankingCardProps = {
+  width: number;
   rank: number;
   image: ImageSource | number;
   popup?: PublicPopup;
@@ -17,7 +15,6 @@ type PopupRankingCardProps = {
   onRecoverCover?: RecoverHomeCover;
   title: string;
   period: string;
-  tags: readonly string[];
   isFavorite: boolean;
   isFavoriteDisabled: boolean;
   onToggleFavorite: () => void;
@@ -25,164 +22,48 @@ type PopupRankingCardProps = {
 };
 
 export default function PopupRankingCard({
-  rank,
-  image,
-  popup,
-  coverScope,
-  onRecoverCover,
-  title,
-  period,
-  tags,
-  isFavorite,
-  isFavoriteDisabled,
-  onToggleFavorite,
+  width, rank, image, popup, coverScope, onRecoverCover, title, period,
   onPress,
 }: PopupRankingCardProps) {
   const { t } = useTranslation();
-  const { resolvedTheme, themeColors } = useTheme();
+  const { themeColors } = useTheme();
   const cover = useHomeCoverImage(image, popup, onRecoverCover, coverScope);
-  const styles = useMemo(() => ({ ...baseStyles,
-    card: { ...baseStyles.card, backgroundColor: themeColors.cardBackground, borderBottomColor: themeColors.border },
-    imageFrame: resolvedTheme === 'dark' ? { ...baseStyles.imageFrame, backgroundColor: themeColors.surface } : baseStyles.imageFrame,
-    rankText: { ...baseStyles.rankText, color: themeColors.onImage },
-    title: { ...baseStyles.title, color: themeColors.textPrimary },
-    period: { ...baseStyles.period, color: themeColors.textSecondary },
-    tag: { ...baseStyles.tag, backgroundColor: themeColors.tagBackground },
-    tagText: { ...baseStyles.tagText, color: themeColors.tagText },
-  }), [themeColors, resolvedTheme]);
   return (
-    <View style={styles.card}>
-      <Pressable accessibilityRole="button" accessibilityLabel={t('place.explore.viewDetails', { title })} onPress={onPress} style={styles.detailButton}>
-        <View style={styles.imageFrame}>
-          <Image key={cover.imageKey} source={cover.source} style={styles.image} contentFit="cover"
-            cachePolicy="memory-disk" onError={cover.onError} onLoad={cover.onLoad} />
-          <View style={styles.rankBadge}>
-            <Text style={styles.rankText}>{rank}</Text>
-          </View>
-          {cover.canRetry && <Pressable testID="home-cover-retry" accessibilityRole="button"
-            accessibilityLabel={t('home.card.retryImage', { title })} accessibilityState={{ disabled: cover.busy }}
-            disabled={cover.busy} onPress={event => { event.stopPropagation(); cover.retry(); }} style={baseStyles.imageRetry}>
-            <Text style={baseStyles.imageRetryText}>{t('home.card.retry')}</Text>
-          </Pressable>}
+    <View style={{ width }}>
+      <Pressable accessibilityRole="button" accessibilityLabel={t("place.explore.viewDetails", { title })} onPress={onPress}>
+        <View style={[styles.imageFrame, { backgroundColor: themeColors.surface }]}>
+          <Image key={cover.imageKey} source={cover.source} style={StyleSheet.absoluteFill}
+            contentFit="cover" contentPosition="center" cachePolicy="memory-disk"
+            onError={cover.onError} onLoad={cover.onLoad} />
+          <Text pointerEvents="none" style={styles.rankText}>{rank}</Text>
+          {cover.canRetry && (
+            <Pressable testID="home-cover-retry" accessibilityRole="button"
+              accessibilityLabel={t("home.card.retryImage", { title })}
+              accessibilityState={{ disabled: cover.busy }} disabled={cover.busy}
+              onPress={event => { event.stopPropagation(); cover.retry(); }}
+              style={[styles.imageRetry, { backgroundColor: themeColors.background }]}>
+              <Text style={[typography.caption, { color: themeColors.textPrimary }]}>{t("home.card.retry")}</Text>
+            </Pressable>
+          )}
         </View>
-        <View style={styles.content}>
-          <Text style={styles.title} numberOfLines={1} ellipsizeMode="tail">
-            {title}
-          </Text>
-          <Text style={styles.period}>{period}</Text>
-          <View style={styles.tags}>
-            {tags.map((tag) => (
-              <View key={tag} style={styles.tag}>
-                <Text style={styles.tagText} numberOfLines={1}>
-                  {tag}
-                </Text>
-              </View>
-            ))}
-          </View>
-        </View>
-      </Pressable>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={t(isFavorite ? 'home.card.removeFavorite' : 'home.card.addFavorite', { title })}
-        accessibilityState={{ selected: isFavorite, disabled: isFavoriteDisabled }}
-        disabled={isFavoriteDisabled}
-        onPress={onToggleFavorite}
-        style={styles.favoriteButton}
-      >
-        <Heart
-          size={22}
-          color={isFavorite ? '#FF5A6E' : themeColors.textPrimary}
-          fill={isFavorite ? '#FF5A6E' : 'none'}
-        />
+        <Text style={[styles.title, { color: themeColors.textPrimary }]} numberOfLines={1} ellipsizeMode="tail">{title}</Text>
+        <Text style={[styles.period, { color: themeColors.textSecondary }]} numberOfLines={1} ellipsizeMode="tail">{period}</Text>
       </Pressable>
     </View>
   );
 }
 
-const baseStyles = StyleSheet.create({
-  imageRetry: {
-    position: 'absolute', left: spacing.space8, top: spacing.space8,
-    paddingHorizontal: spacing.space8, paddingVertical: spacing.space6,
-    borderRadius: radius.radius4, backgroundColor: colors.background,
-  },
-  imageRetryText: { ...typography.caption, color: colors.text },
-  card: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    backgroundColor: colors.background,
-  },
-  detailButton: {
-    flex: 1,
-    minWidth: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: spacing.space12,
-  },
-  imageFrame: {
-    width: 88,
-    height: 108,
-    borderRadius: radius.radius8,
-    overflow: 'hidden',
-  },
-  image: {
-    width: 88,
-    height: 108,
-  },
-  rankBadge: {
-    position: 'absolute',
-    left: 0,
-    bottom: 0,
-    width: 32,
-    height: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderTopRightRadius: radius.radius8,
-    backgroundColor: 'rgba(0, 0, 0, 0.55)',
-  },
+const styles = StyleSheet.create({
+  imageFrame: { width: "100%", aspectRatio: 3 / 4, borderRadius: 5, overflow: "hidden" },
   rankText: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.background,
+    position: "absolute", top: spacing.space12, left: spacing.space12,
+    color: "#FFFFFF", fontSize: 32, fontWeight: "800", lineHeight: 32,
+    textShadowColor: "rgba(0,0,0,0.8)", textShadowOffset: { width: 0, height: 4 }, textShadowRadius: 12,
   },
-  content: {
-    flex: 1,
-    minWidth: 0,
-    marginLeft: spacing.space20,
-  },
-  title: {
-    ...typography.body,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  period: {
-    marginTop: spacing.space4,
-    ...typography.caption,
-    color: colors.secondaryText,
-  },
-  tags: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.space4,
-    marginTop: spacing.space8,
-  },
-  tag: {
-    maxWidth: '100%',
-    borderRadius: radius.radius4,
-    backgroundColor: '#F3F4F6',
-    paddingHorizontal: spacing.space6,
-    paddingVertical: spacing.space4,
-  },
-  tagText: {
-    ...typography.caption,
-    color: '#4B5563',
-  },
-  favoriteButton: {
-    width: 44,
-    height: 44,
-    alignSelf: 'center',
-    alignItems: 'center',
-    justifyContent: 'center',
+  title: { marginTop: spacing.space12, fontSize: 16, fontWeight: "600", lineHeight: 24 },
+  period: { marginTop: spacing.space2, fontSize: 13, fontWeight: "400", lineHeight: 20 },
+  imageRetry: {
+    position: "absolute", left: spacing.space8, bottom: spacing.space8,
+    paddingHorizontal: spacing.space8, paddingVertical: spacing.space6, borderRadius: 4,
   },
 });

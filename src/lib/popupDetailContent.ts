@@ -1,5 +1,60 @@
 import type { SocialChannel } from '../components/place/OfficialChannelIcon';
-import type { PopupHighlight, PopupHighlightType } from './popups';
+import type { PopupHighlight, PopupHighlightType, PublicPopupDetail } from './popups';
+
+export type PopupIntroductionSection = {
+  kind: 'about' | 'attractions' | 'products' | 'benefits' | 'notice';
+  titleKey: string;
+  paragraphs: readonly string[];
+};
+
+type IntroductionKind = 'about' | 'attractions' | 'products';
+
+const introductionHeadings = new Map<string, IntroductionKind>([
+  ['팝업 소개', 'about'], ['볼거리', 'attractions'], ['판매 상품', 'products'],
+  ['ポップアップ紹介', 'about'], ['見どころ', 'attractions'], ['販売商品', 'products'],
+]);
+
+const introductionTitleKeys = {
+  about: 'place.detail.about',
+  attractions: 'place.detail.introduction.attractions',
+  products: 'place.detail.introduction.products',
+} as const;
+
+// Only standalone headings are delimiters. Slice the original string so body
+// whitespace, paragraphs and CRLF/LF line breaks survive without normalization.
+export function parsePopupIntroduction(value: unknown): PopupIntroductionSection[] {
+  const text = popupSummary(value);
+  if (text === null) return [];
+  const sections: PopupIntroductionSection[] = [];
+  let kind: IntroductionKind = 'about';
+  let bodyStart = 0;
+  const append = (bodyEnd: number) => {
+    const body = text.slice(bodyStart, bodyEnd);
+    if (body.trim()) sections.push({ kind, titleKey: introductionTitleKeys[kind], paragraphs: [body] });
+  };
+  for (const line of text.matchAll(/[^\r\n]*(?:\r\n|\n|\r|$)/g)) {
+    const heading = introductionHeadings.get(line[0].trim());
+    if (!heading) continue;
+    append(line.index);
+    kind = heading;
+    bodyStart = line.index + line[0].length;
+  }
+  append(text.length);
+  return sections;
+}
+
+export function popupIntroductionSections(
+  detail: Pick<PublicPopupDetail, 'summary' | 'highlights' | 'benefits' | 'notice'>,
+): PopupIntroductionSection[] {
+  // Legacy highlights remain in API data but are not part of the introduction.
+  // Keep summary intact, including its paragraphs and authored line breaks.
+  const candidates: PopupIntroductionSection[] = [
+    { kind: 'about', titleKey: 'place.detail.about', paragraphs: [popupSummary(detail.summary)].filter((text): text is string => text !== null) },
+    { kind: 'benefits', titleKey: 'place.detail.benefitsGuide', paragraphs: [popupSummary(detail.benefits)].filter((text): text is string => text !== null) },
+    { kind: 'notice', titleKey: 'place.detail.notice', paragraphs: [popupSummary(detail.notice)].filter((text): text is string => text !== null) },
+  ];
+  return candidates.filter(section => section.paragraphs.length > 0);
+}
 
 export const highlightHeadings = {
   SPECIAL: { key: 'place.detail.highlights.SPECIAL', emoji: '✨' },

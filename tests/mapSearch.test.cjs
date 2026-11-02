@@ -22,16 +22,19 @@ function load(file, mocks = {}, globals = {}) {
 
 const camera = load('src/lib/mapPlaceCamera.ts');
 const markerBounds = load('src/lib/mapMarkerBounds.ts');
+const mapClustering = load('src/lib/mapClustering.ts', { './mapMarkerBounds': markerBounds });
 const initial = { latitude: 37.5445, longitude: 127.056, latitudeDelta: 0.025, longitudeDelta: 0.025 };
 const resolved = { placeId: 'seoul', latitude: 37.56, longitude: 126.97,
   viewport: { south: 37.4, north: 37.7, west: 126.8, east: 127.2 }, types: [], attributions: [] };
 const suggestion = { placeId: 'seoul', title: '서울', subtitle: '대한민국', types: [] };
 const popup = { id: 'p1', publicId: 'public-p1', name: '원피스', latitude: 37.56, longitude: 126.97,
+  startDate: '2020-01-01', endDate: '2099-12-31',
   primaryTag: '캐릭터/IP', tags: [{ name: '캐릭터/IP' }] };
 const popupB = { ...popup, id: 'p2', name: '산리오', latitude: 35.68, longitude: 139.76 };
 const jsx = (type, props, key) => ({ type, props, key });
 const runtime = { jsx, jsxs: jsx };
 const native = {
+  AppState: { addEventListener: () => ({ remove() {} }) },
   Pressable: 'Pressable', ScrollView: 'ScrollView', Text: 'Text', View: 'View', TextInput: 'TextInput',
   StyleSheet: { create: (s) => s }, Platform: { OS: 'ios' },
   Dimensions: { get: () => ({ width: 390, height: 844 }) }, useWindowDimensions: () => ({ height: 844 }),
@@ -40,7 +43,7 @@ const native = {
   Easing: { out: (v) => v, cubic: 0 },
   Animated: {
     View: 'AnimatedView',
-    Value: class { interpolate() { return 0; } stopAnimation() {} },
+    Value: class { interpolate() { return 0; } stopAnimation() {} setValue() {} },
     timing: () => ({ start: (callback) => callback?.({ finished: true }) }),
   },
 };
@@ -60,6 +63,12 @@ function text(tree) {
   if (Array.isArray(tree)) return tree.map(text).filter(Boolean).join(' ');
   return tree && typeof tree === 'object' ? text(tree.props?.children) : '';
 }
+function markerArtwork(image) {
+  return decodeURIComponent(image.props.source.uri.split(',')[1]);
+}
+function selectedPinImage(marker) {
+  return nodes(marker).find(node => node.type === 'MarkerImage' && node.props.style.width === 34);
+}
 function deferred() {
   let resolve, reject;
   const promise = new Promise((a, b) => { resolve = a; reject = b; });
@@ -73,7 +82,16 @@ function screen(mapRequest = async () => [popup, popupB], options = {}) {
   let routeParams = {};
   let focused = true;
   const focusEffects = new Map();
-  const calls = { popup: [], autocomplete: [], resolve: [], camera: [], sheetTiming: [], sheetCancellations: [], map: 0, renders: 0 };
+  const calls = { popup: [], autocomplete: [], resolve: [], camera: [], opened: [], bottomTiming: [], sheetTiming: [], sheetCancellations: [], transitionRanges: [], map: 0, renders: 0 };
+  const animatedNative = { ...native, Animated: { ...native.Animated,
+    Value: class extends native.Animated.Value {
+      interpolate(config) { calls.transitionRanges.push(config); return super.interpolate(config); }
+    },
+    timing: (value, config) => ({ start(callback) {
+      calls.bottomTiming.push({ config, finish: (finished = true) => callback?.({ finished }) });
+      if (!options.deferAnimations) callback?.({ finished: true });
+    } }),
+  } };
   const same = (a, b) => a && b && a.length === b.length && a.every((v, i) => Object.is(v, b[i]));
   const hooks = {
     useState(initialValue) {
@@ -121,22 +139,39 @@ function screen(mapRequest = async () => [popup, popupB], options = {}) {
   } : {};
   const mapData = load('src/hooks/useMapPopups.ts', {
     react: hooks, 'expo-router': { useFocusEffect },
+    'react-native': native,
+    '../lib/mapPopupDates': require('./helpers/uiDependencies.cjs').loadPure('src/lib/mapPopupDates.ts'),
     '../lib/popups': { getPopupMap: (signal, languageCode) => { calls.map++; return mapRequest(signal, languageCode); } },
   });
   const Screen = load('src/screens/MapScreen.native.tsx', {
     ...translation,
     '../hooks/useMapPopups': mapData,
-    '../hooks/usePopupNavigation': { usePopupNavigation: () => () => {} },
-    'react': hooks, 'react/jsx-runtime': runtime, 'react-native': native,
+    '../hooks/usePopupNavigation': { usePopupNavigation: () => id => calls.opened.push(id) },
+    'react': hooks, 'react/jsx-runtime': runtime, 'react-native': animatedNative,
     'react-native-reanimated': {
       default: { View: 'ReanimatedView' },
       useSharedValue: (value) => hooks.useRef({
-        value, get() { return this.value; }, set(next) { this.value = next; },
+        value, animation: null, get() { return this.value; }, set(next) {
+          if (typeof next === 'object') { this.animation = next; next.owner = this; }
+          else this.value = next;
+        },
       }).current,
       useAnimatedStyle: (updater) => ({ get transform() { return updater().transform; } }),
       Easing: native.Easing,
-      withTiming: (target, config) => { calls.sheetTiming.push({ target, config }); return target; },
-      cancelAnimation: (value) => calls.sheetCancellations.push(value),
+      withTiming: (target, config, callback) => {
+        const animation = { target, owner: null };
+        const finish = (finished = true) => {
+          if (finished && animation.owner?.animation === animation) {
+            animation.owner.value = target; animation.owner.animation = null;
+          }
+          callback?.(finished);
+        };
+        calls.sheetTiming.push({ target, config, finish });
+        if (!options.deferAnimations) { finish(); return target; }
+        return animation;
+      },
+      runOnJS: fn => fn,
+      cancelAnimation: (value) => { calls.sheetCancellations.push(value); value.animation = null; },
     },
     '@expo/vector-icons': { MaterialIcons: 'MaterialIcons' },
     'expo-location': options.location ?? { getForegroundPermissionsAsync: async () => ({ granted: false }) },
@@ -148,7 +183,7 @@ function screen(mapRequest = async () => [popup, popupB], options = {}) {
     }, 'lucide-react-native': {},
     'react-native-maps': { default: 'MapView', Marker: 'Marker', PROVIDER_GOOGLE: 'google' },
     'react-native-safe-area-context': { useSafeAreaInsets: () => ({ top: 40, bottom: 20 }) },
-    'react-native-svg': { default: 'Svg', Circle: 'Circle', Path: 'Path' },
+    'expo-image': { Image: 'MarkerImage' },
     'supercluster': { default: options.Supercluster ?? class { load() {} getClusters() { return []; } } },
     '../lib/popups': { searchPopups: (q, s, languageCode) => { const promise=request('popup', q, s);calls.popup.at(-1).languageCode=languageCode;return promise; } },
     '../lib/placeSearch': {
@@ -157,6 +192,8 @@ function screen(mapRequest = async () => [popup, popupB], options = {}) {
       resolvePlace: (q, s) => request('resolve', q, s),
     },
     '../lib/mapPlaceCamera': camera, '../lib/mapMarkerBounds': markerBounds,
+    '../lib/mapClustering': mapClustering,
+    '../components/navigation/FloatingTabBar': { FLOATING_TAB_BAR_HEIGHT: 60, FLOATING_TAB_BAR_BOTTOM_GAP: 12 },
     '../locales': require('./helpers/uiDependencies.cjs').loadPure('src/locales/index.ts'),
     '../components/map/MapPopupListSheet': { default: 'ListSheet' },
     '../components/map/MapPopupPreviewCard': { default: 'Preview' },
@@ -230,7 +267,7 @@ test('real language subscription refreshes map titles and keeps selection, categ
       assert.equal(s.find('TextInput').props.placeholder, placeholder); assert.equal(s.tagSelected(label), true);
       assert.equal(s.findButton(label).key,'캐릭터/IP');
       assert.equal(s.find('Preview').props.popup, local);
-      assert.equal(s.markers()[0].key,`${local.id}-true-${preference==='ko'?'ko':'ja'}`); assert.deepEqual(s.markers()[0].props.coordinate, marker.props.coordinate);
+      assert.equal(s.markers()[0].key, local.id); assert.deepEqual(s.markers()[0].props.coordinate, marker.props.coordinate);
       assert.equal(s.find('MapView').props.ref, map.props.ref); assert.equal(s.find('MapView').key, map.key);
       assert.deepEqual(s.find('MapView').props.initialRegion, map.props.initialRegion);
       assert.equal(s.calls.map,++requests);
@@ -277,8 +314,7 @@ test('map exposes all eleven renamed categories and preserves marker appearance 
   const marker = s.find('Marker'); assert.ok(marker);
   const icon = nodes(marker).find(n => n.type === 'MaterialIcons');
   assert.equal(icon.props.name, 'auto-awesome');
-  assert.ok(nodes(marker).some(n => n.type === 'Path' && n.props.fill === '#8B5CF6'
-    || n.type === 'View' && Object.assign({}, ...(Array.isArray(n.props.style) ? n.props.style : [n.props.style])).backgroundColor === '#8B5CF6'));
+  assert.ok(markerArtwork(selectedPinImage(marker)).includes('fill="#8B5CF6"'));
   s.tag('캐릭터/IP'); assert.equal(s.tagSelected('캐릭터/IP'), true);
   s.tag('게임/디지털');
   assert.equal(s.tagSelected('게임/디지털'), true);
@@ -292,12 +328,13 @@ test('expanded screen culls 970 offscreen markers; regional list remains exact b
   const far = Array.from({ length: 970 }, (_, i) => ({ ...popupB, id: `far-${i}` }));
   const buffer = { ...popup, id: 'buffer', latitude: initial.latitude + 0.015, longitude: initial.longitude };
   const s = screen(async () => [...nearby, ...far]); await s.settle();
-  assert.equal(s.markers().length, 30); assert.equal(s.calls.map, 1);
+  assert.equal(s.markers().length, 0); assert.equal(s.clusters().length, 1);
+  assert.equal(s.clusters()[0].props.count, 30); assert.equal(s.calls.map, 1);
   s.find('ScrollView').props.onLayout({ nativeEvent: { layout: { y: 100, height: 36 } } }); s.flush();
   assert.equal(s.find('ListSheet').props.popups.length, 30);
   s.dispose();
   const padded = screen(async () => [...nearby, buffer]); await padded.settle();
-  assert.equal(padded.markers().length, 31);
+  assert.equal(padded.markers().length, 1); assert.equal(padded.clusters()[0].props.count, 30);
   padded.find('ScrollView').props.onLayout({ nativeEvent: { layout: { y: 100, height: 36 } } }); padded.flush();
   assert.equal(padded.find('ListSheet').props.popups.length, 30); padded.dispose();
 });
@@ -308,8 +345,8 @@ test('marker touch/style/anchor/key persist outside bounds; map press closes pre
   s.complete({ ...initial, latitudeDelta: 0.007, longitudeDelta: 0.007 });
   s.markers()[0].props.onPress(); s.flush();
   assert.equal(s.find('Preview').props.popup.id, local.id);
-  assert.equal(s.markers()[0].key, `${local.id}-true-ko`);
-  assert.equal(s.markers()[0].props.zIndex, 1);
+  assert.equal(s.markers()[0].key, local.id);
+  assert.equal(s.markers()[0].props.zIndex, 2);
   assert.equal(s.markers()[0].props.tracksViewChanges, false);
   const markerLayout = nodes(s.markers()[0]).find(n => n.type === 'View' && n.props.onLayout);
   markerLayout.props.onLayout({ nativeEvent: { layout: { height: 60 } } }); s.flush();
@@ -317,7 +354,7 @@ test('marker touch/style/anchor/key persist outside bounds; map press closes pre
   s.complete({ ...initial, latitude: popupB.latitude, longitude: popupB.longitude }, true);
   assert.equal(s.markers().length, 2);
   assert.equal(s.find('Preview').props.popup.id, local.id);
-  assert.equal(s.markers().filter(n => n.props.zIndex === 1).length, 1);
+  assert.equal(s.markers().filter(n => n.props.zIndex === 2).length, 1);
   s.find('MapView').props.onPress({ nativeEvent: { action: 'press' } }); s.flush();
   assert.equal(s.find('Preview'), undefined);
   assert.equal(s.markers().length, 1); s.dispose();
@@ -375,7 +412,8 @@ test('label layouts redraw the stable snapshot and retain separate real heights 
     const labelStyle = nodes(s.markers()[0]).find(n => n.type === 'Text').props.style;
     assert.equal(labelStyle.lineHeight, undefined); assert.equal(labelStyle.height, undefined); assert.equal(labelStyle.textShadowRadius, undefined);
     s.markers()[0].props.onPress(); s.flush(); const selectedKey = s.markers()[0].key;
-    assert.equal(s.find('Preview').props.popup.id, local.id); assert.ok(nodes(s.markers()[0]).some(n => n.type === 'Path'));
+    assert.equal(selectedKey, normalKey, 'selection keeps the same React marker identity');
+    assert.equal(s.find('Preview').props.popup.id, local.id); assert.ok(selectedPinImage(s.markers()[0]));
     layout(74); assert.equal(s.markers()[0].props.anchor.y, 40/74);
     s.complete({ ...initial, latitudeDelta: 0.018 }); assert.equal(s.markers()[0].key, selectedKey);
     assert.equal(s.markers()[0].props.anchor.y, 40/52); layout(52);
@@ -437,24 +475,575 @@ test('failed refresh retains a pinned marker and preview; repeated retry shares 
   assert.equal(s.find('Preview').props.popup.id, local.id); assert.equal(s.markers().length, 1); s.dispose();
 });
 
-test('real Supercluster is unchanged at 0.20, clears clustered selection, and expands on press', async () => {
+test('same-coordinate clusters remain grouped above/below 0.20 and open a list without a camera command', async () => {
   const { default: Supercluster } = await import('supercluster');
   const data = [...Array.from({ length: 3 }, (_, i) => ({ ...popup, ...initial, id: `dense-${i}` })),
     ...Array.from({ length: 5 }, (_, i) => ({ ...popupB, id: `outside-${i}` }))];
   const s = screen(async () => data, { Supercluster }); await s.settle();
   for (const latitudeDelta of [0.025, 0.199999]) {
     s.complete({ ...initial, latitudeDelta, longitudeDelta: latitudeDelta });
-    assert.equal(s.markers().length, 3); assert.equal(s.clusters().length, 0);
+    assert.equal(s.markers().length, 0); assert.equal(s.clusters().length, 1);
+    assert.equal(s.clusters()[0].props.count, 3);
   }
-  s.markers()[0].props.onPress(); s.flush(); assert.ok(s.find('Preview'));
   for (const latitudeDelta of [0.20, 0.200001]) {
     s.complete({ ...initial, latitudeDelta, longitudeDelta: latitudeDelta });
     assert.equal(s.markers().length, 0); assert.equal(s.clusters().length, 1);
     assert.equal(s.clusters()[0].props.count, 3); assert.equal(s.find('Preview'), undefined);
   }
   s.clusters()[0].props.onPress(); s.flush();
-  assert.equal(s.calls.camera.length, 1); assert.ok(s.calls.camera[0].latitudeDelta < 0.20);
-  s.complete(s.calls.camera[0]); assert.equal(s.markers().length, 3); s.dispose();
+  assert.equal(s.calls.camera.length, 0);
+  assert.deepEqual(s.find('Preview').props.popups.map(p => p.id).sort(), ['dense-0', 'dense-1', 'dense-2']);
+  assert.equal(s.calls.map, 1); s.dispose();
+});
+
+test('mixed coordinate group expands to an exact pair and single marker, then the pair opens only its own popups', async () => {
+  const data = [{ ...popup, ...initial, id: 'a' }, { ...popup, ...initial, id: 'b' },
+    { ...popup, ...initial, id: 'c', longitude: initial.longitude + 0.0005 }];
+  const s = screen(async () => data); await s.settle();
+  assert.equal(s.clusters()[0].props.count, 3);
+  for (let i = 0; i < 5 && s.clusters().some(c => c.props.count === 3); i++) {
+    const before = s.calls.camera.length;
+    const cluster = s.clusters().find(c => c.props.count === 3);
+    cluster.props.onPress(); cluster.props.onPress(); s.flush();
+    assert.equal(s.calls.camera.length, before + 1, 'duplicate taps cannot issue two camera commands');
+    s.complete(s.calls.camera.at(-1));
+  }
+  assert.equal(s.markers().length, 1); assert.equal(s.markers()[0].key, 'c');
+  assert.equal(s.clusters().length, 1); assert.equal(s.clusters()[0].props.count, 2);
+  const camera = s.calls.camera.length;
+  s.clusters()[0].props.onPress(); s.flush();
+  assert.equal(s.calls.camera.length, camera);
+  const preview = s.find('Preview'); assert.deepEqual(preview.props.popups.map(p => p.id), ['a', 'b']);
+  preview.props.onPopupPress('b'); s.find('MapView').props.onPress({ nativeEvent: { action: 'press' } }); s.flush();
+  assert.equal(s.find('Preview'), undefined); assert.deepEqual(s.calls.opened, ['b']);
+  assert.equal(s.calls.map, 1); s.dispose();
+});
+
+test('maximum zoom and native camera clamping show all members instead of repeating zoom', async () => {
+  const data = [{ ...popup, ...initial, id: 'a' }, { ...popup, ...initial, id: 'b', longitude: initial.longitude + 1e-10 }];
+  for (const maximum of [true, false]) {
+    const s = screen(async () => data); await s.settle();
+    if (maximum) {
+      const delta = 360 * 390 / (512 * 2 ** 21);
+      s.complete({ ...initial, latitudeDelta: delta, longitudeDelta: delta });
+    }
+    s.clusters()[0].props.onPress(); s.flush();
+    if (!maximum) {
+      assert.equal(s.calls.camera.length, 1);
+      s.complete(initial);
+    } else assert.equal(s.calls.camera.length, 0);
+    assert.deepEqual(s.find('Preview').props.popups.map(p => p.id), ['a', 'b']);
+    assert.equal(s.calls.map, 1); s.dispose();
+  }
+});
+
+test('search selection inside a permanent cluster completes without adding a duplicate individual pin', async () => {
+  const data = [{ ...popup, ...initial, id: 'a' }, { ...popup, ...initial, id: 'b' }];
+  const s = screen(async () => data); await s.settle();
+  s.enterFromDetail('b'); s.ready(); await s.settle();
+  assert.equal(s.find('Preview').props.popup.id, 'b');
+  assert.equal(s.markers().length, 0); assert.equal(s.clusters()[0].props.count, 2);
+  assert.equal(s.calls.map, 1); s.dispose();
+});
+
+function measureMapBottom(s) {
+  s.find('AnimatedView').props.onLayout({ nativeEvent: { layout: { height: 90 } } });
+  s.find('ScrollView').props.onLayout({ nativeEvent: { layout: { y: 100, height: 36 } } }); s.flush();
+  s.find('ReanimatedView').props.onLayout({ nativeEvent: { layout: { height: 844 } } }); s.flush();
+}
+function previewOverlay(s) {
+  return nodes(s.find('View')).find(n => n.type === 'AnimatedView' && nodes(n).some(child => child.type === 'Preview'));
+}
+const previewClusterData = [
+  { ...popup, ...initial, id: 'cluster-a' }, { ...popup, ...initial, id: 'cluster-b' },
+  { ...popup, ...initial, id: 'single', latitude: initial.latitude + 0.009, longitude: initial.longitude + 0.009 },
+];
+
+test('markers, clusters, preview and regional count share only the ongoing map records', async () => {
+  const day = require('./helpers/uiDependencies.cjs').loadPure('src/lib/mapPopupDates.ts').mapPopupDays().KR;
+  const data = [
+    ...previewClusterData.map(p => ({ ...p, startDate: day, endDate: day })),
+    { ...previewClusterData[2], id: 'expired', endDate: '2020-01-02' },
+    { ...previewClusterData[2], id: 'future', startDate: '2099-01-01' },
+    { ...previewClusterData[2], id: 'unknown', startDate: null },
+    { ...previewClusterData[2], id: 'invalid', endDate: '2026-02-30' },
+  ];
+  const s = screen(async () => data);
+  try {
+    await s.settle(); measureMapBottom(s);
+    assert.equal(s.markers().length, 1); assert.equal(s.markers()[0].key, 'single');
+    assert.equal(s.clusters().length, 1); assert.equal(s.clusters()[0].props.count, 2);
+    assert.deepEqual(s.find('ListSheet').props.popups.map(p => p.id).sort(), ['cluster-a', 'cluster-b', 'single']);
+    assert.ok(s.findButton('이 지역 팝업 3개 보기'));
+    s.clusters()[0].props.onPress(); s.flush();
+    assert.deepEqual(s.find('Preview').props.popups.map(p => p.id), ['cluster-a', 'cluster-b']);
+    s.markers()[0].props.onPress(); s.flush(); assert.equal(s.find('Preview').props.popup.id, 'single');
+    s.enterFromDetail('expired'); s.ready(); await s.settle();
+    assert.equal(s.find('Preview'), undefined);
+    assert.equal(s.calls.camera.length, 0, 'even the refresh path cannot move to an expired map target');
+  } finally { s.dispose(); }
+});
+
+for (const index of [0, 1, 2]) {
+  test(`cluster card ${index + 1} detail navigation preserves the mounted preview across blur and focus`, async () => {
+    const data = Array.from({ length: 3 }, (_, i) => ({ ...popup, ...initial, id: `cluster-${i}` }));
+    const s = screen(async () => data, { deferAnimations: true });
+    try {
+      await s.settle(); measureMapBottom(s);
+      s.clusters()[0].props.onPress(); s.flush();
+      previewOverlay(s).props.onLayout({ nativeEvent: { layout: { height: 181 } } }); s.flush();
+      s.calls.bottomTiming.at(-1).finish(); s.flush();
+      const preview = s.find('Preview'), map = s.find('MapView');
+      const timings = s.calls.bottomTiming.length, sheets = s.calls.sheetTiming.length;
+      const camera = s.calls.camera.slice(), requests = s.calls.map;
+      preview.props.onPopupPress(data[index].id);
+      s.blur();
+      assert.equal(s.find('Preview').key, preview.key, 'no carousel unmount or selection reset under the detail');
+      assert.equal(s.find('Preview').props.popups, preview.props.popups);
+      assert.equal(previewOverlay(s).props.pointerEvents, 'auto');
+      assert.equal(previewOverlay(s).props.style[1].opacity, 1);
+      s.reenter(); await s.settle();
+      assert.equal(s.find('Preview').key, preview.key);
+      assert.equal(s.find('Preview').props.popups, preview.props.popups);
+      assert.equal(s.find('MapView').props.ref, map.props.ref);
+      assert.equal(s.find('MapView').key, map.key);
+      assert.deepEqual(s.calls.camera, camera);
+      assert.equal(s.calls.bottomTiming.length, timings, 'returning starts neither exit nor entry animations');
+      assert.equal(s.calls.sheetTiming.length, sheets);
+      assert.equal(s.calls.map, requests);
+      assert.deepEqual(s.calls.opened, [data[index].id]);
+      assert.equal(s.find('AnimatedView').props.pointerEvents, 'none', 'regional actions remain hidden');
+      // Explicit map dismissal and a new selection still use their existing transitions.
+      s.find('MapView').props.onPress({ nativeEvent: { action: 'press' } }); s.flush();
+      assert.equal(s.calls.bottomTiming.at(-1).config.toValue, 0);
+      s.calls.bottomTiming.at(-1).finish(); s.flush();
+      assert.equal(s.find('Preview'), undefined);
+      s.clusters()[0].props.onPress(); s.flush();
+      assert.ok(s.find('Preview'));
+    } finally { s.dispose(); }
+  });
+}
+
+test('ordinary marker detail navigation keeps its existing preview across blur and focus', async () => {
+  const local = { ...popup, ...initial };
+  const s = screen(async () => [local], { deferAnimations: true });
+  try {
+    await s.settle(); measureMapBottom(s);
+    s.markers()[0].props.onPress(); s.flush();
+    previewOverlay(s).props.onLayout({ nativeEvent: { layout: { height: 181 } } }); s.flush();
+    s.calls.bottomTiming.at(-1).finish(); s.flush();
+    const timings = s.calls.bottomTiming.length;
+    s.find('Preview').props.onPress(); s.blur(); s.reenter(); await s.settle();
+    assert.equal(s.find('Preview').props.popup, local);
+    assert.equal(previewOverlay(s).props.style[1].opacity, 1);
+    assert.equal(s.calls.bottomTiming.length, timings);
+    assert.deepEqual(s.calls.opened, [local.id]);
+    assert.equal(s.calls.camera.length, 0);
+  } finally { s.dispose(); }
+});
+
+for (const regionOpen of [false, true]) {
+  test(`cluster shares one simultaneous 230ms transition when the regional list is ${regionOpen ? 'open after its close' : 'already closed'}`, async () => {
+    const s = screen(async () => previewClusterData, { deferAnimations: true });
+    try {
+      await s.settle(); measureMapBottom(s);
+      if (regionOpen) { s.openList(); s.calls.sheetTiming.at(-1).finish(); s.flush(); }
+      const before = s.calls.sheetTiming.length;
+      const cluster = s.clusters()[0]; cluster.props.onPress(); cluster.props.onPress(); s.flush();
+      assert.ok(s.find('Preview'), 'prepare the real preview immediately');
+      assert.equal(previewOverlay(s).props.style[1].opacity, 0);
+      assert.equal(s.sheetOpen(), false);
+      assert.equal(s.calls.bottomTiming.length, 0, 'no separate bottom-action closing animation');
+      const regionAnimationCount = s.calls.sheetTiming.length;
+      previewOverlay(s).props.onLayout({ nativeEvent: { layout: { height: 181 } } }); s.flush();
+      if (regionOpen) {
+        assert.equal(previewOverlay(s).props.style[1].opacity, 0);
+        assert.equal(previewOverlay(s).props.pointerEvents, 'none');
+        assert.equal(s.calls.bottomTiming.length, 0);
+        const region = s.calls.sheetTiming.at(-1);
+        assert.equal(region.target, 0); assert.equal(region.config.duration, 400);
+        region.finish(); s.flush();
+      }
+      assert.equal(s.calls.sheetTiming.length, before + (regionOpen ? 1 : 0), 'selection does not restart a closed/closing regional animation');
+      assert.deepEqual(s.find('Preview').props.popups.map(p => p.id), ['cluster-a', 'cluster-b']);
+      assert.equal(s.find('Preview').props.bottomInset, 28, 'retain the original single-card bottom padding');
+      assert.equal(s.find('Preview').props.maxHeight, 696, 'use the full available height without reserving a hidden tab bar');
+      assert.equal(s.find('Preview').props.width, 390);
+      assert.equal(Object.assign({}, ...previewOverlay(s).props.style).bottom, 0, 'use the original single-marker bottom position');
+      assert.deepEqual(s.calls.transitionRanges.at(-1).outputRange, [193, 0], 'keep the original layout-based entry and exit distance');
+      assert.equal(s.calls.bottomTiming.length, 1);
+      assert.equal(previewOverlay(s).props.style[1].opacity, 1);
+      assert.equal(previewOverlay(s).props.pointerEvents, 'auto');
+      assert.equal(previewOverlay(s).props.accessibilityElementsHidden, false);
+      const entry = s.calls.bottomTiming.at(-1);
+      assert.equal(entry.config.toValue, 1); assert.equal(entry.config.duration, 230);
+      assert.equal(entry.config.useNativeDriver, true);
+      assert.equal(s.calls.sheetTiming.length, regionAnimationCount);
+      s.calls.bottomTiming.at(-1).finish(); s.flush();
+      s.find('Preview').props.onPopupPress('cluster-b'); assert.deepEqual(s.calls.opened, ['cluster-b']);
+      s.find('MapView').props.onPress({ nativeEvent: { action: 'press' } }); s.flush();
+      assert.equal(s.calls.bottomTiming.at(-1).config.toValue, 0);
+      assert.equal(previewOverlay(s).props.pointerEvents, 'none');
+      s.calls.bottomTiming.at(-1).finish(); s.flush();
+      assert.equal(s.find('Preview'), undefined); assert.equal(s.find('AnimatedView').props.pointerEvents, 'auto');
+      assert.equal(s.calls.map, 1);
+    } finally { s.dispose(); }
+  });
+}
+
+test('late initial layout still keeps the cluster preview hidden and starts it once measured', async () => {
+  const s = screen(async () => previewClusterData, { deferAnimations: true });
+  try {
+    await s.settle(); measureMapBottom(s);
+    s.clusters()[0].props.onPress(); s.flush();
+    assert.equal(previewOverlay(s).props.style[1].opacity, 0);
+    assert.equal(s.calls.bottomTiming.length, 0);
+    assert.equal(previewOverlay(s).props.style[1].opacity, 0);
+    previewOverlay(s).props.onLayout({ nativeEvent: { layout: { height: 193 } } }); s.flush();
+    assert.equal(s.calls.bottomTiming.length, 1);
+    assert.equal(previewOverlay(s).props.style[1].opacity, 1);
+  } finally { s.dispose(); }
+});
+
+for (const cancellation of ['marker', 'pan', 'blur']) {
+  test(`${cancellation} cancels an in-flight cluster preview; old animation callbacks cannot reopen it`, async () => {
+    const s = screen(async () => previewClusterData, { deferAnimations: true });
+    try {
+      await s.settle(); measureMapBottom(s); s.openList(); s.calls.sheetTiming.at(-1).finish(); s.flush();
+      s.clusters()[0].props.onPress(); s.flush();
+      const region = s.calls.sheetTiming.at(-1);
+      if (cancellation === 'marker') s.markers()[0].props.onPress();
+      else if (cancellation === 'pan') s.find('MapView').props.onPanDrag();
+      else s.blur();
+      s.flush(); region.finish(); s.flush();
+      if (cancellation === 'marker') assert.equal(s.find('Preview').props.popup.id, 'single');
+      else assert.equal(s.find('Preview'), undefined);
+      assert.deepEqual(s.calls.opened, []); assert.equal(s.calls.map, 1);
+    } finally { s.dispose(); }
+  });
+}
+
+test('normal marker retains its simultaneous action/preview animation without the cluster closing phase', async () => {
+  const s = screen(async () => [previewClusterData[2]], { deferAnimations: true });
+  try {
+    await s.settle(); measureMapBottom(s); s.markers()[0].props.onPress(); s.flush();
+    assert.equal(s.find('Preview').props.popup.id, 'single');
+    assert.equal(s.calls.bottomTiming.length, 0);
+    previewOverlay(s).props.onLayout({ nativeEvent: { layout: { height: 181 } } }); s.flush();
+    assert.equal(s.calls.bottomTiming.length, 1);
+    assert.equal(s.calls.bottomTiming[0].config.toValue, 1);
+    assert.equal(s.calls.bottomTiming[0].config.duration, 230);
+    assert.equal(s.find('Preview').props.bottomInset, 28);
+    assert.equal(s.find('Preview').props.maxHeight, undefined);
+  } finally { s.dispose(); }
+});
+
+test('cluster selection joins an already closing regional sheet without restarting its 400ms animation', async () => {
+  const s = screen(async () => previewClusterData, { deferAnimations: true });
+  try {
+    await s.settle(); measureMapBottom(s); s.openList(); s.calls.sheetTiming.at(-1).finish(); s.flush();
+    s.closeList(); const closing = s.calls.sheetTiming.at(-1), count = s.calls.sheetTiming.length;
+    s.clusters()[0].props.onPress(); s.flush();
+    previewOverlay(s).props.onLayout({ nativeEvent: { layout: { height: 193 } } }); s.flush();
+    assert.equal(s.calls.sheetTiming.length, count); assert.equal(s.calls.bottomTiming.length, 0);
+    assert.equal(previewOverlay(s).props.style[1].opacity, 0);
+    closing.finish(); s.flush();
+    assert.equal(s.calls.sheetTiming.length, count); assert.equal(s.calls.bottomTiming.length, 1);
+    assert.equal(previewOverlay(s).props.style[1].opacity, 1);
+  } finally { s.dispose(); }
+});
+
+test('returning from the regional list still restores the previously selected ordinary marker', async () => {
+  const s = screen(async () => [previewClusterData[2]], { deferAnimations: true });
+  try {
+    await s.settle(); measureMapBottom(s); s.markers()[0].props.onPress(); s.flush();
+    previewOverlay(s).props.onLayout({ nativeEvent: { layout: { height: 181 } } }); s.flush();
+    s.calls.bottomTiming.at(-1).finish(); s.flush();
+    s.openList(); s.calls.bottomTiming.at(-1).finish(); s.flush();
+    assert.equal(s.find('Preview'), undefined);
+    s.closeList(); assert.equal(s.find('Preview').props.popup.id, 'single');
+    previewOverlay(s).props.onLayout({ nativeEvent: { layout: { height: 181 } } }); s.flush();
+    assert.equal(s.calls.bottomTiming.at(-1).config.toValue, 1);
+    assert.equal(s.calls.bottomTiming.at(-1).config.duration, 230);
+  } finally { s.dispose(); }
+});
+
+const otherClusterData = [
+  ...previewClusterData,
+  { ...popup, ...initial, id: 'other-a', latitude: initial.latitude + 0.009, longitude: initial.longitude - 0.009 },
+  { ...popup, ...initial, id: 'other-b', latitude: initial.latitude + 0.009, longitude: initial.longitude - 0.009 },
+];
+function selectCluster(s, other = false) {
+  const cluster = s.clusters().find(c => other ? c.props.longitude < initial.longitude - 0.005 : Math.abs(c.props.latitude - initial.latitude) < 1e-6);
+  assert.ok(cluster); cluster.props.onPress(); s.flush();
+}
+
+const switchingPreviewData = [...otherClusterData,
+  { ...popup, ...initial, id: 'single-b', latitude: initial.latitude - 0.009, longitude: initial.longitude + 0.009 },
+];
+function switchPreview(s, target) {
+  if (target === 'cluster-a' || target === 'cluster-b') selectCluster(s, target === 'cluster-b');
+  else {
+    const marker = s.markers().find(marker => marker.key === target);
+    assert.ok(marker); marker.props.onPress(); s.flush();
+  }
+}
+function assertSwitchingPreview(s, target) {
+  const preview = s.find('Preview');
+  assert.ok(preview);
+  if (target === 'cluster-a') assert.deepEqual(preview.props.popups.map(p => p.id), ['cluster-a', 'cluster-b']);
+  else if (target === 'cluster-b') assert.deepEqual(preview.props.popups.map(p => p.id), ['other-a', 'other-b']);
+  else assert.equal(preview.props.popup.id, target);
+  assert.equal(previewOverlay(s).props.pointerEvents, 'auto');
+  assert.equal(previewOverlay(s).props.style[1].opacity, 1);
+}
+
+test('a regular marker beside generated clusters keeps its ID key when selected and deselected', async () => {
+  const s = screen(async () => otherClusterData);
+  try {
+    await s.settle();
+    const clusters = s.clusters().map(cluster => ({ key: cluster.key, count: cluster.props.count }));
+    assert.equal(clusters.length, 2);
+    const marker = s.markers()[0];
+    assert.equal(marker.key, 'single'); assert.equal(marker.props.zIndex, 0);
+    const coordinate = marker.props.coordinate;
+    marker.props.onPress(); s.flush();
+    const selected = s.markers()[0];
+    assert.equal(selected.key, marker.key);
+    assert.deepEqual(selected.props.coordinate, coordinate);
+    assert.equal(selected.props.zIndex, 2);
+    assert.equal(selected.props.tracksViewChanges, false);
+    assert.ok(selectedPinImage(selected), 'the existing selected pin artwork still renders');
+    assert.deepEqual(s.clusters().map(cluster => ({ key: cluster.key, count: cluster.props.count })), clusters);
+    assert.equal(s.find('Preview').props.popup.id, 'single');
+    s.find('MapView').props.onPress({ nativeEvent: { action: 'press' } }); s.flush();
+    assert.equal(s.markers()[0].key, marker.key);
+    assert.equal(s.markers()[0].props.zIndex, 0);
+    assert.deepEqual(s.calls.camera, []);
+  } finally { s.dispose(); }
+});
+
+test('repeated marker/cluster selections retain the marker boundary and never mount Fabric SVG artwork', async () => {
+  const s = screen(async () => switchingPreviewData);
+  try {
+    await s.settle(); measureMapBottom(s);
+    let redraws = 0;
+    for (let i = 0; i < 20; i++) {
+      for (const target of ['single', 'single-b', 'cluster-a', 'single', 'cluster-b']) {
+        switchPreview(s, target);
+        for (const marker of s.markers()) {
+          const content = nodes(marker).find(node => node.props?.onLayout);
+          assert.equal(content.props.collapsable, false, 'Google iconView receives a real native container');
+          const graphic = content.props.children[0].props.children;
+          assert.equal(graphic.type, 'View');
+          assert.equal(graphic.props.collapsable, false, 'normal and selected artwork retain the same native container type');
+          assert.equal(nodes(marker).some(node => ['Svg', 'Path', 'Circle', 'Star'].includes(node.type)), false);
+          assert.ok(['single', 'single-b'].includes(marker.key));
+        }
+        if (target.startsWith('single')) {
+          const marker = s.markers().find(marker => marker.key === target), image = selectedPinImage(marker);
+          marker.props.ref({ redraw() { redraws++; } });
+          assert.deepEqual(image.props.style, { width: 34, height: 38 });
+          assert.ok(markerArtwork(image).includes('viewBox="0 0 48 52"'));
+          assert.ok(markerArtwork(image).includes('<circle cx="24" cy="21" r="15" fill="#FFFFFF"/>'));
+          const before = redraws; image.props.onDisplay(); assert.equal(redraws, before + 1);
+          marker.props.ref(null); image.props.onDisplay(); assert.equal(redraws, before + 1);
+        }
+      }
+    }
+    assert.deepEqual(s.calls.camera, []); assert.equal(s.calls.map, 1);
+  } finally { s.dispose(); }
+});
+
+test('cluster creation/removal on zoom keeps stable point identity and no live SVG descendants', async () => {
+  const data = [{ ...popup, ...initial, id: 'a' },
+    { ...popup, ...initial, id: 'b', longitude: initial.longitude + 0.0005 }];
+  const s = screen(async () => data);
+  try {
+    await s.settle();
+    for (let i = 0; i < 20; i++) {
+      s.complete(initial, true);
+      assert.equal(s.markers().length, 0); assert.equal(s.clusters()[0].props.count, 2);
+      s.complete({ ...initial, latitudeDelta: 0.002, longitudeDelta: 0.002 }, true);
+      assert.deepEqual(s.markers().map(marker => marker.key).sort(), ['a', 'b']);
+      for (const id of ['a', 'b', 'a']) {
+        s.markers().find(marker => marker.key === id).props.onPress(); s.flush();
+        assert.deepEqual(s.markers().map(marker => marker.key).sort(), ['a', 'b']);
+        assert.ok(selectedPinImage(s.markers().find(marker => marker.key === id)));
+        assert.equal(s.markers().some(marker => nodes(marker).some(node => ['Svg', 'Path', 'Circle', 'Star'].includes(node.type))), false);
+      }
+      s.find('MapView').props.onPress({ nativeEvent: { action: 'press' } }); s.flush();
+      assert.equal(s.find('Preview'), undefined);
+    }
+    assert.equal(s.calls.map, 1); assert.deepEqual(s.calls.camera, []);
+  } finally { s.dispose(); }
+});
+
+test('Lucide category artwork preserves the installed Star path, colors and sizes using image decoding', async () => {
+  const starPath = readFileSync(path.join(__dirname, '../node_modules/lucide-react-native/dist/cjs/icons/star.js'), 'utf8')
+    .match(/d: "([^"]+)"/)[1];
+  const s = screen(async () => [{ ...popup, ...initial, primaryTag: '연예/크리에이터' }]);
+  try {
+    await s.settle();
+    const normal = nodes(s.markers()[0]).find(node => node.type === 'MarkerImage');
+    assert.deepEqual(normal.props.style, { width: 12, height: 12 });
+    assert.ok(markerArtwork(normal).includes(`d="${starPath}"`));
+    assert.ok(markerArtwork(normal).includes('stroke="#FFFFFF" stroke-width="2"'));
+    s.markers()[0].props.onPress(); s.flush();
+    const selected = s.markers()[0], images = nodes(selected).filter(node => node.type === 'MarkerImage');
+    assert.equal(images.length, 2);
+    assert.deepEqual(images[1].props.style, { width: 14, height: 14 });
+    assert.ok(markerArtwork(images[1]).includes(`d="${starPath}"`));
+    assert.ok(markerArtwork(images[1]).includes('stroke="#DB2777"'));
+    for (const image of images) {
+      assert.equal(image.props.cachePolicy, 'memory'); assert.equal(image.props.transition, 0);
+      assert.ok(image.props.source.uri.startsWith('data:image/svg+xml;utf8,'), 'local artwork adds no network request');
+    }
+  } finally { s.dispose(); }
+});
+
+test('an open marker can switch to clusters and any later selection without another native layout event', async () => {
+  const s = screen(async () => switchingPreviewData, { deferAnimations: true });
+  try {
+    await s.settle(); measureMapBottom(s); switchPreview(s, 'single');
+    previewOverlay(s).props.onLayout({ nativeEvent: { layout: { height: 181 } } }); s.flush();
+    s.calls.bottomTiming.at(-1).finish(); s.flush();
+    const animations = s.calls.bottomTiming.length;
+    // RN does not emit a new parent onLayout when equally tall children are replaced.
+    for (const target of ['single-b', 'cluster-a', 'single', 'cluster-a', 'cluster-b', 'cluster-b', 'single-b', 'cluster-a']) {
+      switchPreview(s, target); assertSwitchingPreview(s, target);
+      assert.equal(s.calls.bottomTiming.length, animations, 'replace content without closing/reopening the bottom area');
+    }
+    s.find('Preview').props.onPopupPress('cluster-b'); s.blur(); s.reenter(); await s.settle();
+    assertSwitchingPreview(s, 'cluster-a');
+    assert.equal(s.calls.bottomTiming.length, animations);
+    s.find('MapView').props.onPress({ nativeEvent: { action: 'press' } }); s.flush();
+    s.calls.bottomTiming.at(-1).finish(); s.flush();
+    assert.equal(s.find('Preview'), undefined);
+    assert.equal(s.find('AnimatedView').props.pointerEvents, 'auto');
+    switchPreview(s, 'single');
+    assert.equal(previewOverlay(s).props.style[1].opacity, 0, 'a genuinely new parent still waits for its initial layout');
+    previewOverlay(s).props.onLayout({ nativeEvent: { layout: { height: 181 } } }); s.flush();
+    assertSwitchingPreview(s, 'single');
+  } finally { s.dispose(); }
+});
+
+test('equal-height replacements during entry, exit and regional close never lose measurement or accept stale callbacks', async () => {
+  const s = screen(async () => switchingPreviewData, { deferAnimations: true });
+  try {
+    await s.settle(); measureMapBottom(s); switchPreview(s, 'single');
+    previewOverlay(s).props.onLayout({ nativeEvent: { layout: { height: 181 } } }); s.flush();
+    const entry = s.calls.bottomTiming.at(-1);
+    switchPreview(s, 'cluster-a'); entry.finish(); s.flush(); assertSwitchingPreview(s, 'cluster-a');
+    s.find('MapView').props.onPress({ nativeEvent: { action: 'press' } }); s.flush();
+    const exit = s.calls.bottomTiming.at(-1);
+    switchPreview(s, 'cluster-b'); exit.finish(); s.flush(); assertSwitchingPreview(s, 'cluster-b');
+    s.calls.bottomTiming.at(-1).finish(); s.flush();
+    s.openList(); s.calls.sheetTiming.at(-1).finish(); s.flush();
+    // Keep the still-mounted preview while the regional sheet starts closing.
+    switchPreview(s, 'cluster-a'); const closing = s.calls.sheetTiming.at(-1);
+    switchPreview(s, 'single'); switchPreview(s, 'cluster-b'); switchPreview(s, 'cluster-a');
+    assert.equal(previewOverlay(s).props.style[1].opacity, 0);
+    closing.finish(); s.flush(); assertSwitchingPreview(s, 'cluster-a');
+    exit.finish(); entry.finish(); s.flush(); assertSwitchingPreview(s, 'cluster-a');
+    assert.equal(s.calls.bottomTiming.at(-1).config.duration, 230);
+    assert.equal(closing.config.duration, 400);
+  } finally { s.dispose(); }
+});
+
+test('a newer cluster or marker takes over a pending regional close without opening the older selection', async () => {
+  for (const latest of ['cluster', 'marker']) {
+    const s = screen(async () => otherClusterData, { deferAnimations: true });
+    try {
+      await s.settle(); measureMapBottom(s); s.openList(); s.calls.sheetTiming.at(-1).finish(); s.flush();
+      selectCluster(s); const closing = s.calls.sheetTiming.at(-1), count = s.calls.sheetTiming.length;
+      previewOverlay(s).props.onLayout({ nativeEvent: { layout: { height: 193 } } }); s.flush();
+      if (latest === 'cluster') selectCluster(s, true);
+      else { s.markers()[0].props.onPress(); s.flush(); }
+      const height = latest === 'cluster' ? 193 : 181;
+      previewOverlay(s).props.onLayout({ nativeEvent: { layout: { height } } }); s.flush();
+      assert.equal(s.calls.sheetTiming.length, count); assert.equal(s.calls.bottomTiming.length, 0);
+      assert.equal(previewOverlay(s).props.style[1].opacity, 0);
+      closing.finish(); s.flush();
+      assert.equal(s.calls.bottomTiming.length, 1);
+      assert.equal(previewOverlay(s).props.style[1].opacity, 1);
+      if (latest === 'cluster') assert.deepEqual(s.find('Preview').props.popups.map(p => p.id), ['other-a', 'other-b']);
+      else { assert.equal(s.find('Preview').props.popup.id, 'single'); assert.equal(s.find('Preview').props.popups, undefined); }
+      assert.deepEqual(s.calls.opened, []);
+    } finally { s.dispose(); }
+  }
+});
+
+test('an obsolete regional completion cannot release the preview waiting for a newer regional animation', async () => {
+  const s = screen(async () => otherClusterData, { deferAnimations: true });
+  try {
+    await s.settle(); measureMapBottom(s); s.openList(); s.calls.sheetTiming.at(-1).finish(); s.flush();
+    selectCluster(s); const obsolete = s.calls.sheetTiming.at(-1);
+    s.find('MapView').props.onPress({ nativeEvent: { action: 'press' } }); s.flush();
+    s.openList(); s.calls.sheetTiming.at(-1).finish(); s.flush();
+    selectCluster(s, true); const current = s.calls.sheetTiming.at(-1);
+    previewOverlay(s).props.onLayout({ nativeEvent: { layout: { height: 193 } } }); s.flush();
+    const animations = s.calls.bottomTiming.length;
+    obsolete.finish(); s.flush();
+    assert.equal(previewOverlay(s).props.style[1].opacity, 0);
+    assert.equal(s.calls.bottomTiming.length, animations);
+    current.finish(); s.flush();
+    assert.equal(previewOverlay(s).props.style[1].opacity, 1);
+    assert.equal(s.calls.bottomTiming.length, animations + 1);
+    assert.deepEqual(s.find('Preview').props.popups.map(p => p.id), ['other-a', 'other-b']);
+  } finally { s.dispose(); }
+});
+
+test('late exit callbacks cannot clear a reselected preview during rapid marker/cluster switching', async () => {
+  const s = screen(async () => previewClusterData, { deferAnimations: true });
+  try {
+    await s.settle(); measureMapBottom(s); selectCluster(s);
+    previewOverlay(s).props.onLayout({ nativeEvent: { layout: { height: 193 } } }); s.flush();
+    s.calls.bottomTiming.at(-1).finish(); s.flush();
+    s.find('MapView').props.onPress({ nativeEvent: { action: 'press' } }); s.flush();
+    const exit = s.calls.bottomTiming.at(-1);
+    s.markers()[0].props.onPress(); s.flush();
+    exit.finish(); s.flush();
+    assert.equal(s.find('Preview').props.popup.id, 'single');
+    selectCluster(s);
+    previewOverlay(s).props.onLayout({ nativeEvent: { layout: { height: 193 } } }); s.flush();
+    exit.finish(); s.flush();
+    assert.deepEqual(s.find('Preview').props.popups.map(p => p.id), ['cluster-a', 'cluster-b']);
+    assert.equal(previewOverlay(s).props.style[1].opacity, 1);
+    assert.equal(s.calls.camera.length, 0); assert.equal(s.calls.map, 1);
+  } finally { s.dispose(); }
+});
+
+test('an ordinary marker can be closed and reselected before the next render without losing the new selection', async () => {
+  const s = screen(async () => [previewClusterData[2]], { deferAnimations: true });
+  try {
+    await s.settle(); measureMapBottom(s); s.markers()[0].props.onPress(); s.flush();
+    previewOverlay(s).props.onLayout({ nativeEvent: { layout: { height: 181 } } }); s.flush();
+    s.calls.bottomTiming.at(-1).finish(); s.flush();
+    const marker = s.markers()[0];
+    s.find('MapView').props.onPress({ nativeEvent: { action: 'press' } });
+    marker.props.onPress(); s.flush();
+    assert.equal(s.find('Preview').props.popup.id, 'single');
+    assert.equal(previewOverlay(s).props.pointerEvents, 'auto');
+    assert.equal(previewOverlay(s).props.style[1].opacity, 1);
+    assert.equal(s.calls.bottomTiming.length, 1, 'no redundant animation between the batched close/reselect');
+  } finally { s.dispose(); }
+});
+
+test('a native-clamped cluster zoom reaches the same single preview entry transition', async () => {
+  const data = [{ ...popup, ...initial, id: 'a' }, { ...popup, ...initial, id: 'b', longitude: initial.longitude + 1e-10 }];
+  const s = screen(async () => data, { deferAnimations: true });
+  try {
+    await s.settle(); measureMapBottom(s);
+    s.clusters()[0].props.onPress(); s.flush();
+    assert.equal(s.calls.camera.length, 1); assert.equal(s.find('Preview'), undefined);
+    s.complete(initial);
+    previewOverlay(s).props.onLayout({ nativeEvent: { layout: { height: 193 } } }); s.flush();
+    assert.deepEqual(s.find('Preview').props.popups.map(p => p.id), ['a', 'b']);
+    assert.equal(s.calls.bottomTiming.length, 1);
+    assert.equal(s.calls.bottomTiming[0].config.duration, 230);
+    assert.equal(previewOverlay(s).props.style[1].opacity, 1);
+  } finally { s.dispose(); }
 });
 
 test('completion changes marker bounds; continuous drag does not recalculate; repeated completion and reentry are stable', async () => {
@@ -466,12 +1055,12 @@ test('completion changes marker bounds; continuous drag does not recalculate; re
   assert.equal(s.find('MapView').props.children, originalChildren);
   const japan = { ...initial, latitude: popupB.latitude, longitude: popupB.longitude };
   s.complete(japan, true); assert.equal(s.markers().length, 1);
-  assert.equal(s.markers()[0].key, `${popupB.id}-false-ko`);
+  assert.equal(s.markers()[0].key, popupB.id);
   const afterMove = s.calls.renders, children = s.find('MapView').props.children;
   s.complete({ ...japan }); s.reenter();
   assert.equal(s.calls.renders, afterMove); assert.equal(s.find('MapView').props.children, children);
   assert.equal(s.calls.map, 1);
-  s.complete(initial, true); assert.equal(s.markers()[0].key, `${local.id}-false-ko`); s.dispose();
+  s.complete(initial, true); assert.equal(s.markers()[0].key, local.id); s.dispose();
 });
 
 test('late initial native bounds cannot overwrite a completed move', async () => {
@@ -479,7 +1068,7 @@ test('late initial native bounds cannot overwrite a completed move', async () =>
   const s = screen(undefined, { getMapBoundaries: () => readyBounds.promise }); await s.settle(); s.ready();
   s.complete({ ...initial, latitude: popupB.latitude, longitude: popupB.longitude });
   readyBounds.resolve({ northEast: { latitude: 37.55, longitude: 127.06 }, southWest: { latitude: 37.53, longitude: 127.04 } });
-  await s.settle(); assert.equal(s.markers()[0].key, `${popupB.id}-false-ko`);
+  await s.settle(); assert.equal(s.markers()[0].key, popupB.id);
   assert.equal(s.calls.map, 1); s.dispose();
 });
 
@@ -567,7 +1156,7 @@ test('location move keeps its existing camera and request policy and updates mar
   position.resolve({ coords: { latitude: popupB.latitude, longitude: popupB.longitude } });
   await moving; await s.settle();
   assert.equal(s.calls.camera.length, 1); assert.equal(s.calls.camera[0].latitudeDelta, initial.latitudeDelta);
-  s.complete(s.calls.camera[0]); assert.equal(s.markers()[0].key, `${popupB.id}-false-ko`);
+  s.complete(s.calls.camera[0]); assert.equal(s.markers()[0].key, popupB.id);
   assert.equal(s.calls.map, 1); s.dispose();
 });
 
@@ -1040,7 +1629,7 @@ test('detail map preview sends its public ID to the map tab; directions stays se
       useSafeAreaInsets: () => ({ top: 40, bottom: 20 }) },
     '../../components/common/Tag': { default: 'Tag' },
     '../../components/navigation/FloatingTabBar': { FLOATING_TAB_BAR_BOTTOM_GAP: 12, FLOATING_TAB_BAR_HEIGHT: 60 },
-    '../../components/place/PopupGuidanceCarousel': { default: 'GuidanceCarousel' },
+    '../../components/place/PopupIntroduction': { default: 'PopupIntroduction' },
     '../../components/place/PopupHeroImage': { default: 'HeroImage' },
     '../../components/place/IntroductionImageCarousel': { default: 'Carousel' },
     '../../components/place/OfficialChannelIcon': { default: 'OfficialChannelIcon' },

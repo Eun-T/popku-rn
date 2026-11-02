@@ -22,8 +22,9 @@ async function app() {
   const svg={__esModule:true,default:'Svg',Defs:'Defs',LinearGradient:'LinearGradient',Rect:'Rect',Stop:'Stop'};
   const isFavorite=()=>false,isFavoriteDisabled=()=>false,toggleFavorite=()=>{},retryFavorites=async()=>{};
   const ui=runtime({
+    'src/components/home/HomeVenueSection.tsx': { __esModule: true, default: 'HomeVenueSection' },
     'react-native':native,'expo-image':{Image:'ExpoImage'},'react-native-svg':svg,
-    'lucide-react-native':Object.fromEntries(['Store','Heart','Search','X','Bell','ChevronDown','ChevronUp','ChevronLeft','ChevronRight','RotateCcw'].map(n=>[n,n])),
+    'lucide-react-native':Object.fromEntries(['Store','Heart','Search','X','Bell','ChevronDown','ChevronUp','ChevronLeft','ChevronRight','RotateCcw','ArrowUpRight'].map(n=>[n,n])),
     '@expo/vector-icons':{Ionicons:'Ionicons'},'expo-blur':{BlurTargetView:'BlurTargetView',BlurView:'BlurView'},
     'expo-router':{useRouter:()=>({push:r=>opened.push(r)}),useLocalSearchParams:()=>({}),useScrollToTop(){},useFocusEffect(){}},
     'react-native-safe-area-context':{SafeAreaView:'SafeAreaView',useSafeAreaInsets:()=>({top:40,bottom:20,left:0,right:0})},
@@ -52,15 +53,36 @@ test('compiler-cached trending/new content updates ko/ja/system while expanded/c
   const s=await app(),Trending=s.load('src/components/home/HomeTrendingSection.tsx').default,
     New=s.load('src/components/home/HomeNewPopupSection.tsx').default,props={onPressPopup:id=>s.opened.push(id)};
   const trending=s.mount(()=>Trending(props)),fresh=s.mount(()=>New(props));await s.settle();
+  const showAll=()=>nodes(fresh.tree).find(n=>n.type==='Pressable'&&texts(n).includes(s.load('src/locales/index.ts').translate(s.languageStore.getSnapshot().resolvedLanguage,'home.new.showAll')));
+  const checkShowAllRoute=country=>{
+    showAll().props.onPress();
+    const route=s.opened.at(-1);
+    assert.equal(route.pathname,'/(tabs)/places');
+    assert.deepEqual(route.params,{tab:'all',countryCode:country,...s.load('src/lib/popups.ts').currentWeekRange(),homeNewEntry:route.params.homeNewEntry});
+    assert.match(route.params.homeNewEntry,/^\d+$/);
+  };
+  checkShowAllRoute('KR');
+  assert.equal(child(fresh.tree,'MoreButton'),undefined);
+  assert.equal(child(fresh.tree,'NewPopupCard').props.width,(390-16*2-12*2-30)/2);
+  const moreStyle=Object.assign({},...showAll().props.style),cardWidth=child(fresh.tree,'NewPopupCard').props.width;
+  assert.equal(moreStyle.width,cardWidth);assert.equal(moreStyle.height,cardWidth);
+  assert.equal(moreStyle.alignSelf,'flex-start');assert.equal(moreStyle.alignItems,'center');assert.equal(moreStyle.justifyContent,'center');
+  assert.equal(moreStyle.borderRadius,4);assert.equal(moreStyle.backgroundColor,'#F5F5F5');assert.equal(moreStyle.gap,12);
+  assert.deepEqual(nodes(showAll()).map(n=>n.type),['Pressable','ArrowUpRight','Text']);
+  assert.equal(nodes(showAll()).find(n=>n.type==='ArrowUpRight').props.size,24);
+  assert.equal(nodes(fresh.tree).find(n=>n.type==='ScrollView').props.children.flat().filter(Boolean).at(-1),showAll());
+  assert.ok(!texts(fresh.tree).includes('전체보기'));
   child(trending.tree,'FilterChips').props.onChange('JP');child(fresh.tree,'FilterChips').props.onChange('JP');await s.settle();
   child(trending.tree,'MoreButton').props.onPress();
   const requests=s.calls.slice(),carousel=()=>nodes(fresh.tree).find(n=>n.type==='ScrollView'),key=carousel().key,style=carousel().props.style;
   for(const [preference,language]of [['ja','ja'],['ko','ko'],['system','ja']]) {
     await s.language(preference);
     const locale=s.load('src/locales/index.ts');
+    assert.ok(texts(fresh.tree).includes(locale.translate(language,'home.new.showAll')));
+    checkShowAllRoute('JP');
     for(const [root,prefix]of [[trending,'home.trending'],[fresh,'home.new']]) {
       assert.ok(texts(root.tree).includes(locale.translate(language,`${prefix}.title`)));
-      assert.ok(texts(root.tree).includes(locale.translate(language,`${prefix}.description`)));
+      assert.equal(texts(root.tree).includes(locale.translate(language,`${prefix}.description`)),prefix==='home.trending');
       assert.equal(child(root.tree,'FilterChips').props.value,'JP');
     }
     assert.equal(nodes(trending.tree).filter(n=>n.type?.name==='PopupRankingCard').length,8);

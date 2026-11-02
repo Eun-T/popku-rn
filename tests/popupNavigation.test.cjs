@@ -69,7 +69,7 @@ function callbacks(file, callee, open, id) {
   const ast = source(file);
   return find(ast, (n) => ts.isArrowFunction(n) && find(n.body, (c) => ts.isCallExpression(c) && c.expression.getText(ast) === callee).length > 0
     && !ts.isBlock(n.body) && !ts.isJsxElement(n.body) && !ts.isParenthesizedExpression(n.body))
-    .map((n) => evaluate(`return (${n.getText(ast)});`, { [callee]: open, popup: { publicId: id }, previewPopup: { id } }));
+    .map((n) => evaluate(`return (${n.getText(ast)});`, { [callee]: open, popup: { publicId: id }, previewPopup: { id }, currentPreviewPopups: [{ id }] }));
 }
 for (const [name, file, callee, count] of entries) test(`${name}: rapid taps, different IDs, rerender, back/focus and push exception`, () => {
   const driver = screen(); let open = driver.render();
@@ -93,10 +93,10 @@ for (const [name, file, callee, count] of entries) test(`${name}: rapid taps, di
   }
 });
 
-test('home shares one screen lock across both sections; independent screens do not share it', () => {
+test('home shares one screen lock across all popup sections; independent screens do not share it', () => {
   const ast = source('src/screens/HomeScreen.tsx');
-  const sections = find(ast, (n) => ts.isJsxSelfClosingElement(n) && ['HomeTrendingSection', 'HomeNewPopupSection'].includes(n.tagName.getText(ast)));
-  assert.equal(sections.length, 2);
+  const sections = find(ast, (n) => ts.isJsxSelfClosingElement(n) && ['HomeTrendingSection', 'HomeNewPopupSection', 'HomeLatestPopupSection'].includes(n.tagName.getText(ast)));
+  assert.equal(sections.length, 3);
   for (const section of sections) assert.equal(section.attributes.properties.find((p) => p.name?.text === 'onPressPopup').initializer.expression.getText(ast), 'openPopup');
   assert.equal(find(ast, (n) => ts.isCallExpression(n) && n.expression.getText(ast) === 'usePopupNavigation').length, 1);
   const home = screen(), other = screen(); const open = home.render();

@@ -8,11 +8,11 @@ const screenFile = 'src/screens/MapScreen.native.tsx';
 const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
 const rows = language => [
   { id: 'kr', name: language === 'ko' ? '한국 팝업' : '韓国ポップアップ', latitude: 37.5445, longitude: 127.056,
-    primaryTag: '뷰티', tags: [{ id: 5, name: '뷰티' }], coverImageUrl: null, startDate: null, endDate: null },
+    primaryTag: '뷰티', tags: [{ id: 5, name: '뷰티' }], coverImageUrl: null, startDate: '2020-01-01', endDate: '2099-12-31' },
   { id: 'jp', name: language === 'ko' ? '일본 팝업' : '日本ポップアップ', latitude: 35.68, longitude: 139.76,
-    primaryTag: '뷰티', tags: [{ id: 5, name: '뷰티' }], coverImageUrl: null, startDate: null, endDate: null },
-  { id: 'fallback', name: 'Original fallback', latitude: 37.545, longitude: 127.056,
-    primaryTag: '뷰티', tags: [{ id: 5, name: '뷰티' }], coverImageUrl: null, startDate: null, endDate: null },
+    primaryTag: '뷰티', tags: [{ id: 5, name: '뷰티' }], coverImageUrl: null, startDate: '2020-01-01', endDate: '2099-12-31' },
+  { id: 'fallback', name: 'Original fallback', latitude: 37.5475, longitude: 127.056,
+    primaryTag: '뷰티', tags: [{ id: 5, name: '뷰티' }], coverImageUrl: null, startDate: '2020-01-01', endDate: '2099-12-31' },
 ];
 
 async function setup({ compiled = false } = {}) {
@@ -29,7 +29,7 @@ async function setup({ compiled = false } = {}) {
   const Screen = s.load(screenFile).default, root = s.mount(() => Screen());
   const find = type => nodes(root.tree).find(n => n.type === type);
   const markers = () => nodes(root.tree).filter(n => n.type === 'Marker');
-  const marker = id => markers().find(n => n.key.startsWith(`${id}-`));
+  const marker = id => markers().find(n => n.key === id);
   const mapRequests = () => requests.filter(r => r.url.pathname.endsWith('/map'));
   const searches = () => requests.filter(r => r.url.pathname.endsWith('/search'));
   const finishMap = async () => { const r = mapRequests().at(-1); r.resolve(rows(r.url.searchParams.get('languageCode'))); await s.settle(); };
@@ -62,9 +62,9 @@ test('compiled retained map uses ko/ja/system server names, keeps selection/came
       assert.deepEqual(s.find('SearchOverlay').props.search.results, []);
       s.debounce(); await s.finishMap(); await s.finishSearch();
       assert.ok(texts(s.marker('kr')).includes(title));
-      assert.equal(s.marker('kr').key, `kr-true-${language}`);
+      assert.equal(s.marker('kr').key, 'kr');
       assert.equal(s.marker('kr').props.tracksViewChanges, false);
-      assert.equal(s.marker('kr').props.zIndex, 1);
+      assert.equal(s.marker('kr').props.zIndex, 2);
       assert.equal(s.marker('kr').props.anchor.y, 0.5, 'old title measurement is not reused');
       assert.equal(s.find('Preview').props.popup.name, title);
       assert.equal(s.find('TextInput').props.value, '팝업');
@@ -119,7 +119,7 @@ test('Japan coordinates use Korean names and an open list refreshes names withou
     assert.equal(s.find('ListSheet').props.popups[0].name, '일본 팝업');
     await s.language('ja'); assert.deepEqual(s.find('ListSheet').props.popups, []);
     await s.finishMap(); assert.equal(s.find('ListSheet').props.popups[0].name, '日本ポップアップ');
-    assert.equal(s.marker('jp').key, 'jp-false-ja'); assert.deepEqual(s.camera, []);
+    assert.equal(s.marker('jp').key, 'jp'); assert.deepEqual(s.camera, []);
     for (const r of s.requests) {
       assert.ok(['ko', 'ja'].includes(r.url.searchParams.get('languageCode')));
       assert.equal(r.url.searchParams.has('countryCode'), false);
@@ -138,7 +138,7 @@ test('failed new-language read hides old titles and preserves selected ID for ma
     assert.equal(s.find('ListSheet').props.status, 'error');
     s.find('ListSheet').props.onRetry(); await s.finishMap();
     nodes(s.root.tree).find(n => n.type === 'Pressable' && texts(n) === '地図に戻る').props.onPress();
-    assert.equal(s.marker('kr').key, 'kr-true-ja');
+    assert.equal(s.marker('kr').key, 'kr');
     assert.equal(s.find('Preview').props.popup.name, '韓国ポップアップ');
   } finally { s.dispose(); }
 });

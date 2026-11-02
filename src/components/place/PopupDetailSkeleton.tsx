@@ -6,30 +6,24 @@ import { radius, spacing } from '../../theme/tokens';
 
 type PopupDetailSkeletonProps = {
   width: number;
+  heroHeight: number;
   heroControls: ReactNode;
-  tabs: ReactNode;
 };
 
-export default function PopupDetailSkeleton({ width, heroControls, tabs }: PopupDetailSkeletonProps) {
+export default function PopupDetailSkeleton({ width, heroHeight, heroControls }: PopupDetailSkeletonProps) {
   return (
     <>
       <View style={styles.hero}>
-        <SkeletonBlock width={width} height={width} borderRadius={0} />
+        <SkeletonBlock width={width} height={heroHeight} borderRadius={0} />
         {heroControls}
       </View>
-      {tabs}
       <View style={styles.infoContent} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
         <View style={styles.tags}>
           <SkeletonBlock width={62} height={24} borderRadius={radius.radius8} />
           <SkeletonBlock width={72} height={24} borderRadius={radius.radius8} />
           <SkeletonBlock width={54} height={24} borderRadius={radius.radius8} />
         </View>
-        <SkeletonBlock width="75%" height={26} style={styles.title} />
-        <View style={styles.stats}>
-          <SkeletonBlock width={48} height={20} />
-          <SkeletonBlock width={48} height={20} />
-          <SkeletonBlock width={58} height={20} />
-        </View>
+        <SkeletonBlock width="75%" height={28} style={styles.title} />
         <View style={styles.infoSection}>
           {[0, 1, 2].map((row) => (
             <View key={row} style={[styles.infoRow, row > 0 && styles.nextInfoRow]}>
@@ -54,8 +48,7 @@ const styles = StyleSheet.create({
   hero: { position: 'relative' },
   infoContent: { paddingTop: spacing.space24, paddingHorizontal: spacing.space16 },
   tags: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.space8 },
-  title: { marginTop: spacing.space12 },
-  stats: { flexDirection: 'row', columnGap: spacing.space20, marginTop: spacing.space12 },
+  title: { marginTop: spacing.space8 },
   infoSection: { marginTop: spacing.space24 },
   infoRow: { minHeight: 32, flexDirection: 'row', alignItems: 'center', columnGap: spacing.space8 },
   nextInfoRow: { marginTop: spacing.space4 },

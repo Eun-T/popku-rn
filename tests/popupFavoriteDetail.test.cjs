@@ -114,7 +114,7 @@ function screen({ token = 'saved-token', initialCount = 0, initialFavorited = fa
     'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView', useSafeAreaInsets: () => insets },
     '../../components/common/Tag': { default: 'Tag' },
     '../../components/navigation/FloatingTabBar': { FLOATING_TAB_BAR_BOTTOM_GAP: 12, FLOATING_TAB_BAR_HEIGHT: 60 },
-    '../../components/place/PopupGuidanceCarousel': { default: 'GuidanceCarousel' },
+    '../../components/place/PopupIntroduction': { default: 'PopupIntroduction' },
     '../../components/place/PopupHeroImage': { default: 'HeroImage' },
     '../../components/place/IntroductionImageCarousel': { default: 'Carousel' },
     '../../components/place/OfficialChannelIcon': { default: 'Channel' },

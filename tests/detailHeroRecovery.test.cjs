@@ -26,7 +26,7 @@ async function app({compiled=false,realReviews=false}={}) {
     'react-native-safe-area-context':{SafeAreaView:'SafeAreaView',useSafeAreaInsets:()=>({top:40,bottom:20,left:0,right:0})},
     'src/components/navigation/FloatingTabBar.tsx':{FLOATING_TAB_BAR_HEIGHT:60,FLOATING_TAB_BAR_BOTTOM_GAP:12},
     'src/components/place/PlaceMapPreview.tsx':{__esModule:true,default:'MapPreview',isMapPreviewAvailable:true},
-    ...Object.fromEntries(['DirectionsSheet','IntroductionImageCarousel','OfficialChannelIcon','PopupDetailSkeleton','PopupGuidanceCarousel','PopupReviews']
+    ...Object.fromEntries(['DirectionsSheet','IntroductionImageCarousel','OfficialChannelIcon','PopupDetailSkeleton','PopupIntroduction','PopupReviews']
       .filter(n=>!realReviews||n!=='PopupReviews').map(n=>[`src/components/place/${n}.tsx`,{__esModule:true,default:n}])),
     'src/components/community/CommunityPostItem.tsx':{__esModule:true,default:'ReviewCard'},
     'src/components/reviews/ReviewActions.tsx':{__esModule:true,default:'ReviewActions'},

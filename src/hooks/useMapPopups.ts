@@ -1,15 +1,33 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { getPopupMap, type PopupMapMarker } from '../lib/popups';
 import type { Locale } from '../locales';
+import { filterOngoingMapPopups, mapPopupDays, nextMapDayDelay } from '../lib/mapPopupDates';
 
 type MapState = { languageCode: Locale; popups: PopupMapMarker[]; status: 'loading' | 'ready' | 'error' };
 
 export function useMapPopups(languageCode: Locale) {
   const [state, setState] = useState<MapState>({ languageCode, popups: [], status: 'loading' });
+  const [days, setDays] = useState(() => mapPopupDays());
   const failed = useRef(false);
   const active = useRef(true);
   const request = useRef<{ languageCode: Locale; controller: AbortController; promise: Promise<PopupMapMarker[]> } | null>(null);
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>;
+    const updateDay = () => {
+      const now = Date.now(), next = mapPopupDays(now);
+      setDays(current => current.KR === next.KR && current.JP === next.JP ? current : next);
+      clearTimeout(timer);
+      timer = setTimeout(updateDay, nextMapDayDelay(now));
+    };
+    updateDay();
+    const subscription = AppState.addEventListener('change', state => {
+      if (state === 'active') updateDay();
+    });
+    return () => { clearTimeout(timer); subscription.remove(); };
+  }, []);
 
   const refresh = useCallback((): Promise<PopupMapMarker[]> => {
     if (request.current && request.current.languageCode === languageCode) return request.current.promise;
@@ -22,7 +40,7 @@ export function useMapPopups(languageCode: Locale) {
       }
       failed.current = false;
       setState({ languageCode, popups: items, status: 'ready' });
-      return items;
+      return filterOngoingMapPopups(items);
     }).catch((error: unknown) => {
       if (active.current && !controller.signal.aborted) {
         failed.current = true;
@@ -51,5 +69,6 @@ export function useMapPopups(languageCode: Locale) {
 
   // Hide the previous language synchronously, before the replacement effect runs.
   const current = state.languageCode === languageCode;
-  return { popups: current ? state.popups : [], status: current ? state.status : 'loading', refresh };
+  const popups = useMemo(() => current ? filterOngoingMapPopups(state.popups, days) : [], [current, state.popups, days]);
+  return { popups, status: current ? state.status : 'loading', refresh };
 }

@@ -205,8 +205,27 @@ test('explore makes no general list request; first all entry paginates and tab s
   const s=screen(); await s.settle(); assert.equal(s.pages.length,0); assert.equal(s.endings.length,1);
   assert.ok(s.find('PlaceWeeklySection')); assert.equal(s.find('PlaceWeeklySection').props.popups,undefined);
   s.tab('전체'); assert.equal(s.pages.length,1); assert.equal(s.pages[0].cursor,null);
+  const list=s.find('FlatList').props;
+  const contentStyle=Object.assign({},...list.contentContainerStyle);
+  assert.equal(contentStyle.paddingLeft,16);
+  assert.equal(contentStyle.paddingRight,16);
+  assert.equal(list.ItemSeparatorComponent().props.style.height,32);
+  const Skeleton=load('src/components/place/PopupGridSkeleton.tsx',{
+    'react/jsx-runtime':{jsx,jsxs:jsx},'react-native':{View:'View',StyleSheet:{create:s=>s}},
+    '../common/SkeletonBlock':{default:'SkeletonBlock'},'../../theme/tokens':theme,
+  }).default;
+  const skeleton=Skeleton({cardWidth:list.ListEmptyComponent.props.cardWidth});
+  const rows=skeleton.props.children;
+  assert.equal(Object.assign({},...rows[1].props.style).marginTop,32);
+  const skeletonCard=rows[0].props.children[0];
+  const poster=skeletonCard.type(skeletonCard.props).props.children[0];
+  assert.equal(poster.props.borderRadius,6);
+  assert.equal(poster.props.height,list.ListEmptyComponent.props.cardWidth*4/3);
   s.pages[0].resolve({popups:Array.from({length:10},(_,i)=>popup(i)),nextCursor:'next'}); await s.settle();
   assert.equal(s.find('FlatList').props.data.length,10);
+  const card=s.find('FlatList').props.renderItem({item:s.find('FlatList').props.data[0]});
+  assert.equal(card.props.width,(390-16*2-12)/2);
+  assert.match(card.props.today,/^\d{4}-\d{2}-\d{2}$/);
   s.tab('탐색'); s.tab('전체'); assert.equal(s.pages.length,1);
   s.find('FlatList').props.onEndReached(); s.find('FlatList').props.onEndReached(); assert.equal(s.pages.length,2);
   assert.equal(s.pages[1].cursor,'next'); assert.deepEqual(s.pages[1].detail,s.pages[0].detail);

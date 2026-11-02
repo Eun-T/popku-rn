@@ -191,7 +191,11 @@ test('real detail owner, favorite, review rows and scroll ref survive introducti
   reviewApi.getPopupReviews=async(...args)=>{await oldRead(...args);return {items:[{id:7,type:'REVIEW',liked:true,likeCount:2,commentCount:0,content:'review',author:{id:1,nickname:'user'}}],nextCursor:'next'};};
   s.load('src/lib/favorites.ts').favoritePopup=async()=>({isFavorited:true,favoriteCount:4});
   const Screen=s.load('src/app/places/[id].tsx').default,screen=s.mount(()=>Screen());await s.settle();
-  const find=name=>nodes(screen.tree).find(n=>n.type===name||n.type?.name===name);
+  const find=name=>{
+    const all=nodes(screen.tree);
+    const intro=all.find(n=>n.type==='PopupIntroduction');
+    return all.concat(nodes(intro?.props.detailImages)).find(n=>n.type===name||n.type?.name===name);
+  };
   const carousel=s.mount(()=>{const n=find('IntroductionImageCarousel');return n?n.type(n.props):null;});
   const list=()=>nodes(carousel.tree).find(n=>n.type==='FlatList');
   list().props.onScroll({nativeEvent:{contentOffset:{x:358}}});

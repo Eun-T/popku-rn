@@ -115,7 +115,7 @@ function screen({ token = null, initialCount = 0, initialFavorited = false, deta
       }
     },
   };
-  const jsx = (type, props, key) => ['DetailRow', 'GuidanceMock'].includes(type?.name) ? type(props) : ({ type, props, key });
+  const jsx = (type, props, key) => ['DetailRow', 'IntroductionMock'].includes(type?.name) ? type(props) : ({ type, props, key });
   const native = {
     Alert: { alert: (...args) => alerts.push(args) }, Image: 'Image', Linking: { openURL: async (url) => { openedLinks.push(url); if (linkError) throw linkError; } },
     Pressable: 'Pressable', ScrollView: 'ScrollView', Share: { share: async () => {} },
@@ -131,7 +131,13 @@ function screen({ token = null, initialCount = 0, initialFavorited = false, deta
     'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView', useSafeAreaInsets: () => ({ top: 40, bottom: 20, left: 0, right: 0 }) },
     '../../components/common/Tag': { __esModule: true, default: 'Tag' },
     '../../components/navigation/FloatingTabBar': { FLOATING_TAB_BAR_BOTTOM_GAP: 12, FLOATING_TAB_BAR_HEIGHT: 60 },
-    '../../components/place/PopupGuidanceCarousel': { __esModule: true, default: function GuidanceMock(props) { return { type: 'Guidance', props: { ...props, children: [props.notice, props.benefits] } }; } },
+    '../../components/place/PopupIntroduction': { __esModule: true, default: function IntroductionMock(props) {
+      return { type: 'Introduction', props: { ...props, children: props.sections.map(section => ({ type: 'View', props: {
+        children: section.kind === 'about'
+          ? section.paragraphs.map(text => jsx('Text', { children: text }))
+          : [jsx('Text', { children: locales.t(section.titleKey) })],
+      } })).concat(props.introductionLinks || [], props.detailImages || []) } };
+    } },
     '../../components/place/PopupHeroImage': { default: 'HeroImage' },
     '../../components/place/IntroductionImageCarousel': { default: 'Carousel' },
     '../../components/place/OfficialChannelIcon': { default: 'Channel' },
@@ -352,18 +358,19 @@ test('API detail encodes identifier and uses app locale independently of country
   assert.match(calls[1].url, /languageCode=ja$/);
 });
 
-test('detail renders summary, ordered highlights, benefits and notice with localized headings', async () => {
+test('detail renders only summary and localized accordion labels while hiding every highlight', async () => {
   const s = screen({ language: 'ja', detail: { countryCode: 'KR', summary: '短い紹介', benefits: '購入特典', notice: '予約条件',
-    highlights: [{ type: 'SPACE', text: '空間の説明' }, { type: 'GOODS', text: '商品の説明' }, { type: 'SPECIAL', text: '限定企画' }] } });
+    highlights: [{ type: 'PRODUCTS', text: '• 商品 ¥1,200\n• 限定品 ¥2,000' }, { type: 'VIEW', text: '空間の説明' }, { type: 'SPECIAL', text: '限定企画' }] } });
   await s.settle();
   assert.match(s.calls[0].url, /languageCode=ja$/);
   const text = s.text();
-  for (const value of ['短い紹介', '購入特典', '予約条件', ja.highlights.SPACE, ja.highlights.GOODS, ja.highlights.SPECIAL]) assert.ok(text.includes(value));
-  assert.ok(text.indexOf('空間の説明') < text.indexOf('商品の説明'));
-  assert.ok(text.indexOf('商品の説明') < text.indexOf('限定企画'));
+  const values = ['短い紹介'];
+  for (const value of [...values, ja.descriptionTitle, ja.benefitsGuide, ja.notice]) assert.ok(text.includes(value));
+  for (const value of [ja.about, ja.introduction.attractions, ja.introduction.products, '購入特典', '予約条件', '• 商品 ¥1,200\n• 限定品 ¥2,000', '空間の説明', '限定企画']) assert.ok(!text.includes(value));
+  for (let index = 1; index < values.length; index++) assert.ok(text.indexOf(values[index - 1]) < text.indexOf(values[index]));
 });
 
-test('all highlight types share inline emoji headings and unboxed introduction flow in KO and JA', async () => {
+test('introduction ignores every highlight type and precedes unchanged images', async () => {
   for (const language of ['ko', 'ja']) {
     const localized = language === 'ko' ? ko : ja;
     const s = screen({ language, detail: {
@@ -373,65 +380,76 @@ test('all highlight types share inline emoji headings and unboxed introduction f
     } });
     await s.settle();
     const all = s.nodes();
-    const textNodes = all.filter(node => node.type === 'Text');
-    const summary = textNodes.find(node => displayed(node) === 'summary body');
-    const bodyStyle = summary.props.style[0];
-    assert.equal(bodyStyle.fontSize, 14);
-    assert.equal(bodyStyle.fontWeight, '400');
-    assert.equal(bodyStyle.lineHeight, 22);
-    const group = all.find(node => node.type === 'View' && Array.isArray(node.props.children)
-      && node.props.children.length === types.length
-      && node.props.children.every(child => child?.type === 'View'));
-    assert.ok(group);
-    assert.equal(group.props.style[0].gap, 24);
-    assert.equal(group.props.style[1].marginTop, 24);
-    group.props.children.forEach((block, index) => {
-      assert.equal(block.props.style, undefined, 'highlight has no card container style');
-      const [heading, body] = block.props.children;
-      assert.equal(heading.props.style.flexDirection, 'row');
-      assert.equal(heading.props.style.columnGap, 6);
-      const [emoji, title] = heading.props.children;
-      assert.equal(displayed(emoji), content.highlightHeading(types[index]).emoji);
-      assert.equal(emoji.props.accessible, false);
-      assert.equal(displayed(title), localized.highlights[types[index]]);
-      assert.equal(title.props.style[0].fontSize, 14);
-      assert.equal(title.props.style[0].fontWeight, '600');
-      assert.deepEqual(body.props.style[0], bodyStyle);
-      assert.equal(body.props.style[1].marginTop, 8);
-      assert.equal(displayed(body), types[index] + ' body');
-    });
-    assert.ok(all.indexOf(summary) < all.indexOf(group));
-    assert.ok(all.indexOf(group) < all.findIndex(node => node.props?.images?.[0] === 'https://example.com/image.jpg'));
-    const cards = all.filter(node => node.type === 'View' && [node.props.style].flat().some(style => style?.backgroundColor === '#F7F8FA'));
-    assert.equal(cards.length, 0, 'guidance is delegated to the upper carousel');
-    assert.equal(all.filter(node => node.type === 'Guidance').length, 1);
-    assert.equal(s.text().split('benefit body').length - 1, 1);
+    const introduction = all.find(node => node.type === 'Introduction');
+    assert.deepEqual(introduction.props.sections.map(s => s.kind), ['about', 'benefits', 'notice']);
+    assert.deepEqual(introduction.props.sections.flatMap(s => s.paragraphs), ['summary body', 'benefit body', 'notice body']);
+    for (const type of types) assert.ok(!s.text().includes(type + ' body'));
+    assert.ok(all.indexOf(introduction) < all.findIndex(node => node.props?.images?.[0] === 'https://example.com/image.jpg'));
+    assert.equal(all.filter(node => node.type === 'Guidance').length, 0);
+    assert.ok(s.text().includes(localized.benefitsGuide));
+    assert.equal(s.text().split('benefit body').length - 1, 0);
     assert.ok(!s.text().includes('legacy introduction must stay hidden'));
   }
 });
 
-test('description hides truly empty content, supports summary-only and highlights-only', async () => {
+test('description supports summary-only content and hides highlights-only content', async () => {
   const empty = screen(); await empty.settle();
   assert.ok(!empty.text().includes(ko.about));
   assert.ok(!empty.text().includes(ko.officialChannels));
   const summary = screen({ detail: { summary: '소개만' } }); await summary.settle();
-  assert.ok(summary.text().includes('소개만')); assert.ok(summary.text().includes(ko.about));
-  const highlights = screen({ detail: { highlights: [{ type: 'NEW', text: '새 내용' }, { type: 'GOODS', text: ' ' }] } }); await highlights.settle();
-  assert.ok(highlights.text().includes('새 내용')); assert.ok(highlights.text().includes(ko.highlights.HIGHLIGHT));
-  assert.ok(highlights.text().includes('📌'));
+  assert.ok(summary.text().includes('소개만')); assert.ok(summary.text().includes(ko.descriptionTitle));
+  assert.ok(!summary.text().includes(ko.about));
+  const highlights = screen({ detail: { highlights: [{ type: 'VIEW', text: '새 내용' }, { type: 'GOODS', text: ' ' }] } }); await highlights.settle();
+  assert.ok(!highlights.text().includes('새 내용')); assert.ok(!highlights.text().includes(ko.descriptionTitle));
+  assert.ok(!highlights.text().includes(ko.introduction.attractions));
+  assert.ok(!highlights.text().includes(ko.about));
   assert.ok(!highlights.text().includes(ko.highlights.GOODS));
+  const images = ['https://example.com/first.jpg', 'https://example.com/second.jpg'];
+  const imagesOnly = screen({ detail: { highlights: [{ type: 'VIEW', text: '숨길 내용' }], contentImageUrls: images } });
+  await imagesOnly.settle();
+  assert.ok(imagesOnly.text().includes(ko.descriptionTitle));
+  assert.ok(!imagesOnly.text().includes('숨길 내용'));
+  assert.deepEqual(imagesOnly.nodes().find(node => node.props?.images)?.props.images, images);
   const benefits = screen({ detail: { benefits: '혜택만' } }); await benefits.settle();
-  assert.ok(benefits.text().includes('혜택만')); assert.ok(!benefits.text().includes(ko.about));
+  assert.ok(!benefits.text().includes('혜택만')); assert.ok(benefits.text().includes(ko.benefitsGuide));
+  assert.ok(!benefits.text().includes(ko.about));
 });
 
-test('official section renders only valid links with accessible localized labels', async () => {
+test('restored official section renders accessible localized links', async () => {
   const s = screen({ language: 'ja', detail: { socialLinks: { website: ' https://example.com ', x: 'https://x.com/a', instagram: '' } } });
   await s.settle();
   assert.ok(s.text().includes(ja.officialChannels));
+  assert.ok(!s.text().includes(ja.descriptionTitle));
+  assert.equal(s.nodes().filter(node => node.props?.testID === 'popup-social-links').length, 0);
   const links = s.nodes().filter(node => node.props?.accessibilityRole === 'link');
   assert.deepEqual(links.map(node => node.props.accessibilityLabel), ['公式サイトの公式チャンネル', 'Xの公式チャンネル']);
   links[0].props.onPress(); await s.settle();
   assert.deepEqual(s.openedLinks, ['https://example.com']);
+});
+
+test('restored official section keeps original circular icons and opens post/profile/platform URLs', async () => {
+  const socialLinks = { website: 'https://unknown.example/path', instagram: 'https://www.instagram.com/p/DeqxMdTF6oV/',
+    x: 'https://x.com/account', youtube: 'https://youtube.com/watch?v=abc', threads: 'https://threads.net/@account/post/123', facebook: 'https://facebook.com/account' };
+  for (const language of ['ko', 'ja']) {
+    const s = screen({ language, detail: { summary: 'body', socialLinks, contentImageUrls: ['https://example.com/image.jpg'] } });
+    await s.settle();
+    const links = s.nodes().filter(n => n.props?.accessibilityRole === 'link');
+    assert.equal(links.length, 6);
+    assert.ok(s.nodes().find(n => n.type === 'ScrollView' && n.props.horizontal));
+    const imageIndex = s.nodes().findIndex(n => n.props?.images);
+    assert.ok(imageIndex < s.nodes().indexOf(links[0]));
+    for (const link of links) {
+      assert.equal(link.props.style.width, 44); assert.equal(link.props.style.height, 44);
+      assert.equal(nodes(link).filter(n => n.type === 'Text').length, 0);
+      link.props.onPress();
+    }
+    await s.settle(); assert.deepEqual(s.openedLinks, Object.values(socialLinks));
+    assert.ok(!s.nodes().some(n => n.props?.testID === 'popup-social-links'));
+  }
+  const profile = 'https://www.instagram.com/example/';
+  const s = screen({ detail: { socialLinks: { instagram: profile } } }); await s.settle();
+  s.nodes().find(n => n.props?.accessibilityRole === 'link').props.onPress(); await s.settle();
+  assert.deepEqual(s.openedLinks, [profile]);
 });
 
 test('locale changes refetch the detail and abort stale requests without displaying old language', async () => {

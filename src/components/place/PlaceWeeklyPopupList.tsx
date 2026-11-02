@@ -48,7 +48,7 @@ export default function PlaceWeeklyPopupList({
         const status =
           popup.startDate > todayString
             ? "오픈예정"
-            : popup.endDate < todayString
+            : popup.endDate && popup.endDate < todayString
               ? "종료됨"
               : "진행중";
 
@@ -98,7 +98,7 @@ export default function PlaceWeeklyPopupList({
                 </View>
 
                 <Text numberOfLines={1} style={styles.period}>
-                  {formatDate(popup.startDate)} - {formatDate(popup.endDate)}
+                  {formatDate(popup.startDate)} - {popup.endDate ? formatDate(popup.endDate) : t('place.detail.schedulePending')}
                 </Text>
               </View>
 

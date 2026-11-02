@@ -188,9 +188,10 @@ test('open detail refetches its content language while keeping selected tabs, re
   await s.language('ja');await s.settle();
   assert.ok(texts(tabs.tree).includes('ポップアップ情報')); assert.ok(texts(tabs.tree).includes('訪問レビュー'));
   assert.ok(rows().includes('期間')); assert.ok(labels(root.tree).includes('聖水')); assert.ok(labels(root.tree).includes('ビューティー'));
-  for(const original of [marker.name,detail.summary,detail.operatingHours,detail.address,detail.locationDetail,detail.highlights[0].text]) assert.ok(texts(root.tree).includes(original));
-  const guidance=child(root.tree,'PopupGuidanceCarousel');
-  assert.equal(guidance.props.notice,detail.notice); assert.equal(guidance.props.benefits,detail.benefits); assert.equal(guidance.props.languageCode,'ja');
+  for(const original of [marker.name,detail.operatingHours,detail.address,detail.locationDetail]) assert.ok(texts(root.tree).includes(original));
+  const introduction=nodes(root.tree).find(n=>n.type==='PopupIntroduction');
+  assert.deepEqual(introduction.props.sections.map(s=>s.kind),['about','benefits','notice']);
+  assert.deepEqual(introduction.props.sections.flatMap(s=>s.paragraphs),[detail.summary,detail.benefits,detail.notice]);
   assert.equal(nodes(root.tree).find(n=>n.type==='ScrollView').props.ref,scroll.props.ref);
   assert.equal(nodes(root.tree).find(n=>n.type==='PopupHeroImage').key,hero.key);
   assert.equal(s.calls.detail.length,2); assert.equal(s.calls.detail[0][0],marker.publicId); assert.deepEqual(s.calls.detail.map(c=>c[3]),['ko','ja']);
@@ -205,6 +206,25 @@ test('open detail refetches its content language while keeping selected tabs, re
   await s.language('ko');await s.settle(); assert.ok(texts(tabs.tree).includes('방문 리뷰'));
   await s.language('system');await s.settle(); assert.ok(texts(tabs.tree).includes('訪問レビュー')); assert.equal(child(root.tree,'DetailTabs').props.selectedTab,'reviews');
   assert.deepEqual(s.calls.detail.map(c=>c[3]),['ko','ja','ko','ja']); assert.equal(JSON.stringify(detail),before); s.dispose();
+});
+
+test('restored official section updates ko-ja-ko/system labels while preserving URLs and popup key', async () => {
+  const s = await app(), Screen = s.load('src/app/places/[id].tsx').default;
+  const root = s.mount(() => Screen()); await s.settle();
+  const intro = () => nodes(root.tree).find(n => n.type === 'PopupIntroduction');
+  const key = intro().key;
+  for (const [language, label] of [['ko', '공식 홈페이지'], ['ja', '公式サイト'], ['ko', '공식 홈페이지'], ['system', '公式サイト']]) {
+    await s.language(language); await s.settle();
+    const links = root.tree;
+    assert.ok(nodes(links).some(n => n.props?.accessibilityLabel?.includes(label)));
+    assert.equal(nodes(links).filter(n => n.props?.accessibilityRole === 'link' && n.props.accessibilityLabel.includes(label)).length, 1);
+    nodes(links).find(n => n.props?.accessibilityRole === 'link' && n.props.accessibilityLabel.includes(label)).props.onPress();
+    assert.equal(s.calls.links.at(-1), detail.socialLinks.website);
+    assert.equal(intro().key, key);
+    assert.equal(intro().props.introductionLinks, undefined);
+  }
+  assert.deepEqual(s.calls.detail.map(c => c[3]), ['ko', 'ja', 'ko', 'ja']);
+  s.dispose();
 });
 
 test('detail error retries in the new language while review empty/login/error UI keeps its requests', async () => {

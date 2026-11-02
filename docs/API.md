@@ -3,10 +3,10 @@
 ## API 환경 선택과 인증 저장
 
 - `src/constants/api.ts`의 `API_BASE_URL`은 `EXPO_PUBLIC_API_URL`을 사용하며 공백과 URL 끝의 `/`를 제거한다. 개발 번들(`__DEV__`)이고 `EXPO_PUBLIC_APP_ENV`가 production/preview가 아닐 때만 미설정·빈 값을 기존 `http://192.168.50.146:8080`으로 대체한다. 출시 번들은 환경 마커와 관계없이 public HTTPS 주소를 필수로 요구하며 로컬·사설 IP, 인증정보, query/hash가 들어간 주소를 거부한다.
-- `eas.json`의 production은 EAS production 환경을 명시적으로 선택하고 `EXPO_PUBLIC_APP_ENV=production`을 주입한다. `EXPO_PUBLIC_API_URL`의 실제 값은 EAS production 환경에 별도로 등록해야 하며 저장소에 자동 설정하지 않는다. `app.config.js`는 production/preview 빌드 프로필·환경 마커 또는 `NODE_ENV=production`에서 같은 주소 검증을 수행하므로 잘못된 값은 설정 해석 단계에서 실패한다. 명시적인 EAS development 프로필에서는 네이티브 의존성 빌드의 `NODE_ENV=production`만으로 개발 기본값을 막지 않는다. preview도 릴리스 번들이므로 유효한 HTTPS 주소가 필요하다.
+- `eas.json`의 production은 EAS production 환경을 명시적으로 선택하고 `EXPO_PUBLIC_APP_ENV=production`, `EXPO_PUBLIC_API_URL=https://api.theplave.co.kr`를 주입한다. `app.config.js`는 production/preview 빌드 프로필·환경 마커 또는 `NODE_ENV=production`에서 같은 주소 검증을 수행하므로 잘못된 값은 설정 해석 단계에서 실패한다. 명시적인 EAS development 프로필에서는 네이티브 의존성 빌드의 `NODE_ENV=production`만으로 개발 기본값을 막지 않는다. preview는 API 주소를 고정하지 않으며 릴리스 번들이므로 별도로 유효한 HTTPS 주소가 필요하다.
 - Google Places 자동완성·장소 resolve는 개발 환경에서만 가능하다. 출시 환경에서는 화면의 요청 예약과 서비스의 네트워크 요청을 모두 차단한다. 자체 팝업 검색, Google Maps 지도·마커·카메라 및 상세 Static Map은 이 flag와 무관하다.
-- 운영 예시는 `EXPO_PUBLIC_API_URL=https://api.popchive.com`이다. 요청 코드가 `/api/...`를 추가하므로 Base URL에 `/api`를 넣지 않는다. 비밀키나 토큰은 `EXPO_PUBLIC_` 변수에 넣지 않는다.
-- 기본 로컬 주소의 SecureStore 키는 기존 `accessToken`, `refreshToken`을 유지한다. 다른 API 주소는 URL별 namespace를 사용하며 로컬 토큰으로 fallback하거나 토큰을 복사하지 않는다. 로그인·로그아웃·401 정리는 선택된 환경의 키에만 적용된다.
+- 운영 주소는 `EXPO_PUBLIC_API_URL=https://api.theplave.co.kr`이다. 요청 코드가 `/api/...`를 추가하므로 Base URL에 `/api`를 넣지 않는다. 비밀키나 토큰은 `EXPO_PUBLIC_` 변수에 넣지 않는다.
+- 기본 로컬 주소의 SecureStore 키는 기존 `accessToken`, `refreshToken`을 유지한다. 다른 API 주소는 URL별 namespace를 사용하되, 동일한 백엔드의 신규 운영 주소 `https://api.theplave.co.kr`는 기존 `https://api.popchive.com`의 namespace를 그대로 사용해 업데이트 시 로그인 세션을 보존한다. 다른 호스트·포트·경로의 namespace는 공유하지 않으며 로컬 토큰으로 fallback하거나 토큰을 복사하지 않는다. 로그인·로그아웃·401 정리는 선택된 환경의 키에만 적용된다. 구버전 앱을 위해 기존 API 도메인 지원은 계속 필요하다.
 - 환경변수 변경 후 앱을 전체 Reload하여 주소·인증 상태·메모리 캐시를 새 환경으로 초기화한다. 기존 로컬 `.env`를 유지한 채 테스트 터미널의 `EXPO_PUBLIC_API_URL`을 지정할 수 있다. 빌드된 앱에는 번들 생성 시 선택된 값이 반영된다.
 
 ## 홈 메인 배너
@@ -26,7 +26,24 @@
 - 언어 변경 시 지도·팝업 검색을 다시 조회하고 이전 요청을 취소한다. 이전 언어의 목록·검색 결과·선택 카드 제목은 새 응답까지 숨기며 선택 ID·검색어·카메라·태그 필터는 유지한다. 같은 언어의 지도 갱신 실패는 기존 데이터를 유지한다.
 - 팝업 마커와 제목 높이 측정 key에 언어를 포함하고 언어 변경 시 측정값을 초기화한다. `tracksViewChanges=false`를 유지한다. Google Place 검색과 `getApiLocale()`의 기존 정책은 유지한다.
 
+## 플레이스 탐색 백화점별 팝업
+
+- `GET /api/popups/venues?languageCode=ko|ja`의 `{ venues: [...] }`를 사용한다. 항목은 문자열 `venueId`, `name`, `countryCode`, `regionLabel`, `imageUrl`, `imageCacheKey`, `popupCount`다. 국가 구분 없이 서버 순서를 유지하고 `popupCount >= 1`만 표시한다. 주소 비교·날짜 필터·개수 계산은 서버가 담당한다.
+- `useHomeVenues`는 적용 언어별로 4분간 결과와 빈 결과를 캐시하고 진행 중 요청을 공유한다. 탐색 탭이 활성화될 때만 재검증을 시도하고 탭 복귀 시 유효한 캐시를 재사용한다. 최초 로딩·실패·빈 결과는 섹션을 숨기며 갱신 실패 시 기존 카드를 유지한다. 언어 전환은 해당 언어 캐시를 사용하고 캐시가 없으면 조회한다.
+- 탐색의 장소 카드는 `venueId`와 일회성 `homeVenueEntry`로 기존 플레이스 전체 탭에 진입한다. 국가·지역·태그·검색·기간·상태·예약/혜택 필터를 초기화하고 `GET /api/popups/venues?venueId=...&languageCode=ko|ja`의 `{ venueId, popupCount, popups }` 전체 목록을 기존 카드로 표시한다. 서버의 진행 중·오픈 예정 및 등록 최신순을 유지하며 pagination은 적용하지 않는다.
+- 백화점·언어별 queryKey로 일반 목록과 구분하고, 전환 시 이전 요청을 취소하여 늦은 응답을 무시한다. 탐색 탭·검색 시작·일반 필터 적용/초기화·홈 카테고리/신규 진입·하단 플레이스 재진입은 백화점 선택을 해제한다. 필터 시트의 취소/유효하지 않은 적용과 상세 화면 복귀는 선택을 유지한다.
+- 오픈 예정 팝업의 `endDate: null`을 허용한다. 공용 목록 카드는 이 경우 기존 일정 미정 번역을 사용하며 팝업을 제외하지 않는다. 종료 임박 섹션은 종료일이 있는 항목만 사용하는 기존 의미를 유지한다.
+- 2026-10-20 앱 개발 기본 주소에서 목록과 백화점 팝업 목록의 ko/ja 실제 응답 필드를 확인했다. 현재 등록 데이터는 각 언어 요청에 원문 이름을 반환했다.
+
+## 홈 최근 등록 팝업
+
+- `새로 올라온 팝업 ✨`은 기존 `getPopupPage(undefined, signal, {}, null, resolvedLanguage)`로 `GET /api/popups?limit=10&languageCode=ko|ja` 첫 페이지를 요청한다. 현재 서버는 `limit=7`을 허용하지 않으므로 응답 앞 7개만 표시하고 다음 페이지는 요청하지 않는다. 국가·상태·기간 필터는 생략한다.
+- 페이지 SQL은 `p.created_at DESC, p.id DESC`, 국가 미지정 시 통합 조회이며 기본적으로 서울 오늘보다 종료일이 지난 팝업을 제외한다. RN에서 재정렬·reverse·국가별 할당은 하지 않는다. 기존 Home 캐시에 `latest:ALL:언어`를 추가해 10분 TTL·진행 중 요청 공유·실패 시 이전 데이터 유지 정책을 재사용한다. 대표 이미지 복구도 기존 국가별 섹션과 공유하며 정상 로딩에는 상세 API를 호출하지 않는다.
+- 2026-10-19 로컬 `127.0.0.1:8080` 및 앱 기본 주소 `192.168.50.146:8080`에서 limit=7의 400, limit=10의 200·양국 데이터·등록일 기준 `v2|createdAt|id` 커서를 확인했다. 운영 서버 배포 버전은 확인하지 않았다.
+
 ## 홈 인기·신규 팝업 콘텐츠 언어
+
+- 홈의 일본 신상은 웹 japan-new-popups와 같은 기존 `GET /api/popups?countryCode=JP&languageCode=ko|ja`의 전체 목록(페이지/상태/주간/homeNew 필터 없음)을 사용한다. 서버 `created_at DESC, id DESC` 응답 순서 앞 10개를 표시하며 createdAt 필드를 새로 만들거나 클라이언트에서 정렬하지 않는다. 페이지 형식 응답·JP 외 항목·중복 ID는 오류 처리한다. `useHomePopups`에 `japanNew:JP:언어` 캐시를 추가하고 기존 10분 TTL·진행 중 요청 공유·이미지 복구를 재사용한다. 별도 Lazy Loading은 추가하지 않으며 기존 한국 신규 섹션의 요청 조건·캐시는 유지한다.
 
 - 인기 목록은 `GET /api/home-curations/NOW_HOT?countryCode=KR|JP&languageCode=ko|ja`, 신규 목록은 기존 `GET /api/popups?countryCode=KR|JP&openingFrom=...&openingTo=...&homeNew=true&limit=8`에 `languageCode=ko|ja`를 추가한다. 언어는 `useTranslation().resolvedLanguage`이며 국가 필터와 독립적이다.
 - 목록의 10분 캐시 정책은 유지하고 키를 `섹션:국가:언어`로 구분한다. 동일 키 요청은 공유하며 늦은 응답은 원래 키의 캐시에만 반영한다. 전환한 언어의 캐시가 없으면 새 응답까지 이전 언어 목록을 표시하지 않는다. 서버가 반환한 번역 및 원본 fallback을 그대로 사용한다.
@@ -63,7 +80,7 @@
 - 상세는 `GET /api/popups/{publicId}?languageCode=ko|ja`를 호출한다. `languageCode`는 `useTranslation().resolvedLanguage`이며 팝업 국가/GPS와 독립적이다. 제목·소개·혜택·공지·운영시간 등 서버가 반환한 번역 및 원본 fallback을 그대로 사용한다.
 - `averageRating`은 해당 place의 전체 reviews.rating 평균, `reviewCount`는 전체 방문 후기 수다. 상세 SQL에서 함께 집계하며 후기가 없으면 `averageRating: 0.0`, `reviewCount: 0`을 반환한다. RN은 평균을 소수점 한 자리로 표시하고 후기 수가 1 이상일 때만 `후기 N개`를 표시한다. 리뷰 pagination과 독립적이며 RN에서 재조회하거나 평균을 계산하지 않는다.
 - `summary: string | null`, `highlights: { type, text }[] | null`을 사용한다. 구조화 소개의 다국어 fallback은 Backend가 담당한다. RN은 null 배열을 빈 표시 목록으로 처리하며 과거 소개 텍스트 필드를 사용하지 않는다.
-- highlights는 Backend 순서대로 표시한다. 고정 type 8종의 제목은 `place.detail.highlights`의 KO/JA 리소스에서 가져온다. 알 수 없는 type은 HIGHLIGHT 제목, blank text는 표시 생략이다. title/emoji를 서버에 요구하지 않는다.
+- RN 상세 영역은 팝업 소개(summary) → 혜택(benefits) → 볼거리(highlights의 VIEW) → 판매 상품(highlights의 PRODUCTS) → 공지사항(notice) 순서로 표시한다. highlights 배열 순서와 무관하며 같은 type이 여러 개면 해당 항목 안에서 원래 순서대로 모두 표시한다. 빈 본문은 소제목까지 숨기고, summary의 상품 목록·문단 및 각 필드의 원문을 분리·이동하지 않는다. 나머지 6종 highlight는 이 5개 항목에 합치지 않으며 원본 응답 데이터는 변경하지 않는다. API 계약은 변경하지 않는다.
 - 상세는 캐시 라이브러리 없이 `(id, languageCode)` 요청 상태와 AbortController를 사용한다. 앱 언어가 달라지면 이전 요청을 취소하고 해당 언어로 재조회한다. 이전 응답은 무시하고 새 응답까지 이전 언어 상세를 표시하지 않는다. 인증 만료 후 anonymous 재조회에도 같은 언어를 전달한다.
 - `socialLinks`는 public JSON 객체의 `website`, `instagram`, `x`, `youtube`, `threads`, `facebook` 키를 사용한다. 유효한 http/https URL만 기존 공식 채널 UI에서 표시한다. URL은 번역하지 않으며 외부 링크 열기 실패는 안내한다.
 
@@ -270,3 +287,22 @@ Pull-to-refresh는 서버의 최신 item 전체 값으로 목록을 교체한다
 - 400 잘못된 입력/본인 대상, 401 인증 필요, 404 삭제되거나 사용할 수 없는 대상, 409 중복. 일반 사용자 신고 기록 조회 API는 없다.
 - 댓글 응답 isBlocked=true는 ID/부모 관계를 보존한다. RN은 서버의 placeholder 본문 대신 해당 언어 안내를 표시하고 작성자/멘션/액션을 숨긴다. 정상 답글은 제거하지 않는다. REVIEW 댓글 UI는 기존 결정대로 상세에서 노출하지 않으며 공용 API/컴포넌트에서 호환된다.
 - moderationState revision + 인증 세대 검사, 기존 AbortController/read-version 보호로 차단 전 GET을 무효화한다. 차단/해제 후 관련 목록은 첫 페이지부터, 상세/댓글은 해당 ID로 재조회한다. 전체 평점/리뷰 수 집계는 개인 차단과 독립적이다.
+# 상세 블로그 후기 (RN)
+
+- 기존 상세의 `publicId`로 `https://popchive.com/api/blog-reviews?publicId=...`를 직접 HTTPS GET 한다. Spring API 설정·인증·기존 요청과 독립적이며 네이버 키를 사용하지 않는다.
+- 응답 `{ items: [{ title, description, publishedAt, url, thumbnailUrl }] }`를 검증해 최대 3개를 표시한다. 원문은 정규화된 HTTPS 네이버 블로그 글 URL만 허용한다. 날짜는 문자열로 표시하며 시간대 변환하지 않는다.
+- `src/lib/blogReviews.ts`가 ID별 진행 중 요청을 공유하고 앱 세션 동안 정상·빈·실패 결과를 메모리에 저장한다. 자동 재시도는 없고 timeout은 18초다. 웹 서버의 1시간 캐시는 변경하지 않는다. 화면 포커스를 잃으면 비동기 결과로 화면 상태를 갱신하지 않으며 공유 요청은 완료해 캐시한다.
+- 블로그 요청은 핵심 상세 요청과 독립적이다. 로딩·빈 결과·오류에는 섹션을 숨긴다. 실제 API·화면 실행 검증은 하지 않았다.
+
+## 상세 주변 팝업
+
+- 웹의 Nuxt proxy가 전달하는 기존 Spring 공개 GET과 동일하게 `${API_BASE_URL}/api/popups/{publicId}/nearby?limit=7&languageCode=ko`를 사용한다. `nearbyPopups.ts`가 독립적으로 조회한다. 좌표·반경·정렬·날짜/국가 필터는 추가하지 않으며 현재 팝업의 위치를 아는 서버에 선정을 맡긴다. 웹 클라이언트 코드에는 수치 반경·동률 정렬 규칙이 없으므로 RN에서도 추정하지 않는다.
+- 상세 좌표가 유효할 때만 조회한다. 응답 `{ popups: [...] }`의 `distanceMeters`를 그대로 표시하며 서버 순서를 유지한다. 현재 ID 및 중복 ID만 제외하고 최대 7개를 표시한다. 날짜는 nullable DATE 문자열로 처리한다.
+- 화면에서 300dp 이내에 접근하면 조회한다. API 주소·ID·limit=7·ko 키별 진행 중 요청을 공유하며 성공·빈·실패 결과는 웹 클라이언트처럼 앱 세션 동안 캐시한다. timeout 12초, 자동 재시도 없음. 공유 요청은 화면 이탈 후 완료될 수 있지만 이전 포커스의 화면 상태는 갱신하지 않는다. 로딩·빈 결과·오류는 섹션을 숨긴다. 기존 상세·블로그 캐시는 변경하지 않는다.
+- 실제 API 호출·실행 검증은 수행하지 않았다.
+
+## 상세 비슷한 취향의 팝업
+
+- 웹 Nuxt가 전달하는 기존 Spring GET `${API_BASE_URL}/api/popups/{publicId}/similar?limit=7&languageCode=ko`를 사용한다. 응답은 `{ popups: [{ publicId, name, coverImageUrl, startDate, endDate, regionName, tags, matchedTagCount }] }`이며 최대 7개, matchedTagCount는 1 이상의 정수다. 웹 타입 주석상 국가는 원본 팝업에서 상속한다. 세부 가중치·카테고리 필터·동률 정렬은 웹 클라이언트에 없으므로 RN에서도 추가하지 않는다.
+- 서버 순서를 유지하고 현재 ID 및 동일 결과 안 중복 ID만 제외한다. 웹처럼 주변 팝업과의 교차 중복은 제거하지 않는다.
+- `similarPopups.ts`는 nearby와 독립된 요청·세션 캐시를 사용한다. API 주소·ID·limit=7·ko 키별 진행 중 요청을 공유하고 성공·빈·실패 결과를 앱 세션 동안 보관한다. 300dp 접근 시 지연 조회, timeout 12초, 자동 재시도 없음. 이탈한 포커스의 비동기 결과는 화면에 반영하지 않는다. 실제 API·화면 실행 검증은 하지 않았다.

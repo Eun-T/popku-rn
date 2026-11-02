@@ -7,7 +7,7 @@ const file = 'src/components/navigation/FloatingTabBar.tsx';
 const style = node => Object.assign({}, ...[node.props.style].flat().filter(Boolean));
 
 function app(platform = 'ios') {
-  const animations = [], navigationCalls = [], bailouts = [];
+  const animations = [], navigationCalls = [], navigationEntries = [], bailouts = [];
   class Value {
     constructor(value) { this.value = value; }
     setValue(value) { this.value = value; }
@@ -45,7 +45,8 @@ function app(platform = 'ios') {
   const Component = ui.load(file).default;
   const navigation = {
     emit: event => { navigationCalls.push(event); return { defaultPrevented: false }; },
-    navigate(name) {
+    navigate(name, params) {
+      navigationEntries.push({ name, params });
       navigationCalls.push(name);
       state = { ...state, index: state.routes.findIndex(route => route.name === name) };
       root.render();
@@ -57,7 +58,7 @@ function app(platform = 'ios') {
   const indicator = () => nodes(root.tree).find(node => node.props?.pointerEvents === 'none' && node.type === 'AnimatedView');
   const parentLayout = width => items().props.onLayout({ nativeEvent: { layout: { width } } });
   const tabLayout = (index, width = 347) => tabs()[index].props.onLayout({ nativeEvent: { layout: { x: index * width / 5, width: width / 5 } } });
-  return { ...ui, root, animations, navigationCalls, bailouts, items, tabs, indicator, parentLayout, tabLayout,
+  return { ...ui, root, animations, navigationCalls, navigationEntries, bailouts, items, tabs, indicator, parentLayout, tabLayout,
     ready() { parentLayout(347); for (let index = 0; index < 5; index++) tabLayout(index); },
     assertVisible(visible) {
       assert.equal(style(root.tree).opacity, undefined);
@@ -67,6 +68,18 @@ function app(platform = 'ios') {
     },
   };
 }
+
+test('bottom Place entry targets the existing index and sends a fresh browse token on each re-entry', () => {
+  const s = app(); s.ready();
+  s.tabs()[1].props.onPress();
+  const first = s.navigationEntries.at(-1);
+  assert.equal(first.name, 'places'); assert.equal(first.params.screen, 'index');
+  assert.ok(first.params.params.placeBrowseEntry);
+  assert.equal(first.params.params.homeVenueEntry, ''); assert.equal(first.params.params.venueId, '');
+  s.tabs()[0].props.onPress(); s.tabs()[1].props.onPress();
+  assert.notEqual(s.navigationEntries.at(-1).params.params.placeBrowseEntry, first.params.params.placeBrowseEntry);
+  s.dispose();
+});
 
 for (const platform of ['ios', 'android']) test(`${platform}: Compiler-processed mount keeps the background visible and reveals icons/indicator together after placement`, () => {
   const s = app(platform);

@@ -41,7 +41,7 @@ async function app({ path=null, fresh=false, missing=false, compiled=false, popu
   let item={...(popup??env.item),...(fresh?{coverImageFetchedAt:env.now()}:{}),...(missing?{coverImageUrl:null}:{})};
   const hookRoot=ui.mount(()=>hook(item,recover));
   const cardRoot=ui.mount(()=>Card({item,width:170,isFavorite:false,isFavoriteDisabled:false,
-    onToggleFavorite(){},onPress(){},onRecoverCover:recover}));
+    onToggleFavorite(){},onPress(){},onRecoverCover:recover,today:'2026-10-09'}));
   const image=()=>nodes(cardRoot.tree).find(n=>n.type===ExpoImage);
   const settle=async()=>{await flush();await flush();};
   await settle();
@@ -114,7 +114,8 @@ test('final recovery failure and missing/fresh broken images use existing placeh
     s.requests[0].reject(Error('offline'));await s.settle();
     assert.match(s.image().props.source,/ranking-placeholder\.png$/);
     assert.deepEqual(s.image().props.style,poster);assert.deepEqual(s.cardRoot.tree.props.style,card);
-    assert.equal(nodes(s.cardRoot.tree).find(n=>n.props?.style?.aspectRatio).props.style.aspectRatio,4/5);
+    assert.equal(nodes(s.cardRoot.tree).find(n=>n.props?.style?.aspectRatio).props.style.aspectRatio,3/4);
+    assert.equal(poster.borderRadius,6);
     s.image().props.onError();await s.settle();assert.equal(s.requests.length,1);
   }finally{s.unmount();}
   for(const options of [{missing:true},{fresh:true}]){
@@ -238,7 +239,7 @@ test('mounted compiled card keeps normal images and request count across ko-ja-k
     const source=s.image().props.source;
     for(const preference of ['ja','ko','system']){
       await s.store.setLanguagePreference(preference);
-      assert.ok(texts(s.cardRoot.tree).includes(preference==='ko'?'진행중':'開催中'));
+      assert.ok(texts(s.cardRoot.tree).includes(preference==='ko'?'종료 D-22':'終了 D-22'));
       assert.deepEqual(s.image().props.source,source);assert.equal(s.requests.length,0);assert.equal(s.cacheCalls.length,0);
     }
   }finally{s.unmount();}

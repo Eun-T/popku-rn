@@ -13,7 +13,6 @@ import {
 
 import type { PublicPopup } from "../../lib/popups";
 import { usePlaceCoverImage, type RecoverPlaceCover } from "../../hooks/usePlaceCoverImage";
-import { popupOperatingStatus } from "../../lib/popupStatus";
 import { colors, radius, spacing, typography } from "../../theme/tokens";
 
 type PopupGridCardProps = {
@@ -24,17 +23,38 @@ type PopupGridCardProps = {
   onToggleFavorite: () => void;
   onPress?: (item: PublicPopup) => void;
   onRecoverCover?: RecoverPlaceCover;
+  today?: string;
 };
 
 const placeholderImage = require("../../../assets/images/ranking-placeholder.png");
 const favoriteIconSize = 26;
 
-function formatPeriod(startDate: string, endDate: string): string {
+function formatPeriod(startDate: string, endDate: string | null, pendingLabel: string): string {
   const [startYear, startMonth, startDay] = startDate.split("-");
-  const [endYear, endMonth, endDay] = endDate.split("-");
   const start = `${startYear.slice(-2)}.${startMonth}.${startDay}`;
+  if (!endDate) return `${start} ~ ${pendingLabel}`;
+  const [endYear, endMonth, endDay] = endDate.split("-");
   const end = `${endYear.slice(-2)}.${endMonth}.${endDay}`;
   return `${start} ~ ${end}`;
+}
+
+// Keep the web list's calendar-day precedence and partial-date behavior local.
+function cardDayStatus(item: PublicPopup, today: string, language: string) {
+  const { startDate: start, endDate: end } = item;
+  const ja = language === "ja";
+  const daysUntil = (date: string) =>
+    (Date.parse(date + "T00:00:00Z") - Date.parse(today + "T00:00:00Z")) / 86_400_000;
+  if (end && end < today) return { label: ja ? "終了" : "종료", color: "#9CA3AF" };
+  if (start && start > today) return { label: (ja ? "オープン" : "오픈") + " D-" + daysUntil(start), color: "#2563EB" };
+  if (end === today) return { label: ja ? "本日終了" : "오늘 종료", color: "#C05621" };
+  if (start === today) return { label: ja ? "本日オープン" : "오늘 오픈", color: "#16805D" };
+  if (start && start < today && end && end > today) return { label: (ja ? "終了" : "종료") + " D-" + daysUntil(end), color: "#16805D" };
+  return null;
+}
+
+function currentCardDay() {
+  // KR and JP both use UTC+09:00.
+  return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
 export default function PopupGridCard({
@@ -45,11 +65,10 @@ export default function PopupGridCard({
   onToggleFavorite,
   onPress,
   onRecoverCover,
+  today = currentCardDay(),
 }: PopupGridCardProps) {
   const { t, resolvedLanguage } = useTranslation();
-  const status = popupOperatingStatus(item.startDate, item.endDate);
-  const statusText =
-    t(status === "오픈 예정" ? "place.all.card.upcoming" : status === "종료" ? "place.all.card.ended" : "place.all.card.ongoing");
+  const dayStatus = cardDayStatus(item, today, resolvedLanguage);
   const { fontScale } = useWindowDimensions();
   const cover = usePlaceCoverImage(item, onRecoverCover);
   const region = getPopupRegionDisplayName(item, resolvedLanguage).trim();
@@ -112,41 +131,18 @@ export default function PopupGridCard({
         </Pressable>
       </View>
 
-      <View
-        style={styles.statusRow}
-      >
-        <View
-          style={[
-            styles.statusBadge,
-            status === "오픈 예정"
-              ? styles.upcomingBadge
-              : status === "종료"
-                ? styles.endedBadge
-                : styles.openBadge,
-          ]}
-        >
-          <Text
-            numberOfLines={1}
-            style={[
-              styles.statusText,
-              status === "오픈 예정"
-                ? styles.upcomingText
-                : status === "종료"
-                  ? styles.endedText
-                  : styles.openText,
-            ]}
-          >
-            {statusText}
-          </Text>
-        </View>
-      </View>
+      {dayStatus && (
+        <Text style={[styles.dayStatus, { color: dayStatus.color }]}>
+          {dayStatus.label}
+        </Text>
+      )}
 
       <Text numberOfLines={1} ellipsizeMode="tail" style={styles.title}>
         {item.name}
       </Text>
 
       <Text numberOfLines={1} ellipsizeMode="tail" style={styles.period}>
-        {formatPeriod(item.startDate, item.endDate)}
+        {formatPeriod(item.startDate, item.endDate, t('place.detail.schedulePending'))}
       </Text>
 
       <View
@@ -185,12 +181,12 @@ const styles = StyleSheet.create({
   },
   posterArea: {
     width: "100%",
-    aspectRatio: 4 / 5,
+    aspectRatio: 3 / 4,
   },
   poster: {
     width: "100%",
     height: "100%",
-    borderRadius: radius.radius8,
+    borderRadius: 6,
   },
   favoriteButton: {
     position: "absolute",
@@ -215,51 +211,17 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
   },
-  statusRow: {
-    alignSelf: "flex-start",
-    maxWidth: "100%",
-    flexDirection: "row",
-    flexWrap: "nowrap",
-    alignItems: "center",
-    marginTop: spacing.space8,
-  },
-  statusBadge: {
-    flexShrink: 0,
-    alignItems: "center",
-    borderRadius: 5,
-    paddingHorizontal: 5,
-    paddingVertical: 1,
-  },
-  statusText: {
-    ...typography.caption,
+  dayStatus: {
+    marginTop: spacing.space12,
+    fontSize: 13,
     fontWeight: "600",
-    flexShrink: 0,
-    fontSize: 12,
-    lineHeight: 16,
-  },
-  upcomingText: {
-    color: "#1D4ED8",
-  },
-  openText: {
-    color: "#15803D",
-  },
-  endedText: {
-    color: "#6B7280",
-  },
-  upcomingBadge: {
-    backgroundColor: "#DBEAFE",
-  },
-  openBadge: {
-    backgroundColor: "#DCFCE7",
-  },
-  endedBadge: {
-    backgroundColor: "#F3F4F6",
+    lineHeight: 20,
   },
   title: {
     marginTop: spacing.space4,
     fontSize: 16,
-    fontWeight: "700",
-    lineHeight: 20,
+    fontWeight: "600",
+    lineHeight: 24,
     color: colors.text,
   },
   metadata: {

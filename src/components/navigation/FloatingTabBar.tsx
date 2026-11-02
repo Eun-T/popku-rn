@@ -141,6 +141,7 @@ export default function FloatingTabBar({
   const dragging = useRef(false);
   const pendingIndex = useRef<number | null>(null);
   const suppressPress = useRef(false);
+  const browseEntrySequence = useRef(0);
   const [itemsWidth, setItemsWidth] = useState(0);
   const [tabCenters, setTabCenters] = useState<Record<string, number>>({});
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
@@ -228,6 +229,11 @@ export default function FloatingTabBar({
 
       if (route.name === "profile") {
         navigation.navigate("profile", { screen: "index" });
+      } else if (route.name === "places") {
+        navigation.navigate("places", { screen: "index", params: {
+          placeBrowseEntry: `${Date.now()}-${++browseEntrySequence.current}`,
+          homeVenueEntry: "", venueId: "",
+        } });
       } else {
         navigation.navigate(route.name);
       }

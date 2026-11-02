@@ -75,7 +75,7 @@ test('config rejects unsafe release profiles/markers before build without printi
   const eas = JSON.parse(readFileSync('eas.json', 'utf8'));
   assert.equal(eas.build.production.environment, 'production');
   assert.equal(eas.build.production.env.EXPO_PUBLIC_APP_ENV, 'production');
-  assert.equal(eas.build.production.env.EXPO_PUBLIC_API_URL, undefined, 'actual API URL is supplied through EAS, never fabricated');
+  assert.equal(eas.build.production.env.EXPO_PUBLIC_API_URL, 'https://api.theplave.co.kr');
 });
 
 test('Places autocomplete and resolve never reach fetch in release, including direct service callers', async () => {

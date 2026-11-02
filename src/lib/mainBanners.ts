@@ -6,9 +6,17 @@ export type MainBannerPopup = Pick<PublicPopupDetail,
   'publicId' | 'name' | 'countryCode' | 'regionId' | 'regionName' |
   'startDate' | 'endDate' | 'coverImageUrl' | 'coverImageCacheKey'> & {
   placeId: number;
+  bannerPositionX: number;
+  bannerPositionY: number;
   backgroundColors?: string[] | null;
   coverImageFetchedAt?: number;
 };
+
+function parseBannerPosition(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100
+    ? value
+    : 50;
+}
 
 export async function getMainBanners(signal: AbortSignal, languageCode: Locale = getApiLocale()): Promise<MainBannerPopup[]> {
   const fetchedAt = Date.now();
@@ -27,5 +35,10 @@ export async function getMainBanners(signal: AbortSignal, languageCode: Locale =
     || (popup.coverImageCacheKey != null && typeof popup.coverImageCacheKey !== 'string'))) {
     throw new Error('Invalid main banner popup');
   }
-  return (body.popups as MainBannerPopup[]).map(popup => ({ ...popup, coverImageFetchedAt: fetchedAt }));
+  return (body.popups as MainBannerPopup[]).map(popup => ({
+    ...popup,
+    bannerPositionX: parseBannerPosition(popup.bannerPositionX),
+    bannerPositionY: parseBannerPosition(popup.bannerPositionY),
+    coverImageFetchedAt: fetchedAt,
+  }));
 }

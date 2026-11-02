@@ -6,8 +6,12 @@ export const IS_DEVELOPMENT_ENVIRONMENT = __DEV__
   && process.env.EXPO_PUBLIC_APP_ENV !== 'preview';
 export const API_BASE_URL = resolveApiBaseUrl(process.env.EXPO_PUBLIC_API_URL, IS_DEVELOPMENT_ENVIRONMENT);
 
-// Keep legacy local sessions; every other API gets its own SecureStore-safe namespace.
-export const API_TOKEN_STORAGE_NAMESPACE = API_BASE_URL === LOCAL_API_URL
+// Both production domains serve the same backend. Keep the existing production keys
+// across app upgrades; do not migrate tokens or share sessions with other API hosts.
+const tokenStorageUrl = API_BASE_URL === 'https://api.theplave.co.kr'
+  ? 'https://api.popchive.com'
+  : API_BASE_URL;
+export const API_TOKEN_STORAGE_NAMESPACE = tokenStorageUrl === LOCAL_API_URL
   ? ''
-  : `api.${API_BASE_URL.split('').map(character => character.charCodeAt(0).toString(16)).join('_')}`;
+  : `api.${tokenStorageUrl.split('').map(character => character.charCodeAt(0).toString(16)).join('_')}`;
 

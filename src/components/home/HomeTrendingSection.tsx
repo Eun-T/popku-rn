@@ -1,183 +1,217 @@
-import { getPopupRegionDisplayName, getTagDisplayName } from '../../locales/filterLabels';
-import { useMemo, useState } from "react";
-import { useTheme } from '../../theme/useTheme';
+import type { ImageSource } from "expo-image";
 import { Store } from "lucide-react-native";
-import { Pressable, StyleSheet, Text, View } from "react-native";
-import type { ImageSource } from 'expo-image';
-
+import {
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from "react-native";
 import { useHomePopups } from "../../hooks/useHomePopups";
 import { usePopupFavorites } from "../../hooks/usePopupFavorites";
-import { useTranslation } from '../../hooks/useTranslation';
-import { colors, radius, spacing, typography } from "../../theme/tokens";
-import FilterChips from "../common/FilterChips";
-import MoreButton from "../common/MoreButton";
-import {
-  HomeTrendingSkeleton,
-  RankingSkeletonFooter,
-} from "./HomePopupSkeleton";
+import { useTranslation } from "../../hooks/useTranslation";
+import { spacing, typography } from "../../theme/tokens";
+import { useTheme } from "../../theme/useTheme";
+import SkeletonBlock from "../common/SkeletonBlock";
 import PopupRankingCard from "./PopupRankingCard";
 
-const countries = [
-  { labelKey: 'place.filters.countries.kr', value: "KR" },
-  { labelKey: 'place.filters.countries.jp', value: "JP" },
-] as const;
-type Country = (typeof countries)[number]["value"];
-
+// Preserve the existing default request and cache scope without country controls.
+const selectedCountry = "KR";
 const placeholderImage = require("../../../assets/images/ranking-placeholder.png");
 
 function cardImage(url: string | null): ImageSource | number {
   return url ? { uri: url } : placeholderImage;
 }
-
 function displayDate(date: string): string {
-  return date.replace(/-/g, ".");
+  return `${Number(date.slice(5, 7))}월 ${Number(date.slice(8, 10))}일`;
 }
+type Props = {
+  onPressPopup: (id: string) => void;
+};
 
-export default function HomeTrendingSection({ onPressPopup }: { onPressPopup: (id: string) => void }) {
+export default function HomeTrendingSection({ onPressPopup }: Props) {
   const { t, resolvedLanguage } = useTranslation();
   const { themeColors } = useTheme();
-  const styles = useMemo(() => ({ ...baseStyles,
-    title: { ...baseStyles.title, color: themeColors.textPrimary },
-    description: { ...baseStyles.description, color: themeColors.textSecondary },
-    stateText: { ...baseStyles.stateText, color: themeColors.textSecondary },
-    emptyCard: { ...baseStyles.emptyCard, backgroundColor: themeColors.surface },
-    emptyTitle: { ...baseStyles.emptyTitle, color: themeColors.textPrimary },
-    emptyDescription: { ...baseStyles.emptyDescription, color: themeColors.textSecondary },
-  }), [themeColors]);
-  const [selectedCountry, setSelectedCountry] = useState<Country>("KR");
-  const { status, popups, recoverCover } = useHomePopups("trending", selectedCountry);
-  const [isExpanded, setIsExpanded] = useState(false);
-  const { isFavorite, isFavoriteDisabled, toggleFavorite, favoritesStatus, retryFavorites } = usePopupFavorites();
-
-  const visiblePopups = popups.slice(0, isExpanded ? 10 : 5);
-
-  const handleCountryChange = (country: Country) => {
-    setSelectedCountry(country);
-    setIsExpanded(false);
-  };
+  const { width } = useWindowDimensions();
+  const cardWidth = (width - spacing.space16 * 2 - spacing.space12) / 2;
+  const { status, popups, recoverCover } = useHomePopups(
+    "trending",
+    selectedCountry,
+  );
+  const {
+    isFavorite,
+    isFavoriteDisabled,
+    toggleFavorite,
+    favoritesStatus,
+    retryFavorites,
+  } = usePopupFavorites();
+  const visiblePopups = popups.slice(0, 10);
 
   return (
     <View style={styles.section}>
-      <Text style={styles.title}>
-        {t('home.trending.title')}
-      </Text>
-      <Text style={styles.description}>{t('home.trending.description')}</Text>
-      <View style={styles.filters}>
-        <FilterChips
-          themeColors={themeColors}
-          options={countries.map(({ labelKey, value }) => ({ label: t(labelKey), value }))}
-          value={selectedCountry}
-          onChange={handleCountryChange}
-        />
+      <View style={styles.heading}>
+        <Text style={[styles.title, { color: themeColors.textPrimary }]}>
+          {t("home.trending.title")}
+        </Text>
+        <Text style={styles.badge}>TOP 10</Text>
       </View>
       <View style={styles.rankingList}>
-        {favoritesStatus === 'error' && <Pressable accessibilityRole="button" accessibilityLabel={t('home.favoriteRetry')}
-          onPress={() => { void retryFavorites(); }}>
-          <Text style={styles.stateText}>{t('home.favoriteLoadFailed')}</Text>
-        </Pressable>}
-        {status === "loading" && <HomeTrendingSkeleton />}
+        {favoritesStatus === "error" && (
+          <Pressable
+            style={styles.stateContainer}
+            accessibilityRole="button"
+            accessibilityLabel={t("home.favoriteRetry")}
+            onPress={() => {
+              void retryFavorites();
+            }}
+          >
+            <Text
+              style={[styles.stateText, { color: themeColors.textSecondary }]}
+            >
+              {t("home.favoriteLoadFailed")}
+            </Text>
+          </Pressable>
+        )}
         {status === "error" && (
-          <Text style={styles.stateText}>{t('home.loadFailed')}</Text>
+          <Text
+            style={[
+              styles.stateContainer,
+              styles.stateText,
+              { color: themeColors.textSecondary },
+            ]}
+          >
+            {t("home.loadFailed")}
+          </Text>
         )}
         {status === "ready" && popups.length === 0 && (
-          <View style={styles.emptyCard}>
+          <View
+            style={[
+              styles.stateContainer,
+              styles.emptyCard,
+              { backgroundColor: themeColors.surface },
+            ]}
+          >
             <Store size={20} color={themeColors.inactiveIcon} />
-            <Text style={styles.emptyTitle}>{t('home.trending.emptyTitle')}</Text>
-            <Text style={styles.emptyDescription}>{t('home.trending.emptyDescription')}</Text>
+            <Text
+              style={[styles.emptyTitle, { color: themeColors.textPrimary }]}
+            >
+              {t("home.trending.emptyTitle")}
+            </Text>
+            <Text
+              style={[
+                styles.emptyDescription,
+                { color: themeColors.textSecondary },
+              ]}
+            >
+              {t("home.trending.emptyDescription")}
+            </Text>
           </View>
         )}
-        {visiblePopups.map((popup, index) => {
-          const rank = index + 1;
-          const id = `${selectedCountry}-${popup.publicId}`;
-
-          return (
+        <ScrollView
+          horizontal
+          nestedScrollEnabled
+          directionalLockEnabled
+          showsHorizontalScrollIndicator={false}
+          snapToInterval={cardWidth + spacing.space12}
+          snapToAlignment="start"
+          decelerationRate="fast"
+          style={styles.viewport}
+          contentContainerStyle={styles.track}
+        >
+          {status === "loading" &&
+            Array.from({ length: 2 }, (_, index) => (
+              <View
+                key={`loading-${index}`}
+                style={{ width: cardWidth }}
+                accessibilityElementsHidden
+                importantForAccessibility="no-hide-descendants"
+              >
+                <SkeletonBlock
+                  backgroundColor={themeColors.skeletonBackground}
+                  width={cardWidth}
+                  height={(cardWidth * 4) / 3}
+                  borderRadius={5}
+                />
+                <SkeletonBlock
+                  backgroundColor={themeColors.skeletonBackground}
+                  width="90%"
+                  height={24}
+                  style={styles.skeletonTitle}
+                />
+                <SkeletonBlock
+                  backgroundColor={themeColors.skeletonBackground}
+                  width="80%"
+                  height={20}
+                  style={styles.skeletonPeriod}
+                />
+              </View>
+            ))}
+          {visiblePopups.map((popup, index) => (
             <PopupRankingCard
-              key={id}
-              rank={rank}
+              key={`${selectedCountry}-${popup.publicId}`}
+              width={cardWidth}
+              rank={index + 1}
               image={cardImage(popup.coverImageUrl)}
               popup={popup}
               coverScope={`${selectedCountry}:${resolvedLanguage}`}
               onRecoverCover={recoverCover}
               title={popup.name}
-              period={`${displayDate(popup.startDate)} ~ ${displayDate(popup.endDate)}`}
-              tags={[
-                ...(popup.regionName ? [getPopupRegionDisplayName(popup, resolvedLanguage)] : []),
-                ...popup.tags.map((tag) => getTagDisplayName(tag, resolvedLanguage)),
-              ]}
+              period={`${displayDate(popup.startDate)} - ${popup.endDate ? displayDate(popup.endDate) : t("place.detail.schedulePending")}`}
               isFavorite={isFavorite(popup.publicId)}
               isFavoriteDisabled={isFavoriteDisabled(popup.publicId)}
               onToggleFavorite={() => void toggleFavorite(popup)}
-              onPress={() =>
-                onPressPopup(popup.publicId)
-              }
+              onPress={() => onPressPopup(popup.publicId)}
             />
-          );
-        })}
+          ))}
+        </ScrollView>
       </View>
-      {status === "loading" && (
-        <View style={styles.moreButtonContainer}>
-          <RankingSkeletonFooter />
-        </View>
-      )}
-      {status === "ready" && popups.length > 5 && (
-        <View style={styles.moreButtonContainer}>
-          <MoreButton
-            themeColors={themeColors}
-            label={t(isExpanded ? 'place.filters.collapse' : 'home.trending.showAll')}
-            onPress={() => setIsExpanded((current) => !current)}
-          />
-        </View>
-      )}
     </View>
   );
 }
 
-const baseStyles = StyleSheet.create({
-  section: {
-    marginTop: spacing.space32,
+const styles = StyleSheet.create({
+  section: { marginTop: spacing.space48 },
+  heading: {
     paddingHorizontal: spacing.space16,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.space8,
+    flexWrap: "wrap",
   },
-  title: {
-    ...typography.titleM,
-    color: colors.text,
+  title: { ...typography.titleM },
+  badge: {
+    paddingVertical: spacing.space2,
+    paddingHorizontal: spacing.space6,
+    borderRadius: 6,
+    backgroundColor: "#f0e7ff",
+    color: "#7839ef",
+    fontSize: 13,
+    fontWeight: "600",
+    lineHeight: 20,
   },
-  description: {
-    marginTop: 2,
-    ...typography.label,
-    color: colors.secondaryText,
-  },
-  filters: {
-    marginTop: spacing.space16,
-  },
-  rankingList: {
-    marginTop: spacing.space16,
-    // rowGap: spacing.space12,
-  },
-  moreButtonContainer: {
-    marginTop: spacing.space12,
-  },
-  stateText: {
-    ...typography.body,
-    color: colors.secondaryText,
-  },
+  rankingList: { marginTop: spacing.space16 },
+  viewport: { width: "100%", flexGrow: 0 },
+  track: { paddingHorizontal: spacing.space16, columnGap: spacing.space12 },
+  stateContainer: { marginHorizontal: spacing.space16 },
+  stateText: { fontSize: 14, lineHeight: 20 },
   emptyCard: {
     minHeight: 110,
     padding: spacing.space16,
-    borderRadius: radius.radius12,
-    backgroundColor: colors.surface,
+    borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
   },
   emptyTitle: {
     marginTop: spacing.space8,
     ...typography.label,
-    color: colors.text,
     textAlign: "center",
   },
   emptyDescription: {
     marginTop: spacing.space2,
     ...typography.caption,
-    color: colors.secondaryText,
     textAlign: "center",
   },
+  skeletonTitle: { marginTop: spacing.space12 },
+  skeletonPeriod: { marginTop: spacing.space2 },
 });

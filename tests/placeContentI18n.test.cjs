@@ -30,6 +30,7 @@ async function app({ slow = false } = {}) {
   const screenFile = 'src/screens/PlaceScreen.tsx', weeklyFile = 'src/components/place/PlaceWeeklySection.tsx';
   const animation = () => ({ start: cb => cb?.({ finished: true }), stop() {} });
   const ui = runtime({
+    'src/components/home/HomeVenueSection.tsx': { __esModule: true, default: 'HomeVenueSection' },
     'src/constants/api.ts': { API_BASE_URL: 'https://api.test' },
     'react-native': {
       ...Object.fromEntries(['View','Text','Pressable','TextInput','FlatList'].map(n => [n,n])),

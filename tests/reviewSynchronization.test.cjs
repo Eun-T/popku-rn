@@ -144,7 +144,7 @@ function setup(t, initial = []) {
     let Component;
     if (kind === 'detail') Component = load('src/app/places/[id].tsx', { ...common,
       '../../components/common/Tag': { __esModule: true, default: 'Tag' }, '../../components/navigation/FloatingTabBar': { FLOATING_TAB_BAR_BOTTOM_GAP: 12, FLOATING_TAB_BAR_HEIGHT: 60 },
-      ...Object.fromEntries(['PopupGuidanceCarousel', 'PopupHeroImage', 'IntroductionImageCarousel', 'OfficialChannelIcon', 'PopupDetailSkeleton', 'PopupReviews']
+      ...Object.fromEntries(['PopupIntroduction', 'PopupHeroImage', 'IntroductionImageCarousel', 'OfficialChannelIcon', 'PopupDetailSkeleton', 'PopupReviews']
         .map(name => [`../../components/place/${name}`, { __esModule: true, default: name }])),
       '../../components/place/PlaceMapPreview': { __esModule: true, default: 'MapPreview', isMapPreviewAvailable: false },
       '../../lib/auth': auth, '../../lib/favorites': { favoritePopup: async () => ({ isFavorited: true, favoriteCount: 1 }) },
